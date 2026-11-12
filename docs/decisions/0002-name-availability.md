@@ -1,13 +1,13 @@
-# 0002 — Name `geist4`
+# 0002 — Product and crate names
 
 ## Context
-Before publishing to crates.io, npm, and other registries, the name `geist4` must be confirmed
-available.
+The engine needs a product name and crate names, free on the registries it will publish to (crates.io, npm, PyPI).
 
 ## Decision
-The name `geist4` is available on crates.io and npmjs.com as of 2026-11-12. It is used as the
-workspace root name and as the crate prefix for all eight workspace members.
+Product name: **Geist4**. Rust workspace members use the `geist4-` prefix: `geist4-core`, `geist4-html`, `geist4-ext`, `geist4-ext-loader`, `geist4-cli` (binary `geist4`), `geist4-ffi`, `geist4-wasm`, `geist4-spec-harness`. Future bindings follow the same scheme (`geist4-python`, Swift package `Geist4`).
+
+## Decision (availability, checked 2026-11-12)
+`geist4` is free on crates.io and npm; `geist4-core` probed free on crates.io.
 
 ## Consequences
-When publishing to crates.io, the `geist4` crate will need a unique name (e.g. `geist4-engine`)
-or the team must request a namespace on crates.io. The `geist4` npm package name is available.
+Publishing to crates.io, npm, PyPI, or a Swift registry needs the maintainer's accounts; the engine does not publish itself.
