@@ -1,0 +1,50 @@
+# Testing
+
+The engine is meant to be absolutely reliable, so testing is a first-class part of the design, not a step at the end. This file describes every test suite, what it proves, and how to run it. Keep it true: when a suite is added, changed, or moved, update this file in the same commit.
+
+## The Rules
+
+1. **Every behavior has a test.** A rule from a spec has a spec example; a rule we decide ourselves has a unit test and a decision record.
+2. **Every bug gets a regression test** in `tests/regressions/` before it is fixed, with a comment saying what it caught and which commit fixed it.
+3. **Counts never go down.** The CommonMark pass count, each extension's pass count, and coverage are checked in and enforced by CI.
+4. **Local and CI are the same.** `scripts/check.sh` runs exactly what CI runs. A change is pushed only after it passes there.
+5. **No test is skipped to get green.** A test that fails is fixed, or the behavior it checks is changed by a decision record. Ignored tests need a reason in a comment and an issue.
+
+## Suites
+
+Each suite below says where it lives and how it runs. Paths and commands are the plan; fill in the real ones as each suite is built.
+
+| Suite | Proves | Where | Runs |
+| --- | --- | --- | --- |
+| CommonMark spec | Exact conformance: all 652 examples | `spec/`, harness in `crates/spec-harness` | every CI run |
+| Extension specs | Each extension's own examples, plus examples showing plain Markdown is unchanged | `crates/ext/*/spec.md`, `examples/extensions/*/spec.md` | every CI run |
+| GFM spec | GFM extensions conform to the GFM spec's examples | `spec/gfm/` | every CI run |
+| Unit tests | Each scanner, rule and edge case on its own | next to the code | every CI run |
+| Property tests | No panic on any input; well-formed HTML; deterministic output; valid spans | `tests/properties/` (`proptest`) | every CI run, more cases locally |
+| Pathological inputs | Linear time on hostile input; limits behave as documented | `tests/pathological/` | every CI run |
+| Differential tests | Same output as the reference C implementation on generated input, except documented differences | `tests/differential/` | every CI run |
+| Fuzzing | No crash, hang or limit breach on mutated input | `fuzz/` (`cargo-fuzz`) | a few minutes per target in CI; an hour per target locally per milestone |
+| Cross-binding | JavaScript, Swift, Python and C give byte-identical output to the core on every spec | `tests/bindings/` | every CI run |
+| Extension tiers | An extension's `spec.md` passes whichever tier implements it | `tests/ext-conformance/` | every CI run |
+| Round trip | `format` is idempotent and keeps the rendered HTML the same | `tests/roundtrip/` | every CI run |
+| JSON schema | Every JSON tree validates against the published schema | `tests/json/` | every CI run |
+| Extension sandbox | Hostile extensions are stopped by fuel and memory limits | `tests/sandbox/` | every CI run |
+| Benchmarks | Speed against the corpus and other engines | `benches/` (`criterion`), instruction counts in CI | instruction counts every CI run; wall clock locally |
+| Mutation testing | The tests notice when the code is changed | `cargo-mutants` | before each release, results below |
+| Coverage | Which lines no test reaches | `cargo-llvm-cov` | every CI run, threshold enforced |
+
+## Running Everything
+
+```sh
+scripts/check.sh            # exactly what CI runs
+```
+
+Document each other command here as it exists (fuzzing, long property runs, benchmarks, mutation testing), with the time it takes.
+
+## Known Differences
+
+List here every case where the output deliberately differs from the reference implementation in the differential suite, with the reason and a link to the decision record. The list starts empty and should stay short.
+
+## Results
+
+Record the latest long-run results here: fuzzing hours per target and findings, mutation testing survival rate and the explained survivors, coverage per crate, and the date of each.

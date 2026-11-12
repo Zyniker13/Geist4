@@ -1,0 +1,8 @@
+/target
+**/*.rs.bk
+/fuzz/target
+/fuzz/artifacts
+/fuzz/coverage
+node_modules/
+*.profraw
+.DS_Store
