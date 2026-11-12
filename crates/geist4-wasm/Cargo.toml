@@ -1,0 +1,15 @@
+[package]
+name = "geist4-wasm"
+description = "WebAssembly bindings for the Geist4 Markdown engine, with TypeScript types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+geist4-core = { path = "../geist4-core" }
+geist4-html = { path = "../geist4-html" }

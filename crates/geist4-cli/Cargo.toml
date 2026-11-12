@@ -1,0 +1,19 @@
+[package]
+name = "geist4-cli"
+description = "The Geist4 command-line tool: render, check, ast, format, ext check"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "geist4"
+path = "src/main.rs"
+
+[dependencies]
+geist4-core = { path = "../geist4-core" }
+geist4-html = { path = "../geist4-html" }

@@ -1,0 +1,7 @@
+# The toolchain everyone builds with: the current stable release, with the
+# tools CI runs. The minimum supported Rust version is recorded in
+# `rust-version` in this file's sibling `Cargo.toml` and tested by a
+# dedicated CI job.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

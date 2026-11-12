@@ -1,0 +1,14 @@
+[package]
+name = "geist4-ext-loader"
+description = "Loads Geist4 extensions in the standard format, including the WebAssembly sandbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+geist4-core = { path = "../geist4-core" }

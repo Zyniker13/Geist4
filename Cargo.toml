@@ -1,0 +1,23 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/geist4-core",
+    "crates/geist4-html",
+    "crates/geist4-ext",
+    "crates/geist4-ext-loader",
+    "crates/geist4-cli",
+    "crates/geist4-ffi",
+    "crates/geist4-wasm",
+    "crates/geist4-spec-harness",
+]
+
+[workspace.package]
+version = "0.1.0-dev"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Zyniker13/Geist4"
+rust-version = "1.85.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"

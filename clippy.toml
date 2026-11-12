@@ -1,0 +1,3 @@
+# The minimum supported Rust version, so clippy does not suggest lints that
+# need a newer release than the engine supports.
+msrv = "1.85.0"

@@ -1,0 +1,15 @@
+[package]
+name = "geist4-ffi"
+description = "Stable C-compatible API for the Geist4 Markdown engine, the base for native bindings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+geist4-core = { path = "../geist4-core" }
+geist4-html = { path = "../geist4-html" }

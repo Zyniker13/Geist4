@@ -1,0 +1,14 @@
+[package]
+name = "geist4-html"
+description = "HTML renderer for the Geist4 document tree, with the URL and raw-HTML safety policy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+geist4-core = { path = "../geist4-core" }
