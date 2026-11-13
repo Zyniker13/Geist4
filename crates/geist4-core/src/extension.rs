@@ -49,8 +49,24 @@ pub struct KindDecl {
     pub kind: String,
     /// Whether nodes of this kind have children.
     pub container: bool,
+    /// Whether nodes of this kind hold inline text: a text child is
+    /// parsed as inline content like a paragraph's, and the kind's
+    /// children render as inline content.
+    pub inline_text: bool,
     /// The attribute names the kind accepts, in order.
     pub attrs: Vec<String>,
+}
+
+/// The rendered HTML of one of an extension node's children, together
+/// with the child's own node when that child is itself an extension
+/// node, so a hook that arranges its children (as a table groups its
+/// rows into `thead` and `tbody`) can read the structure it is
+/// arranging. Children that are plain inline nodes carry no node.
+pub struct RenderedChild<'a> {
+    /// The child's node, when the child is an extension node.
+    pub node: Option<&'a ExtNode>,
+    /// The child's rendered HTML.
+    pub html: String,
 }
 
 /// An extension: hooks for block starts and continuation, inline
@@ -95,11 +111,42 @@ pub trait Extension: Send + Sync {
     }
 
     /// Renders one of this extension's nodes. `children` is the
-    /// already-rendered HTML of the node's children; the hook appends
-    /// its output to `out`. Unrendered kinds produce no output and are
-    /// reported by `check`.
-    fn render(&self, node: &ExtNode, children: &str, out: &mut String) {
+    /// rendered HTML of the node's children along with their nodes;
+    /// the hook appends its output to `out`. Children of a kind that
+    /// declared [`inline_text`](KindDecl::inline_text) render as
+    /// inline content, others as blocks. Unrendered kinds produce no
+    /// output and are reported by `check`.
+    fn render(&self, node: &ExtNode, children: &[RenderedChild<'_>], out: &mut String) {
         let _ = (node, children, out);
+    }
+
+    /// Runs where a new block could start, after the built-in block
+    /// starts have all declined, once per line per extension in
+    /// registration order. The hook opens one of its blocks with
+    /// [`open_extension`](BlockStartCtx::open_extension), converts an
+    /// open paragraph into one with
+    /// [`convert_paragraph`](BlockStartCtx::convert_paragraph), or
+    /// declines by doing nothing. Opening consumes the line.
+    fn try_start(&self, ctx: &mut BlockStartCtx<'_, '_, '_, '_>) {
+        let _ = ctx;
+    }
+
+    /// Runs for each line while an extension block of this extension
+    /// is open, to decide whether the line continues it. Returning
+    /// false closes the block; the line is then free to start other
+    /// blocks. The hook may read the block's state; it should not
+    /// depend on mutations here surviving, because a line that both
+    /// continues the block and starts a new one closes it first.
+    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_>) -> bool {
+        let _ = ctx;
+        false
+    }
+
+    /// Runs when an extension block closes, before the tree is
+    /// returned. The hook builds the block's children under its node
+    /// from the state it kept while the block was open.
+    fn close(&self, state: &mut dyn std::any::Any, ctx: &mut CloseCtx<'_, '_>) {
+        let _ = (state, ctx);
     }
 }
 
@@ -141,6 +188,143 @@ pub struct TreeCtx<'ctx, 'doc, 'opts> {
     /// The options the parse runs with; hooks may read other
     /// extensions' declarations, but never their private state.
     pub options: &'opts Options,
+}
+
+/// What the place a new block would open in is.
+///
+/// The block-start hook sees this as the deepest open block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartContainer {
+    /// A container — the document, a block quote, a list item — that
+    /// new blocks open inside.
+    Container,
+    /// An open paragraph. The hook can turn it into one of its blocks
+    /// with [`convert_paragraph`](BlockStartCtx::convert_paragraph),
+    /// keeping the paragraph's last line as the new block's first
+    /// line.
+    Paragraph,
+    /// An extension block of the extension at this index is the
+    /// deepest open block.
+    Extension(usize),
+}
+
+/// The context of the block-start hook.
+///
+/// The hook sees the current line as it stands after the open
+/// containers' prefixes were consumed, and what it would open in.
+/// The methods are implemented next to the block parser, which owns
+/// the state they drive.
+pub struct BlockStartCtx<'p, 'a, 'l, 'ext> {
+    pub(crate) inner: crate::parser::StartInner<'p, 'a, 'l, 'ext>,
+}
+
+/// The context of the block-continuation hook.
+pub struct BlockContinueCtx<'c, 's> {
+    /// The line's content from its first non-space byte, without the
+    /// line ending.
+    pub(crate) line: &'c [u8],
+    /// The open block's state, taken out of the frame for the hook.
+    pub(crate) state: Option<&'s mut dyn std::any::Any>,
+}
+
+/// The context of the block-close hook.
+pub struct CloseCtx<'ctx, 'doc> {
+    /// The document's arena; the hook builds its nodes through it.
+    pub arena: &'ctx mut crate::arena::Arena<'doc>,
+    /// The extension block's node, to build children under.
+    pub node: crate::arena::NodeId,
+    /// The byte offset where the block's first line began.
+    pub start_offset: usize,
+    /// The byte offset just past the block's last line.
+    pub end_offset: usize,
+}
+
+impl<'p, 'a, 'l, 'ext> BlockStartCtx<'p, 'a, 'l, 'ext> {
+    /// The index of the extension whose hook is running.
+    pub fn extension(&self) -> usize {
+        self.inner.extension_index()
+    }
+
+    /// The current line's content from its first non-space byte,
+    /// without the line ending.
+    pub fn line(&self) -> &'l [u8] {
+        self.inner.line()
+    }
+
+    /// Whether the line is blank: only spaces and tabs remain.
+    pub fn line_blank(&self) -> bool {
+        self.inner.line_blank()
+    }
+
+    /// Whether the line's first non-space byte sits four or more
+    /// virtual columns past the container prefixes.
+    pub fn indented(&self) -> bool {
+        self.inner.indented()
+    }
+
+    /// What the new block would open in.
+    pub fn container(&self) -> StartContainer {
+        self.inner.container()
+    }
+
+    /// The open paragraph's accumulated text, if the deepest open
+    /// block is a paragraph. The text stays in the frame; the hook
+    /// that wants it for its own block's first line passes the byte
+    /// offset where that line begins to
+    /// [`convert_paragraph`](Self::convert_paragraph).
+    pub fn paragraph_text(&self) -> Option<&str> {
+        self.inner.paragraph_text()
+    }
+
+    /// Marks the open paragraph as having declined this extension's
+    /// block: the hook will not be called with it again. A delimiter
+    /// row that matches no header row uses this, so a later line
+    /// cannot turn a paragraph that failed once into a block after
+    /// all.
+    pub fn visit_paragraph(&mut self) {
+        self.inner.visit_paragraph();
+    }
+
+    /// Converts the open paragraph into an extension block of the
+    /// running extension: the paragraph's node becomes a node of
+    /// `kind`, the text before byte `pre_len` becomes a paragraph of
+    /// its own in front of it (with `\|` unescaped to `|` and the
+    /// whole prefix trimmed, as the reference implementations prepare
+    /// a table's pre-header text), and the state box travels with the
+    /// new frame. Consumes the rest of the line.
+    pub fn convert_paragraph(
+        &mut self,
+        kind: String,
+        pre_len: usize,
+        state: Box<dyn std::any::Any + Send>,
+    ) {
+        self.inner.convert_paragraph(kind, pre_len, state);
+    }
+
+    /// Opens an extension block of the running extension inside the
+    /// container the hook was called with, interrupting an open
+    /// paragraph if one is open. Consumes the rest of the line.
+    pub fn open_extension(
+        &mut self,
+        kind: String,
+        state: Box<dyn std::any::Any + Send>,
+    ) -> crate::arena::NodeId {
+        self.inner.open_extension(kind, state)
+    }
+}
+
+impl<'c, 's> BlockContinueCtx<'c, 's> {
+    /// The line's content from its first non-space byte, without the
+    /// line ending.
+    pub fn line(&self) -> &'c [u8] {
+        self.line
+    }
+
+    /// The open block's state, downcast to the extension's own type.
+    pub fn state<T: std::any::Any>(&mut self) -> Option<&mut T> {
+        let state = self.state.as_deref_mut()?;
+        state.downcast_mut::<T>()
+    }
 }
 
 /// The parse and render options: the registered extensions, in order.

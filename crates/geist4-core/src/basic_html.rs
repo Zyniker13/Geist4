@@ -67,8 +67,9 @@ enum Step {
     Item(NodeId, bool),
     /// Renders one node's inline children.
     Inline(NodeId),
-    /// Renders an extension node whose children are already rendered.
-    Extension(crate::extension::ExtNode, String),
+    /// Renders an extension node with its children, per its kind's
+    /// declaration.
+    Extension(crate::extension::ExtNode, NodeId),
 }
 
 struct Renderer<'a> {
@@ -78,36 +79,20 @@ struct Renderer<'a> {
 }
 
 impl Renderer<'_> {
-    /// Renders `id`'s children as blocks into a fresh string.
-    fn block_children_html(&self, id: NodeId) -> String {
-        let mut sub = Renderer {
-            arena: self.arena,
-            extensions: self.extensions,
-            out: String::new(),
-        };
-        let mut stack: Vec<Step> = self
-            .arena
-            .children(id)
-            .iter()
-            .rev()
-            .map(|child| Step::Block(*child, false))
-            .collect();
-        while let Some(step) = stack.pop() {
-            sub.run(step, &mut stack);
-        }
-        sub.out
-    }
-
-    /// Renders `id`'s children as inline content into a fresh string.
-    fn inline_children_html(&self, id: NodeId) -> String {
+    /// Renders one child of an extension node into a fresh string,
+    /// as inline content or as a block per the parent kind's
+    /// declaration.
+    fn child_html(&self, child: NodeId, inline: bool) -> String {
         let mut sub = Renderer {
             arena: self.arena,
             extensions: self.extensions,
             out: String::new(),
         };
         let mut stack: Vec<Step> = Vec::new();
-        for child in self.arena.children(id).iter().rev() {
-            sub.inline_child(*child, &mut stack);
+        if inline {
+            sub.inline_child(child, &mut stack);
+        } else {
+            stack.push(Step::Block(child, false));
         }
         while let Some(step) = stack.pop() {
             sub.run(step, &mut stack);
@@ -115,12 +100,41 @@ impl Renderer<'_> {
         sub.out
     }
 
+    /// Whether nodes of this kind declared their content as inline
+    /// text, which decides how the node's children render and whether
+    /// the inline phase parses its text child.
+    fn kind_is_inline_text(&self, kind: &str) -> bool {
+        self.extensions.iter().any(|extension| {
+            extension
+                .kinds()
+                .iter()
+                .any(|decl| decl.inline_text && decl.kind == kind)
+        })
+    }
+
     /// Hands an extension node to the registered extensions, giving
-    /// each the already-rendered children. Extensions render in
-    /// registration order; a kind no extension claims produces nothing.
-    fn render_extension(&mut self, ext: &crate::extension::ExtNode, children: &str) {
+    /// each the rendered children along with their nodes. Extensions
+    /// render in registration order; a kind no extension claims
+    /// produces nothing.
+    fn render_extension(&mut self, ext: &crate::extension::ExtNode, id: NodeId) {
+        let inline = self.kind_is_inline_text(&ext.kind);
+        let arena = self.arena;
+        let children: Vec<crate::extension::RenderedChild<'_>> = arena
+            .children(id)
+            .iter()
+            .map(|child| {
+                let node = match arena.kind(*child) {
+                    crate::node::Node::Extension(ext) => Some(ext),
+                    _ => None,
+                };
+                crate::extension::RenderedChild {
+                    node,
+                    html: self.child_html(*child, inline),
+                }
+            })
+            .collect();
         for extension in self.extensions {
-            extension.render(ext, children, &mut self.out);
+            extension.render(ext, &children, &mut self.out);
         }
     }
     fn run(&mut self, step: Step, stack: &mut Vec<Step>) {
@@ -130,7 +144,7 @@ impl Renderer<'_> {
             Step::Block(id, tight) => self.block(id, tight, stack),
             Step::Item(id, tight) => self.item(id, tight, stack),
             Step::Inline(id) => self.inline(id, stack),
-            Step::Extension(ext, children) => self.render_extension(&ext, &children),
+            Step::Extension(ext, id) => self.render_extension(&ext, id),
         }
     }
 
@@ -203,9 +217,8 @@ impl Renderer<'_> {
             }
             Node::Extension(ext) => {
                 self.cr();
-                let children = self.block_children_html(id);
                 stack.push(Step::Cr);
-                stack.push(Step::Extension(ext.clone(), children));
+                stack.push(Step::Extension(ext.clone(), id));
             }
             Node::CodeBlock(data) => {
                 self.cr();
@@ -325,8 +338,7 @@ impl Renderer<'_> {
                     stack.push(Step::Text(tag));
                 }
                 Node::Extension(ext) => {
-                    let children = self.inline_children_html(child);
-                    stack.push(Step::Extension(ext.clone(), children));
+                    stack.push(Step::Extension(ext.clone(), child));
                 }
                 Node::Document
                 | Node::BlockQuote

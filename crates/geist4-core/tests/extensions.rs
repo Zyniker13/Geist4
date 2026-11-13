@@ -5,7 +5,9 @@
 
 use geist4_core::arena::NodeId;
 use geist4_core::basic_html::{render, render_with};
-use geist4_core::extension::{AttrValue, ExtNode, Extension, KindDecl, Options, TreeCtx};
+use geist4_core::extension::{
+    AttrValue, ExtNode, Extension, KindDecl, Options, RenderedChild, TreeCtx,
+};
 use geist4_core::node::Node;
 use geist4_core::parser::parse_with;
 use std::sync::Arc;
@@ -22,6 +24,7 @@ impl Extension for Marker {
         vec![KindDecl {
             kind: "marked".to_owned(),
             container: true,
+            inline_text: true,
             attrs: vec!["label".to_owned()],
         }]
     }
@@ -60,7 +63,7 @@ impl Extension for Marker {
         }
     }
 
-    fn render(&self, node: &ExtNode, children: &str, out: &mut String) {
+    fn render(&self, node: &ExtNode, children: &[RenderedChild<'_>], out: &mut String) {
         if node.kind != "marked" {
             return;
         }
@@ -68,7 +71,11 @@ impl Extension for Marker {
             AttrValue::Str(value) => value.clone(),
             _ => String::new(),
         };
-        out.push_str(&format!("<marked label=\"{label}\">{children}</marked>"));
+        out.push_str(&format!("<marked label=\"{label}\">"));
+        for child in children {
+            out.push_str(&child.html);
+        }
+        out.push_str("</marked>");
     }
 }
 

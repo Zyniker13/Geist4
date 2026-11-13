@@ -49,6 +49,12 @@ enum OpenKind {
     },
     /// A raw HTML block of one of the seven kinds.
     HtmlBlock { kind: u8, literal: String },
+    /// An extension block: which registered extension owns it and its
+    /// opaque state, taken out for hook calls and put back after.
+    Extension {
+        index: usize,
+        state: Option<Box<dyn std::any::Any + Send>>,
+    },
 }
 
 /// One entry in the stack of open blocks.
@@ -136,6 +142,26 @@ pub fn parse_with<'a>(src: &'a str, options: &crate::extension::Options) -> Docu
     }
 }
 
+/// Prepares a converted paragraph's prefix as paragraph text: `\|`
+/// unescapes to `|` and the whole prefix is trimmed, as the reference
+/// implementations prepare a table's pre-header text.
+fn unescape_pipes_trim(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let bytes = raw.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && bytes.get(i + 1) == Some(&b'|') {
+            out.push('|');
+            i += 2;
+        } else {
+            let ch = raw[i..].chars().next().unwrap();
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    out.trim().to_owned()
+}
+
 /// Parses the block structure of `src`.
 struct Parser<'a, 'ext> {
     src: &'a str,
@@ -154,6 +180,184 @@ struct Parser<'a, 'ext> {
     /// The registered extensions, or `None` on the plain path; passed
     /// through to the inline phase's hook sites.
     extensions: Option<&'ext [std::sync::Arc<dyn crate::extension::Extension>]>,
+    /// Paragraphs that declined an extension block start; the hook is
+    /// not called with them again.
+    visited_paragraphs: Vec<NodeId>,
+    /// Whether a block-start hook consumed the current line, which
+    /// makes it not blank however empty the rest looks.
+    line_consumed: bool,
+}
+
+/// The state behind a block-start hook. Its fields stay private to
+/// the parser; hooks reach the state through the context's methods.
+pub(crate) struct StartInner<'p, 'a, 'l, 'ext> {
+    parser: &'p mut Parser<'a, 'ext>,
+    cursor: &'p mut Cursor<'l>,
+    line_offset: usize,
+    line_stop: usize,
+    line: &'l [u8],
+    line_blank: bool,
+    indented: bool,
+    extension: usize,
+    fired: bool,
+    fired_node: Option<NodeId>,
+}
+
+impl<'p, 'a, 'l, 'ext> StartInner<'p, 'a, 'l, 'ext> {
+    /// The index of the extension whose hook is running.
+    pub(crate) fn extension_index(&self) -> usize {
+        self.extension
+    }
+
+    /// The current line's content from its first non-space byte,
+    /// without the line ending.
+    pub(crate) fn line(&self) -> &'l [u8] {
+        self.line
+    }
+
+    /// Whether the line is blank: only spaces and tabs remain.
+    pub(crate) fn line_blank(&self) -> bool {
+        self.line_blank
+    }
+
+    /// Whether the line's first non-space byte sits four or more
+    /// virtual columns past the container prefixes.
+    pub(crate) fn indented(&self) -> bool {
+        self.indented
+    }
+
+    /// What the new block would open in.
+    pub(crate) fn container(&self) -> crate::extension::StartContainer {
+        match &self.parser.open.last().unwrap().kind {
+            OpenKind::Paragraph { .. } => crate::extension::StartContainer::Paragraph,
+            OpenKind::Extension { index, .. } => {
+                crate::extension::StartContainer::Extension(*index)
+            }
+            _ => crate::extension::StartContainer::Container,
+        }
+    }
+
+    /// The open paragraph's accumulated text, if any.
+    pub(crate) fn paragraph_text(&self) -> Option<&str> {
+        match &self.parser.open.last().unwrap().kind {
+            OpenKind::Paragraph { text } => Some(text),
+            _ => None,
+        }
+    }
+
+    /// Marks the open paragraph as having declined this hook.
+    pub(crate) fn visit_paragraph(&mut self) {
+        let id = self.parser.open.last().unwrap().id;
+        if matches!(
+            self.parser.open.last().unwrap().kind,
+            OpenKind::Paragraph { .. }
+        ) {
+            self.parser.visited_paragraphs.push(id);
+        }
+    }
+
+    /// Converts the open paragraph into an extension block of the
+    /// running extension. The text before `pre_len` becomes a
+    /// paragraph in front of the new block, with `\|` unescaped
+    /// and the prefix trimmed.
+    pub(crate) fn convert_paragraph(
+        &mut self,
+        kind: String,
+        pre_len: usize,
+        state: Box<dyn std::any::Any + Send>,
+    ) {
+        let frame = self.parser.open.pop().expect("a paragraph frame is open");
+        let OpenKind::Paragraph { text } = frame.kind else {
+            unreachable!("convert_paragraph runs on a paragraph frame");
+        };
+        self.parser.arena.set_kind(
+            frame.id,
+            Node::Extension(crate::extension::ExtNode {
+                kind,
+                attrs: Vec::new(),
+            }),
+        );
+        if pre_len > 0 && pre_len <= text.len() {
+            let pre = unescape_pipes_trim(&text[..pre_len]);
+            if !pre.is_empty() {
+                let parent = self.parser.open.last().unwrap().id;
+                let pre_id = self.parser.arena.alloc(
+                    Node::Paragraph,
+                    Span::new(frame.start_offset, frame.start_offset + pre_len),
+                );
+                let text_id = self
+                    .parser
+                    .arena
+                    .alloc(Node::Text(Cow::Owned(pre)), Span::empty(frame.start_offset));
+                self.parser.arena.push_child(pre_id, text_id);
+                let pre_index = pre_id.index();
+                if self.parser.last_line_blank.len() <= pre_index {
+                    self.parser.last_line_blank.resize(pre_index + 1, false);
+                }
+                // The former paragraph node was the parent's last
+                // child; put the new paragraph in front of it.
+                let last = self.parser.arena.pop_child(parent);
+                debug_assert_eq!(last, Some(frame.id));
+                self.parser.arena.push_child(parent, pre_id);
+                self.parser.arena.push_child(parent, frame.id);
+            }
+        }
+        let index = frame.id.index();
+        if self.parser.last_line_blank.len() <= index {
+            self.parser.last_line_blank.resize(index + 1, false);
+        }
+        self.parser.last_line_blank[index] = false;
+        self.parser.open.push(Frame {
+            id: frame.id,
+            kind: OpenKind::Extension {
+                index: self.extension,
+                state: Some(state),
+            },
+            start_line: self.parser.line_number,
+            start_offset: frame.start_offset,
+            end_offset: self.line_stop,
+        });
+        self.parser.line_consumed = true;
+        self.cursor.bump_all();
+        self.fired = true;
+        self.fired_node = Some(frame.id);
+    }
+
+    /// Opens an extension block of the running extension inside
+    /// the container the hook was called with.
+    pub(crate) fn open_extension(
+        &mut self,
+        kind: String,
+        state: Box<dyn std::any::Any + Send>,
+    ) -> NodeId {
+        self.parser.interrupt_paragraph(self.line_stop);
+        self.parser.close_until_can_contain(self.line_stop);
+        let parent = self.parser.open.last().unwrap().id;
+        let id = self.parser.arena.alloc(
+            Node::Extension(crate::extension::ExtNode {
+                kind,
+                attrs: Vec::new(),
+            }),
+            Span::empty(self.line_offset),
+        );
+        self.parser.arena.push_child(parent, id);
+        self.parser.last_line_blank.push(false);
+        self.parser.open.push(Frame {
+            id,
+            kind: OpenKind::Extension {
+                index: self.extension,
+                state: Some(state),
+            },
+            start_line: self.parser.line_number,
+            start_offset: self.line_offset,
+            end_offset: self.line_stop,
+        });
+        self.parser.line_consumed = true;
+        self.cursor.bump_all();
+        self.fired = true;
+        self.fired_node = Some(id);
+        id
+    }
 }
 
 impl<'a, 'ext> Parser<'a, 'ext> {
@@ -182,6 +386,8 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             adding_lazy: false,
             line_is_src: true,
             extensions: None,
+            visited_paragraphs: Vec::new(),
+            line_consumed: false,
         }
     }
 
@@ -294,7 +500,14 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             Some(id) => id,
             None => opened.unwrap_or_else(|| self.open.last().unwrap().id),
         };
-        let blank = cursor.blank_from_here();
+        // A line a block-start hook consumed is content, not blank,
+        // however empty the rest looks after the bump.
+        let blank = if self.line_consumed {
+            self.line_consumed = false;
+            false
+        } else {
+            cursor.blank_from_here()
+        };
         let on_stack = self.open.iter().position(|frame| frame.id == target);
         self.update_last_line_blank(target, on_stack, blank);
     }
@@ -305,6 +518,30 @@ impl<'a, 'ext> Parser<'a, 'ext> {
     /// fence ends the line's processing.
     fn walk(&mut self, cursor: &mut Cursor<'_>, line_stop: usize) -> WalkResult {
         for depth in 0..self.open.len() {
+            // Extension frames need mutable access to their state, so
+            // they are matched before the shared-borrow match below.
+            if let OpenKind::Extension { index, state } = &mut self.open[depth].kind {
+                if cursor.blank_from_here() {
+                    return WalkResult::FailedAt(depth);
+                }
+                let (pos, col) = cursor.find_nonspace();
+                let line = &cursor.line()[pos..];
+                let mut inner = state.take();
+                let state_ref: Option<&mut dyn std::any::Any> =
+                    inner.as_deref_mut().map(|s| s as _);
+                let mut ctx = crate::extension::BlockContinueCtx {
+                    line,
+                    state: state_ref,
+                };
+                let matched = self.extensions.unwrap()[*index].try_continue(&mut ctx);
+                *state = inner;
+                if matched {
+                    cursor.set_pos_col(pos, col);
+                } else {
+                    return WalkResult::FailedAt(depth);
+                }
+                continue;
+            }
             let matched = match &self.open[depth].kind {
                 OpenKind::Document | OpenKind::List(_) | OpenKind::Heading => true,
                 OpenKind::BlockQuote => {
@@ -380,6 +617,9 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                         true
                     }
                 }
+                // Extension frames were handled above, with mutable
+                // access to their state.
+                OpenKind::Extension { .. } => unreachable!("handled above"),
             };
             if !matched {
                 return WalkResult::FailedAt(depth);
@@ -551,9 +791,69 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 return Some(id);
             }
 
+            // Extension block starts: each registered hook in registration
+            // order, until one opens a block or converts the paragraph.
+            if self.extensions.is_some() {
+                if let Some(id) = self.extension_starts(cursor, line_offset, line_stop, indent) {
+                    opened = Some(id);
+                    break;
+                }
+            }
+
             break;
         }
         opened
+    }
+
+    /// Runs the registered extensions' block-start hooks for the
+    /// current line, in registration order, until one opens a block.
+    /// Returns the new block's node then.
+    fn extension_starts(
+        &mut self,
+        cursor: &mut Cursor<'_>,
+        line_offset: usize,
+        line_stop: usize,
+        indent: usize,
+    ) -> Option<NodeId> {
+        let (pos, _) = cursor.find_nonspace();
+        if pos >= cursor.line().len() {
+            return None;
+        }
+        let line_blank = cursor.blank_from_here();
+        let line = &cursor.line()[pos..];
+        let extensions = self.extensions.unwrap();
+        // A paragraph that already declined a hook is not offered to
+        // hooks again.
+        let visited = matches!(self.open.last().unwrap().kind, OpenKind::Paragraph { .. })
+            && self
+                .visited_paragraphs
+                .contains(&self.open.last().unwrap().id);
+        for (index, extension) in extensions.iter().enumerate() {
+            if visited {
+                break;
+            }
+            let inner = StartInner {
+                parser: self,
+                cursor,
+                line_offset,
+                line_stop,
+                line,
+                line_blank,
+                indented: indent >= 4,
+                extension: index,
+                fired: false,
+                fired_node: None,
+            };
+            let mut ctx = crate::extension::BlockStartCtx { inner };
+            extension.try_start(&mut ctx);
+            let StartInner {
+                fired, fired_node, ..
+            } = ctx.inner;
+            if fired {
+                return fired_node;
+            }
+        }
+        None
     }
 
     /// Scans a list item start at the cursor, honoring the rules for
@@ -841,9 +1141,26 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         let mut session = crate::inline::InlineSession::new();
         // One join buffer reused across every leaf block's inline text.
         let mut text = String::new();
+        // Which extension kinds hold inline text, from their
+        // declarations.
+        let mut inline_kinds: Vec<String> = Vec::new();
+        if let Some(extensions) = self.extensions {
+            for extension in extensions {
+                for decl in extension.kinds() {
+                    if decl.inline_text && !inline_kinds.contains(&decl.kind) {
+                        inline_kinds.push(decl.kind);
+                    }
+                }
+            }
+        }
         let mut stack: Vec<NodeId> = self.arena.children(root).to_vec();
         while let Some(id) = stack.pop() {
-            if matches!(self.arena.kind(id), Node::Paragraph | Node::Heading(_)) {
+            let is_leaf = match self.arena.kind(id) {
+                Node::Paragraph | Node::Heading(_) => true,
+                Node::Extension(ext) => inline_kinds.iter().any(|k| k == &ext.kind),
+                _ => false,
+            };
+            if is_leaf {
                 // One append per text part: the parts already borrow the
                 // source, so no intermediate strings are built.
                 text.clear();
@@ -925,6 +1242,16 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 // (handled in the walk) keep theirs.
                 cursor.skip_to_content();
                 self.append_paragraph_rest(id, cursor, line_offset);
+                Some(id)
+            }
+            OpenKind::Extension { .. } => {
+                // The block-start hook consumed the line when it opened
+                // or continued the block; should a hook decline after its
+                // continuation matched, the leftover line is consumed
+                // here rather than lost.
+                if cursor.rest_len() > 0 {
+                    cursor.bump_all();
+                }
                 Some(id)
             }
             OpenKind::CodeBlock { .. } => {
@@ -1233,6 +1560,17 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             }
             OpenKind::List(_) => {
                 self.finalize_list_tightness(frame.id);
+            }
+            OpenKind::Extension { index, state } => {
+                let mut state = state.take().expect("an extension frame carries its state");
+                let extensions = self.extensions.unwrap();
+                let mut ctx = crate::extension::CloseCtx {
+                    arena: &mut self.arena,
+                    node: frame.id,
+                    start_offset: frame.start_offset,
+                    end_offset: frame.end_offset,
+                };
+                extensions[*index].close(state.as_mut(), &mut ctx);
             }
             _ => {}
         }

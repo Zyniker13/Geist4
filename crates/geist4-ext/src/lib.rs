@@ -7,7 +7,7 @@
 //! like loaded extensions, so the API stays honest. See the repository
 //! roadmap.
 
-use geist4_core::extension::{ExtNode, Extension, InlineTriggerCtx, KindDecl, Run};
+use geist4_core::extension::{ExtNode, Extension, InlineTriggerCtx, KindDecl, RenderedChild, Run};
 
 /// GFM strikethrough: text wrapped in a matching pair of one or two tildes
 /// becomes a `strikethrough` node, rendered as `<del>`.
@@ -34,6 +34,7 @@ impl Extension for Strikethrough {
         vec![KindDecl {
             kind: Self::KIND.to_owned(),
             container: true,
+            inline_text: true,
             attrs: Vec::new(),
         }]
     }
@@ -51,12 +52,14 @@ impl Extension for Strikethrough {
         }
     }
 
-    fn render(&self, node: &ExtNode, children: &str, out: &mut String) {
+    fn render(&self, node: &ExtNode, children: &[RenderedChild<'_>], out: &mut String) {
         if node.kind != Self::KIND {
             return;
         }
         out.push_str("<del>");
-        out.push_str(children);
+        for child in children {
+            out.push_str(&child.html);
+        }
         out.push_str("</del>");
     }
 }
