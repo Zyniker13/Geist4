@@ -108,6 +108,28 @@ fn html_block_kinds_one_through_five() {
 }
 
 #[test]
+fn html_block_trailing_blank_lines_are_kept() {
+    // A comment block (kind 2) runs to the end of input, blank lines
+    // included; the blank line inside the block survives rendering (the
+    // document-final newline is stripped by the spec output convention,
+    // so the block's own blank line remains).
+    assert_eq!(html("<!--a\nb\n\nc\n"), "<!--a\nb\n\nc");
+    assert_eq!(html("<!--a\n\n"), "<!--a\n");
+}
+
+#[test]
+fn raw_html_comments_allow_dash_runs() {
+    // Comment content may contain dash runs as long as no `-->` appears
+    // early, matching the reference scanner.
+    assert_eq!(
+        html("x <!-- a ------' b --> y"),
+        "<p>x <!-- a ------' b --> y</p>"
+    );
+    // A comment ending in `--->` is not a comment.
+    assert_eq!(html("x <!-- a ---> y"), "<p>x &lt;!-- a ---&gt; y</p>");
+}
+
+#[test]
 fn html_block_kind_six_ends_at_blank_line() {
     assert_eq!(
         html("<table><tr><td>\n<pre>\nx\n</pre>\n</td></tr></table>\n\nafter"),

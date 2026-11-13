@@ -1424,7 +1424,8 @@ fn scan_html_comment(bytes: &[u8], start: usize) -> Option<usize> {
         } else if bytes[i] == b'-' && bytes.get(i + 1) == Some(&b'-') {
             match bytes.get(i + 2) {
                 Some(&b'>') => return Some(i - start),
-                Some(&b'-') => return None,
+                // `--` followed by any other byte (a dash included) is
+                // comment content, as in the reference scanner.
                 Some(_) => i += 3,
                 None => return None,
             }

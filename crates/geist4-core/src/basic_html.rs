@@ -158,9 +158,13 @@ impl Renderer<'_> {
                 self.out.push_str("</code></pre>\n");
             }
             Node::HtmlBlock(data) => {
+                // The literal's lines are already newline-terminated; emit
+                // it as-is between conditional newlines, as the reference
+                // renderer does, so trailing blank lines inside the block
+                // are preserved.
                 self.cr();
-                self.out.push_str(data.literal.trim_end_matches('\n'));
-                self.out.push('\n');
+                self.out.push_str(&data.literal);
+                self.cr();
             }
             Node::Text(_) => {
                 // Text outside a leaf is not rendered at block level.
