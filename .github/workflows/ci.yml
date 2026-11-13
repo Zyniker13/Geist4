@@ -9,10 +9,6 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: short
 
-permissions:
-  contents: read
-  statuses: write
-
 jobs:
   check:
     name: Check & Test (${{ matrix.os }})
@@ -55,12 +51,6 @@ jobs:
         with:
           name: check-log-${{ matrix.os }}
           path: check.log
-      - name: Publish the failure tail as commit statuses (temporary diagnostic)
-        if: failure()
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 tools/ci_publish_tail.py "${{ github.sha }}" "${{ github.repository }}" "$GH_TOKEN" "${{ matrix.os }}"
 
   msrv:
     name: MSRV check

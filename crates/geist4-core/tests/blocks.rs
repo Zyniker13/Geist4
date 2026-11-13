@@ -168,6 +168,17 @@ fn link_reference_definitions() {
     );
     // Labels are folded case-insensitively.
     assert_eq!(html("[ẞ]\n\n[SS]: /url"), "<p><a href=\"/url\">ẞ</a></p>");
+    // Title content that itself starts and ends with the outer quote
+    // character is kept: only the outer pair is stripped, and content
+    // that is a single quote byte must not panic the range slice.
+    assert_eq!(
+        html("[a]: /u \"'x'\"\n\n[a]"),
+        "<p><a href=\"/u\" title=\"'x'\">a</a></p>"
+    );
+    assert_eq!(
+        html("[a]: /u \"'\"\n\n[a]"),
+        "<p><a href=\"/u\" title=\"'\">a</a></p>"
+    );
 }
 
 #[test]

@@ -1260,7 +1260,9 @@ pub(crate) fn clean_title(title: &str) -> Option<String> {
         return None;
     }
     let inner = match (bytes.first(), bytes.last()) {
-        (Some(&b'\''), Some(&b'\'')) | (Some(&b'('), Some(&b')')) | (Some(&b'"'), Some(&b'"')) => {
+        (Some(&b'\''), Some(&b'\'')) | (Some(&b'('), Some(&b')')) | (Some(&b'"'), Some(&b'"'))
+            if bytes.len() >= 2 =>
+        {
             &title[1..title.len() - 1]
         }
         _ => title,

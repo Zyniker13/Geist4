@@ -810,7 +810,11 @@ fn scan_title(text: &str) -> Option<(String, usize)> {
         match bytes[i] {
             b'\\' => i += escape_step(bytes, i),
             b if b == close => {
-                return Some((String::from_utf8_lossy(&bytes[1..i]).into_owned(), i + 1));
+                // The quoted span is returned whole, outer quotes
+                // included: the caller strips exactly one pair, so
+                // title content that itself starts and ends with the
+                // same quote character is preserved.
+                return Some((String::from_utf8_lossy(&bytes[..=i]).into_owned(), i + 1));
             }
             _ => i += 1,
         }
