@@ -63,3 +63,34 @@ jobs:
           rustup default 1.85.0
       - name: Build (MSRV)
         run: cargo build --workspace
+
+  instructions:
+    name: Instruction-count gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install Rust (stable)
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - name: Check valgrind is available
+        run: valgrind --version
+      - name: Check the runner version matches Cargo.lock
+        run: |
+          lock=$(python3 -c "import re;s=open('Cargo.lock').read();m=re.search(r'name = \"iai-callgrind\"\\nversion = \"([^\"]+)\"',s);print(m.group(1))")
+          echo "iai-callgrind in Cargo.lock: $lock"
+          [ "$lock" = "0.14.2" ] || { echo "the runner is pinned to 0.14.2; update both together"; exit 1; }
+      - name: Install iai-callgrind-runner
+        run: cargo install --locked iai-callgrind-runner@0.14.2
+      - name: Run the instruction-count benchmarks
+        run: |
+          cargo bench -p geist4-bench --bench iai 2>&1 | tee iai.log
+          exit "${PIPESTATUS[0]}"
+      - name: Check the counts against the baseline
+        run: python3 tools/check_iai.py iai.log bench/iai-baseline.txt
+      - name: Upload the instruction-count log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iai-log
+          path: iai.log
