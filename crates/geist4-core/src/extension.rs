@@ -267,6 +267,32 @@ impl<'p, 'a, 'l, 'ext> BlockStartCtx<'p, 'a, 'l, 'ext> {
         self.inner.container()
     }
 
+    /// The arena, for hooks that build their block's children.
+    pub fn arena(&mut self) -> &mut crate::arena::Arena<'a> {
+        self.inner.arena_mut()
+    }
+
+    /// The deepest open frame's node when it is an extension block.
+    /// Used with [`container`](Self::container)'s
+    /// [`StartContainer::Extension`] to append to an open extension
+    /// block.
+    pub fn open_node(&self) -> Option<crate::arena::NodeId> {
+        self.inner.open_node()
+    }
+
+    /// The open extension block's state, when the deepest open block
+    /// is an extension block, downcast to the extension's own type.
+    pub fn state<T: std::any::Any>(&mut self) -> Option<&mut T> {
+        self.inner.frame_state()?.downcast_mut::<T>()
+    }
+
+    /// Consumes the rest of the line as content of the open block
+    /// without opening a new one, for hooks that append to an open
+    /// extension block directly.
+    pub fn absorb_line(&mut self) {
+        self.inner.absorb_line();
+    }
+
     /// The open paragraph's accumulated text, if the deepest open
     /// block is a paragraph. The text stays in the frame; the hook
     /// that wants it for its own block's first line passes the byte
@@ -291,14 +317,15 @@ impl<'p, 'a, 'l, 'ext> BlockStartCtx<'p, 'a, 'l, 'ext> {
     /// its own in front of it (with `\|` unescaped to `|` and the
     /// whole prefix trimmed, as the reference implementations prepare
     /// a table's pre-header text), and the state box travels with the
-    /// new frame. Consumes the rest of the line.
+    /// new frame. Consumes the rest of the line. Returns the new
+    /// block's node.
     pub fn convert_paragraph(
         &mut self,
         kind: String,
         pre_len: usize,
         state: Box<dyn std::any::Any + Send>,
-    ) {
-        self.inner.convert_paragraph(kind, pre_len, state);
+    ) -> crate::arena::NodeId {
+        self.inner.convert_paragraph(kind, pre_len, state)
     }
 
     /// Opens an extension block of the running extension inside the

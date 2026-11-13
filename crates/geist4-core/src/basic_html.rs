@@ -217,7 +217,8 @@ impl Renderer<'_> {
             }
             Node::Extension(ext) => {
                 self.cr();
-                stack.push(Step::Cr);
+                // The hook emits its own line breaks; a table's rows
+                // and cells are placed by its hooks.
                 stack.push(Step::Extension(ext.clone(), id));
             }
             Node::CodeBlock(data) => {

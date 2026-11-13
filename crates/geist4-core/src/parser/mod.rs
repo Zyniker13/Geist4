@@ -226,6 +226,37 @@ impl<'p, 'a, 'l, 'ext> StartInner<'p, 'a, 'l, 'ext> {
         self.indented
     }
 
+    /// The arena, for hooks that build their block's children.
+    pub(crate) fn arena_mut(&mut self) -> &mut crate::arena::Arena<'a> {
+        &mut self.parser.arena
+    }
+
+    /// The deepest open frame's node when it is an extension block.
+    pub(crate) fn open_node(&self) -> Option<NodeId> {
+        let frame = self.parser.open.last().unwrap();
+        match &frame.kind {
+            OpenKind::Extension { .. } => Some(frame.id),
+            _ => None,
+        }
+    }
+
+    /// The open extension block's state, when the deepest frame is one.
+    pub(crate) fn frame_state(&mut self) -> Option<&mut dyn std::any::Any> {
+        match &mut self.parser.open.last_mut().unwrap().kind {
+            OpenKind::Extension { state, .. } => state.as_deref_mut().map(|s| s as _),
+            _ => None,
+        }
+    }
+
+    /// Consumes the rest of the line as content of the open block
+    /// without opening a new one, for hooks that append to the open
+    /// block directly.
+    pub(crate) fn absorb_line(&mut self) {
+        self.parser.line_consumed = true;
+        self.cursor.bump_all();
+        self.fired = true;
+    }
+
     /// What the new block would open in.
     pub(crate) fn container(&self) -> crate::extension::StartContainer {
         match &self.parser.open.last().unwrap().kind {
@@ -265,7 +296,7 @@ impl<'p, 'a, 'l, 'ext> StartInner<'p, 'a, 'l, 'ext> {
         kind: String,
         pre_len: usize,
         state: Box<dyn std::any::Any + Send>,
-    ) {
+    ) -> NodeId {
         let frame = self.parser.open.pop().expect("a paragraph frame is open");
         let OpenKind::Paragraph { text } = frame.kind else {
             unreachable!("convert_paragraph runs on a paragraph frame");
@@ -321,6 +352,7 @@ impl<'p, 'a, 'l, 'ext> StartInner<'p, 'a, 'l, 'ext> {
         self.cursor.bump_all();
         self.fired = true;
         self.fired_node = Some(frame.id);
+        frame.id
     }
 
     /// Opens an extension block of the running extension inside
@@ -500,14 +532,10 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             Some(id) => id,
             None => opened.unwrap_or_else(|| self.open.last().unwrap().id),
         };
-        // A line a block-start hook consumed is content, not blank,
-        // however empty the rest looks after the bump.
-        let blank = if self.line_consumed {
-            self.line_consumed = false;
-            false
-        } else {
-            cursor.blank_from_here()
-        };
+        // A line a hook consumed leaves the parse at the line's end, and the
+        // reference's flag pass reads that residual position as blank, so
+        // extension blocks that take whole lines count as ending blank.
+        let blank = cursor.blank_from_here();
         let on_stack = self.open.iter().position(|frame| frame.id == target);
         self.update_last_line_blank(target, on_stack, blank);
     }
@@ -524,7 +552,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 if cursor.blank_from_here() {
                     return WalkResult::FailedAt(depth);
                 }
-                let (pos, col) = cursor.find_nonspace();
+                let (pos, _) = cursor.find_nonspace();
                 let line = &cursor.line()[pos..];
                 let mut inner = state.take();
                 let state_ref: Option<&mut dyn std::any::Any> =
@@ -536,7 +564,9 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 let matched = self.extensions.unwrap()[*index].try_continue(&mut ctx);
                 *state = inner;
                 if matched {
-                    cursor.set_pos_col(pos, col);
+                    // The reference leaves the offset at the last matched
+                    // container prefix; consuming the row here would erase
+                    // the line's indentation and hide later block starts.
                 } else {
                     return WalkResult::FailedAt(depth);
                 }
@@ -895,12 +925,13 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         }
     }
 
-    /// Closes the paragraph and any list until a container that can hold a
-    /// list is open.
+    /// Closes the paragraph and any block in the way of a new list,
+    /// mirroring the reference's add-child walk: a list may live under
+    /// a document, block quote or item, so everything else closes.
     fn make_room_for_list(&mut self, line_stop: usize) {
-        while matches!(
+        while !matches!(
             self.open.last().unwrap().kind,
-            OpenKind::Paragraph { .. } | OpenKind::List(_)
+            OpenKind::Document | OpenKind::BlockQuote | OpenKind::Item { .. }
         ) {
             self.close_last(line_stop);
         }

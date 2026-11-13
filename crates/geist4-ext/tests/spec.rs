@@ -11,6 +11,7 @@ use geist4_core::parser::parse_with;
 use geist4_spec_harness::{parse, run};
 
 const STRIKETHROUGH_SPEC: &str = include_str!("../spec/strikethrough.md");
+const TABLES_SPEC: &str = include_str!("../spec/tables.md");
 
 /// Runs a spec file with `options` and requires every example to pass.
 fn run_spec(name: &str, spec: &str, options: &Options) {
@@ -35,6 +36,37 @@ fn strikethrough_spec() {
     let mut options = Options::new();
     options.extension(geist4_ext::strikethrough());
     run_spec("strikethrough", STRIKETHROUGH_SPEC, &options);
+}
+
+#[test]
+fn tables_spec() {
+    let mut options = Options::new();
+    options.extension(geist4_ext::tables());
+    run_spec("tables", TABLES_SPEC, &options);
+}
+
+/// With no extensions, pipe rows stay plain paragraphs: the same sources
+/// that build tables with the extension must not change plain output.
+#[test]
+fn tables_off_leaves_plain_commonmark() {
+    let cases = [
+        "| a | b |\n| --- | --- |\n| c | d |\n",
+        "text\n| a | b |\n| --- | --- |\n| c | d |\n",
+    ];
+    for source in cases {
+        let plain = render_with(&parse_with(source, &Options::new()), &Options::new());
+        let mut options = Options::new();
+        options.extension(geist4_ext::tables());
+        let tabled = render_with(&parse_with(source, &options), &options);
+        assert!(
+            plain.contains("<p>"),
+            "without the extension the rows stay a paragraph: {source:?}"
+        );
+        assert_ne!(
+            plain, tabled,
+            "the extension must change this output: {source:?}"
+        );
+    }
 }
 
 /// With no extensions, tilde runs are plain text: the same sources that

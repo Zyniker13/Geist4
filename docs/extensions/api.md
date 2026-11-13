@@ -61,6 +61,17 @@ Built-in extensions enforce the reference implementations' limits
 extensions inherit the format's limits (M6). A hook that returns an
 error aborts the parse with a span-carrying problem, not a panic.
 
+## Blocks that take whole lines
+
+A hook that consumes the line it acts on (`open_extension`,
+`convert_paragraph`, the consume-rest helper) leaves the parse at the
+line's end, and the parser records the block as ending on a blank
+line, exactly as the reference implementation does for its whole-line
+extension blocks. List tightness sees that: an item holding a table
+followed by a sibling item renders loose, matching the reference byte
+for byte. Hooks that only look at the line without consuming it do not
+affect the flags.
+
 ## Where to look
 
 - `geist4-core/src/extension.rs` — the traits and context types.
