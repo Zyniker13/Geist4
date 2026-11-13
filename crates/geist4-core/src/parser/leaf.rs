@@ -154,7 +154,7 @@ pub(super) fn setext_underline(c: &Cursor) -> Option<u8> {
 pub(super) fn atx_heading(c: &Cursor) -> Option<(u8, String)> {
     let line = c.line();
     let mut pos = c.pos();
-    let mut level = 0u8;
+    let mut level = 0usize;
     while line.get(pos) == Some(&b'#') {
         level += 1;
         pos += 1;
@@ -197,7 +197,7 @@ pub(super) fn atx_heading(c: &Cursor) -> Option<(u8, String)> {
     ) {
         text.pop();
     }
-    Some((level, text))
+    Some((level as u8, text))
 }
 
 /// Scans a fenced code block start at the cursor: three or more backticks or
