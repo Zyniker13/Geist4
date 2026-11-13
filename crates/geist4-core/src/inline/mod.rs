@@ -49,6 +49,11 @@ pub(crate) enum Kind {
     Emph,
     /// Strong emphasis; children are its content.
     Strong,
+    /// A backslash-escaped character; its only child is the character
+    /// as text. The wrapper keeps hooks that read the sibling chain —
+    /// the footnote claim, for one — from seeing the escaped character
+    /// as ordinary text, exactly as the reference's own wrapper does.
+    Escaped,
     /// An extension's node; children are its content, and the kind
     /// name selects the extension's renderer.
     Ext {
@@ -127,8 +132,12 @@ impl DelimList {
 /// One open link or image bracket.
 struct Bracket {
     image: bool,
-    /// The text node holding `[` or `![`.
+    /// The text node holding `[`.
     node: u32,
+    /// For an image bracket, the text node holding the `!` before the
+    /// `[`. A footnote claim consumes the bracket but leaves the
+    /// marker; a matched link removes both.
+    bang: Option<u32>,
     /// The input position of the bracket's start.
     position: usize,
     /// Whether another bracket opened between this one and the current
@@ -321,6 +330,21 @@ fn attach_pool(
         let cell = &mut pool[cell_id as usize];
         let kind = std::mem::replace(&mut cell.kind, Kind::Text(String::new()));
         let first_child = cell.first_child;
+        // An escaped character's wrapper dissolves here: its text
+        // joins the wrapper's siblings in its place, so nothing past
+        // the inline phase ever sees the wrapper.
+        if matches!(kind, Kind::Escaped) {
+            let mut kid = first_child;
+            while let Some(child) = kid {
+                if pool[child as usize].alive {
+                    kids.push(child);
+                }
+                kid = pool[child as usize].next;
+            }
+            kids.reverse();
+            work.extend(kids.drain(..).map(|child| (arena_parent, child)));
+            continue;
+        }
         let node = node_from_kind(kind);
         let id = arena.alloc(node, crate::span::Span::empty(0));
         arena.push_child(arena_parent, id);
@@ -347,10 +371,10 @@ fn node_from_kind(kind: Kind) -> Node<'static> {
         Kind::HardBreak => Node::HardBreak,
         Kind::Emph => Node::Emphasis,
         Kind::Strong => Node::Strong,
-        Kind::Ext { kind, attrs } => Node::Extension(crate::extension::ExtNode {
-            kind,
-            attrs,
-        }),
+        // Dissolved in `attach_pool` before this match; a stray one
+        // would be a wrapper the walk skipped.
+        Kind::Escaped => unreachable!("escaped wrapper survived to the arena"),
+        Kind::Ext { kind, attrs } => Node::Extension(crate::extension::ExtNode { kind, attrs }),
         Kind::Link { url, title, image } => Node::Link(crate::node::LinkData {
             url: url.into(),
             title: title.map(std::borrow::Cow::Owned),
@@ -682,9 +706,14 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                 b'[' => self.handle_open_bracket(),
                 b'!' => {
                     if self.bytes.get(self.pos + 1) == Some(&b'[') {
-                        let id = self.push(Kind::Text("![".to_string()));
-                        self.pos += 2;
-                        self.push_bracket(true, id);
+                        // The image marker stays a text node of its own,
+                        // as the reference keeps it: a footnote claim
+                        // leaves it behind, a matched link removes it.
+                        let bang = self.push(Kind::Text("!".to_string()));
+                        self.pos += 1;
+                        let id = self.push(Kind::Text("[".to_string()));
+                        self.pos += 1;
+                        self.push_bracket(true, id, Some(bang));
                     } else {
                         self.pos += 1;
                         self.push(Kind::Text("!".to_string()));
@@ -846,13 +875,14 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
     }
 
     /// Pushes a bracket onto the bracket stack.
-    fn push_bracket(&mut self, image: bool, node: u32) {
+    fn push_bracket(&mut self, image: bool, node: u32, bang: Option<u32>) {
         if let Some(last) = self.brackets.last_mut() {
             last.bracket_after = true;
         }
         self.brackets.push(Bracket {
             image,
             node,
+            bang,
             position: self.pos,
             bracket_after: false,
         });
@@ -914,7 +944,15 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
         match self.bytes.get(self.pos).copied() {
             Some(next) if is_ascii_punct_byte(next) => {
                 self.pos += 1;
-                self.push(Kind::Text((next as char).to_string()));
+                // The escaped character sits in a wrapper of its own,
+                // matching the reference's node for an escape: hooks
+                // reading the sibling chain see the wrapper, not text.
+                let esc = self.alloc(Kind::Escaped);
+                let text = self.alloc(Kind::Text((next as char).to_string()));
+                self.pool[text as usize].parent = Some(esc);
+                self.pool[esc as usize].first_child = Some(text);
+                self.pool[esc as usize].last_child = Some(text);
+                self.append(esc);
             }
             Some(b'\r') | Some(b'\n') => {
                 self.handle_newline_raw();
@@ -1141,7 +1179,7 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
     fn handle_open_bracket(&mut self) {
         let id = self.push(Kind::Text("[".to_string()));
         self.pos += 1;
-        self.push_bracket(false, id);
+        self.push_bracket(false, id, None);
     }
 
     /// Closes a bracket: an inline link, a reference link, or plain text.
@@ -1250,6 +1288,10 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                 self.tail = Some(opener_node);
                 self.insert_before(link_id, opener_node);
                 self.kill(opener_node);
+                // A matched image takes its marker with it.
+                if let Some(bang) = self.brackets[opener_index].bang {
+                    self.kill(bang);
+                }
                 self.process_emphasis(opener_position);
                 self.brackets.pop();
                 if !is_image {
@@ -1266,7 +1308,7 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                 let mut claimed: Option<(String, Vec<(String, crate::extension::AttrValue)>)> =
                     None;
                 if let Some(extensions) = self.extensions {
-                    let mut inner = BracketInner {
+                    let inner = BracketInner {
                         parser: &mut *self,
                         opener_node,
                         opener_position,

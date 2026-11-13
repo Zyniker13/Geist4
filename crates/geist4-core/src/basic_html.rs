@@ -177,8 +177,13 @@ impl Renderer<'_> {
                     crate::node::Node::Extension(ext) => Some(ext),
                     _ => None,
                 };
+                let core_kind = match arena.kind(*child) {
+                    crate::node::Node::Extension(_) => None,
+                    core => Some(core.kind_name()),
+                };
                 crate::extension::RenderedChild {
                     node,
+                    core_kind,
                     html: self.child_html(*child, inline),
                 }
             })
@@ -511,7 +516,9 @@ fn is_dangerous_url(url: &str) -> bool {
 
 /// Escapes a URL for use in an `href` or `src` attribute: bytes outside
 /// the safe set percent-encode, and `&` and `'` become entities.
-fn escape_href(url: &str) -> String {
+/// Extensions rendering URLs of their own use the same escaping, so
+/// attributes stay consistent across the built-in and extension output.
+pub fn escape_href(url: &str) -> String {
     const HREF_SAFE: [bool; 256] = {
         let mut table = [false; 256];
         let mut i = 0usize;

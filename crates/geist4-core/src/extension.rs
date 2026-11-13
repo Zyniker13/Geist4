@@ -65,6 +65,12 @@ pub struct KindDecl {
 pub struct RenderedChild<'a> {
     /// The child's node, when the child is an extension node.
     pub node: Option<&'a ExtNode>,
+    /// The child's core kind name, when the child is a core node
+    /// (see [`crate::node::Node::kind_name`]). Extension children
+    /// carry `None` here and their kind in `node` instead, so a hook
+    /// can tell what kind of block each child is without matching on
+    /// rendered HTML.
+    pub core_kind: Option<&'static str>,
     /// The child's rendered HTML.
     pub html: String,
 }
@@ -548,6 +554,15 @@ impl<'c, 's, 'l> BlockContinueCtx<'c, 's, 'l> {
     /// line.
     pub fn pure_blank(&self) -> bool {
         self.cursor.rest_len() == 0
+    }
+
+    /// The columns between the cursor and the line's first non-space
+    /// byte — the leading indentation the hook may consume from.
+    #[must_use]
+    pub fn indent(&self) -> usize {
+        let (pos, col) = self.cursor.find_nonspace();
+        let _ = pos;
+        col - self.cursor.col()
     }
 
     /// The open block's state, downcast to the extension's own type.

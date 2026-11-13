@@ -282,6 +282,7 @@ dependencies = [
 name = "geist4-ext"
 version = "0.1.0-dev"
 dependencies = [
+ "caseless",
  "geist4-core",
  "geist4-spec-harness",
 ]

@@ -94,7 +94,14 @@ pub fn tagfilter() -> std::sync::Arc<dyn Extension> {
     tagfilter::tagfilter()
 }
 
+/// The footnotes extension as a shared extension value.
+#[must_use]
+pub fn footnotes() -> std::sync::Arc<dyn Extension> {
+    footnotes::footnotes()
+}
+
 pub mod autolink;
+pub mod footnotes;
 pub mod tables;
 pub mod tagfilter;
 pub mod tasklist;

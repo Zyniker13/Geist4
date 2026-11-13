@@ -56,9 +56,11 @@ cargo fuzz cmin to_html                                         # minimize the c
 A three-minute run per target is what CI (`.github/workflows/fuzz.yml`)
 executes on every push; the hour-long runs are for after each milestone,
 with results recorded under Results below. The extension target
-(`parse_with_extension`) parses and renders with the strikethrough
-built-in registered, so the inline trigger dispatch, the extension
-delimiter machinery and the extension renderer get mutated input.
+(`parse_with_extension`) parses and renders with every built-in
+registered — tables, strikethrough, autolink, tasklist, tagfilter and
+footnotes — so the inline trigger dispatch, the extension delimiter
+machinery, the bracket claim, the output filter and the post-process
+tree surgery all get mutated input.
 
 The minimized corpus is not committed in full (it is tens of megabytes
 of near-duplicate files); instead a deterministic subset is checked in

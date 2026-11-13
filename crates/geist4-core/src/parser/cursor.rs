@@ -52,7 +52,7 @@ impl<'t> Cursor<'t> {
     }
 
     /// The current virtual column.
-    pub(super) fn col(&self) -> usize {
+    pub(crate) fn col(&self) -> usize {
         self.col
     }
 

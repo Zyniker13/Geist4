@@ -15,6 +15,7 @@ const TABLES_SPEC: &str = include_str!("../spec/tables.md");
 const AUTOLINK_SPEC: &str = include_str!("../spec/autolink.md");
 const TASKLIST_SPEC: &str = include_str!("../spec/tasklist.md");
 const TAGFILTER_SPEC: &str = include_str!("../spec/tagfilter.md");
+const FOOTNOTES_SPEC: &str = include_str!("../spec/footnotes.md");
 
 /// Runs a spec file with `options` and requires every example to pass.
 fn run_spec(name: &str, spec: &str, options: &Options) {
@@ -67,6 +68,13 @@ fn tagfilter_spec() {
     let mut options = Options::new();
     options.extension(geist4_ext::tagfilter());
     run_spec("tagfilter", TAGFILTER_SPEC, &options);
+}
+
+#[test]
+fn footnotes_spec() {
+    let mut options = Options::new();
+    options.extension(geist4_ext::footnotes());
+    run_spec("footnotes", FOOTNOTES_SPEC, &options);
 }
 
 /// With no extensions, blacklisted raw HTML passes through untouched:
@@ -185,6 +193,34 @@ fn strikethrough_off_leaves_plain_commonmark() {
         assert_ne!(
             plain, struck,
             "the extension must change this output: {source:?}"
+        );
+    }
+}
+
+/// With no extensions, `[^label]` runs stay literal text: the same
+/// sources that carry references and definitions with the extension
+/// must not change plain CommonMark output. A definition line reads as
+/// a link reference definition without the extension, and its bracket
+/// then resolves as a reference link — plain CommonMark behavior the
+/// extension replaces with the footnote. A reference with no
+/// definition at all renders the same both ways.
+#[test]
+fn footnotes_off_leaves_plain_commonmark() {
+    for source in ["x[^1]\n\n[^1]: note\n", "a[^x] b[^x]\n\n[^x]: y\n"] {
+        let plain = render_with(&parse_with(source, &Options::new()), &Options::new());
+        let mut options = Options::new();
+        options.extension(geist4_ext::footnotes());
+        let footnoted = render_with(&parse_with(source, &options), &options);
+        assert_ne!(
+            plain, footnoted,
+            "the extension must change this output: {source:?}"
+        );
+    }
+    for source in ["x[^1]\n", "[^1]\n"] {
+        let plain = render_with(&parse_with(source, &Options::new()), &Options::new());
+        assert!(
+            plain.contains("[^"),
+            "without the extension the marker stays literal: {source:?}"
         );
     }
 }

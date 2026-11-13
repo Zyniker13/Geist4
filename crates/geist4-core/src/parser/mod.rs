@@ -1381,9 +1381,10 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 // paragraph inside it. Line-accumulator blocks get the
                 // whole leftover line; should a hook decline after its
                 // continuation matched, that is the leftover's only use.
-                if self.extensions.is_some_and(|extensions| {
-                    extensions[*index].contains_blocks()
-                }) {
+                if self
+                    .extensions
+                    .is_some_and(|extensions| extensions[*index].contains_blocks())
+                {
                     if cursor.blank_from_here() {
                         None
                     } else {

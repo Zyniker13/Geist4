@@ -121,3 +121,35 @@ pub struct LinkData<'a> {
     /// Whether this is an image (`![text](url)`) rather than a link.
     pub image: bool,
 }
+
+impl<'a> Node<'a> {
+    /// The node's kind name, stable across versions: `document`,
+    /// `blockquote`, `list`, `item`, `heading`, `thematic_break`,
+    /// `paragraph`, `code_block`, `html_block`, `text`, `code_span`,
+    /// `inline_html`, `soft_break`, `hard_break`, `emphasis`,
+    /// `strong`, `link`. Extension nodes use the extension's kind
+    /// name instead, so this is only called on core nodes.
+    #[must_use]
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            Node::Document => "document",
+            Node::BlockQuote => "blockquote",
+            Node::List(_) => "list",
+            Node::Item(_) => "item",
+            Node::Heading(_) => "heading",
+            Node::ThematicBreak => "thematic_break",
+            Node::Paragraph => "paragraph",
+            Node::CodeBlock(_) => "code_block",
+            Node::HtmlBlock(_) => "html_block",
+            Node::Text(_) => "text",
+            Node::CodeSpan(_) => "code_span",
+            Node::InlineHtml(_) => "inline_html",
+            Node::SoftBreak => "soft_break",
+            Node::HardBreak => "hard_break",
+            Node::Emphasis => "emphasis",
+            Node::Strong => "strong",
+            Node::Link(_) => "link",
+            Node::Extension(_) => "extension",
+        }
+    }
+}
