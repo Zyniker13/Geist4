@@ -44,6 +44,9 @@ pub fn render_with(
             .collect(),
         out: String::new(),
     };
+    for extension in options.extensions() {
+        extension.begin_render();
+    }
     let mut stack: Vec<Step> = document
         .arena
         .children(document.root)
@@ -53,6 +56,9 @@ pub fn render_with(
         .collect();
     while let Some(step) = stack.pop() {
         renderer.run(step, &mut stack);
+    }
+    for extension in options.extensions() {
+        extension.document_suffix(&mut renderer.out);
     }
     if renderer.out.ends_with('\n') {
         renderer.out.pop();

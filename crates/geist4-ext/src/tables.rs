@@ -117,7 +117,7 @@ impl Extension for Tables {
         }
     }
 
-    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_>) -> bool {
+    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> bool {
         // The table continues on any line that parses as a row with at
         // least one cell; a blank line or anything else closes it.
         scan_row(ctx.line()).is_some()

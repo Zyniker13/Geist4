@@ -54,6 +54,9 @@ pub(crate) enum Kind {
     Ext {
         /// The kind name, as the extension declared it.
         kind: String,
+        /// Attributes the creating hook set; empty for the built-in
+        /// wraps.
+        attrs: Vec<(String, crate::extension::AttrValue)>,
     },
     /// A link or image; children are its content.
     Link {
@@ -344,15 +347,105 @@ fn node_from_kind(kind: Kind) -> Node<'static> {
         Kind::HardBreak => Node::HardBreak,
         Kind::Emph => Node::Emphasis,
         Kind::Strong => Node::Strong,
-        Kind::Ext { kind } => Node::Extension(crate::extension::ExtNode {
+        Kind::Ext { kind, attrs } => Node::Extension(crate::extension::ExtNode {
             kind,
-            attrs: Vec::new(),
+            attrs,
         }),
         Kind::Link { url, title, image } => Node::Link(crate::node::LinkData {
             url: url.into(),
             title: title.map(std::borrow::Cow::Owned),
             image,
         }),
+    }
+}
+
+/// The state an inline bracket hook drives. Private to the engine; the
+/// public wrapper is `crate::extension::InlineBracketCtx`.
+pub(crate) struct BracketInner<'p, 'defs, 'a, 'ext> {
+    parser: &'p mut Parser<'defs, 'a, 'ext>,
+    /// The text node holding the bracket's `[`.
+    opener_node: u32,
+    /// The input position of the bracket's start.
+    opener_position: usize,
+    /// The group's text content, built on first use: `None` is not yet
+    /// built, `Some(None)` is a group with a non-text node inside,
+    /// `Some(Some)` is the built text.
+    content: Option<Option<String>>,
+    /// Set by a claim: the kind and attributes of the node that
+    /// replaces the group.
+    claimed: Option<(String, Vec<(String, crate::extension::AttrValue)>)>,
+}
+
+impl<'p, 'defs, 'a, 'ext> BracketInner<'p, 'defs, 'a, 'ext> {
+    /// The group's first content node's text, if any.
+    fn first_text(&self) -> Option<&str> {
+        let next = self.parser.pool[self.opener_node as usize].next?;
+        match &self.parser.pool[next as usize].kind {
+            crate::inline::Kind::Text(t) | crate::inline::Kind::Html(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    /// Builds the group's text content, or `None` when a non-text node
+    /// sits inside the brackets.
+    fn build_content(&mut self) -> Option<String> {
+        if let Some(cached) = &self.content {
+            return cached.clone();
+        }
+        let mut text = String::new();
+        let mut ok = true;
+        let mut id = self.parser.pool[self.opener_node as usize].next;
+        while let Some(cur) = id {
+            match &self.parser.pool[cur as usize].kind {
+                crate::inline::Kind::Text(t) | crate::inline::Kind::Html(t) => text.push_str(t),
+                _ => {
+                    ok = false;
+                    break;
+                }
+            }
+            id = self.parser.pool[cur as usize].next;
+        }
+        let built = ok.then_some(text);
+        self.content = Some(built.clone());
+        built
+    }
+}
+
+impl<'p, 'defs, 'a, 'ext> crate::extension::InlineBracketCtx<'p, 'defs, 'a, 'ext> {
+    /// Whether the `[`…`]` group's text content starts with `prefix`.
+    /// This reads only the group's first node, so a hook that checks it
+    /// before building the content stays cheap on bracket-heavy input.
+    pub fn content_starts_with(&mut self, prefix: &[u8]) -> bool {
+        self.inner
+            .first_text()
+            .is_some_and(|t| t.as_bytes().starts_with(prefix))
+    }
+
+    /// The `[`…`]` group's text content: every Text and inline HTML
+    /// node between the brackets, concatenated, already entity-decoded
+    /// where the inline phase decoded it. `None` when a code span,
+    /// emphasis, break or other non-text node sits inside the brackets.
+    /// Build this only after [`content_starts_with`](Self::content_starts_with)
+    /// passed, so bracket-heavy input stays linear.
+    pub fn content(&mut self) -> Option<&str> {
+        self.inner.build_content();
+        self.inner.content.as_ref().and_then(|c| c.as_deref())
+    }
+
+    /// The input position of the bracket's opening `[`.
+    #[must_use]
+    pub fn opener_position(&self) -> usize {
+        self.inner.opener_position
+    }
+
+    /// Claims the whole `[`…`]` group — the opening bracket, its
+    /// content nodes and the closing bracket — as one inline node of
+    /// `kind` carrying `attrs`. The node has no children. Several
+    /// hooks may run; the first claim wins.
+    pub fn claim(&mut self, kind: String, attrs: Vec<(String, crate::extension::AttrValue)>) {
+        if self.inner.claimed.is_none() {
+            self.inner.claimed = Some((kind, attrs));
+        }
     }
 }
 
@@ -732,6 +825,24 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
     fn kill(&mut self, id: u32) {
         self.unlink(id);
         self.pool[id as usize].alive = false;
+    }
+
+    /// Removes every delimiter run opened after `position`, the way
+    /// the reference parser cleans up when a bracket group is claimed:
+    /// the runs inside the group never pair with anything after it.
+    fn remove_delimiters_since(&mut self, position: usize) {
+        let mut id = self.delims.last;
+        while let Some(cur) = id {
+            let (prev, cell_position) = {
+                let cell = &self.delims.cells[cur as usize];
+                (cell.prev, cell.position)
+            };
+            if cell_position <= position {
+                break;
+            }
+            self.delims.remove(cur);
+            id = prev;
+        }
     }
 
     /// Pushes a bracket onto the bracket stack.
@@ -1146,9 +1257,46 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                 }
             }
             None => {
-                self.brackets.pop();
-                self.pos = initial_pos;
-                self.push(Kind::Text("]".to_string()));
+                // An extension may claim the group as one inline node.
+                // The hooks materialize the group's text lazily —
+                // through content_starts_with first — so the plain
+                // path and bracket-heavy input stay linear.
+                let opener_node = self.brackets[opener_index].node;
+                let opener_position = self.brackets[opener_index].position;
+                let mut claimed: Option<(String, Vec<(String, crate::extension::AttrValue)>)> =
+                    None;
+                if let Some(extensions) = self.extensions {
+                    let mut inner = BracketInner {
+                        parser: &mut *self,
+                        opener_node,
+                        opener_position,
+                        content: None,
+                        claimed: None,
+                    };
+                    let mut ctx = crate::extension::InlineBracketCtx { inner };
+                    for extension in extensions {
+                        extension.inline_bracket(&mut ctx);
+                    }
+                    claimed = ctx.inner.claimed;
+                }
+                if let Some((kind, attrs)) = claimed {
+                    self.pos = initial_pos;
+                    let ext_id = self.alloc(Kind::Ext { kind, attrs });
+                    self.insert_before(ext_id, opener_node);
+                    let mut id = self.pool[opener_node as usize].next;
+                    while let Some(cur) = id {
+                        let next = self.pool[cur as usize].next;
+                        self.kill(cur);
+                        id = next;
+                    }
+                    self.kill(opener_node);
+                    self.remove_delimiters_since(opener_position);
+                    self.brackets.pop();
+                } else {
+                    self.brackets.pop();
+                    self.pos = initial_pos;
+                    self.push(Kind::Text("]".to_string()));
+                }
             }
         }
     }
@@ -1294,6 +1442,7 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
             // The opener's text node becomes the extension container.
             self.pool[opener_node as usize].kind = Kind::Ext {
                 kind: kind.to_owned(),
+                attrs: Vec::new(),
             };
             let first = self.pool[opener_node as usize].next;
             let last = self.pool[closer_node as usize].prev;

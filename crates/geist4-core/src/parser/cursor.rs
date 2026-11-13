@@ -7,7 +7,7 @@
 
 /// A cursor over a line of source text.
 #[derive(Debug, Clone)]
-pub(super) struct Cursor<'t> {
+pub(crate) struct Cursor<'t> {
     /// The line's bytes, without its line ending.
     line: &'t [u8],
     /// The byte position within the line.
@@ -22,7 +22,7 @@ pub(super) struct Cursor<'t> {
 
 impl<'t> Cursor<'t> {
     /// Creates a cursor at the start of `line`.
-    pub(super) fn new(line: &'t [u8]) -> Self {
+    pub(crate) fn new(line: &'t [u8]) -> Self {
         Cursor {
             line,
             pos: 0,
@@ -32,17 +32,17 @@ impl<'t> Cursor<'t> {
     }
 
     /// The next byte, without advancing.
-    pub(super) fn peek(&self) -> Option<u8> {
+    pub(crate) fn peek(&self) -> Option<u8> {
         self.line.get(self.pos).copied()
     }
 
     /// The byte `n` positions ahead, without advancing.
-    pub(super) fn peek_at(&self, n: usize) -> Option<u8> {
+    pub(crate) fn peek_at(&self, n: usize) -> Option<u8> {
         self.line.get(self.pos + n).copied()
     }
 
     /// Whether the cursor is at the end of the line.
-    pub(super) fn at_end(&self) -> bool {
+    pub(crate) fn at_end(&self) -> bool {
         self.pos >= self.line.len()
     }
 
@@ -79,7 +79,7 @@ impl<'t> Cursor<'t> {
 
     /// The position and virtual column of the next byte that is not a space
     /// or tab, counting from the cursor.
-    pub(super) fn find_nonspace(&self) -> (usize, usize) {
+    pub(crate) fn find_nonspace(&self) -> (usize, usize) {
         let mut pos = self.pos;
         let mut col = self.col;
         while let Some(&b) = self.line.get(pos) {
@@ -106,7 +106,7 @@ impl<'t> Cursor<'t> {
     /// Returns false if the line ends first. When the advance lands inside a
     /// tab, the cursor stays on the tab byte and records the remaining
     /// columns, which the content-taking methods turn into spaces.
-    pub(super) fn advance_cols(&mut self, n: usize) -> bool {
+    pub(crate) fn advance_cols(&mut self, n: usize) -> bool {
         let mut left = n;
         while left > 0 {
             let Some(&b) = self.line.get(self.pos) else {
@@ -134,20 +134,41 @@ impl<'t> Cursor<'t> {
     }
 
     /// Moves the cursor to the first non-space byte from here.
-    pub(super) fn skip_to_content(&mut self) {
+    pub(crate) fn skip_to_content(&mut self) {
         let (pos, col) = self.find_nonspace();
         self.pos = pos;
         self.col = col;
         self.partial_tab = 0;
     }
 
+    /// Advances `n` bytes, tracking the column the way
+    /// [`advance_cols`](Self::advance_cols) does; a tab inside the run
+    /// moves to the tab's own column end. Used by hooks that matched a
+    /// marker by byte length.
+    pub(crate) fn advance_bytes(&mut self, n: usize) {
+        for _ in 0..n {
+            if self.at_end() {
+                return;
+            }
+            if self.line[self.pos] == b'\t' {
+                let chars_to_tab = 4 - self.col % 4;
+                self.col += chars_to_tab;
+                self.pos += 1;
+                self.partial_tab = 0;
+            } else {
+                self.pos += 1;
+                self.col += 1;
+            }
+        }
+    }
+
     /// The line's bytes, without its line ending.
-    pub(super) fn line(&self) -> &'t [u8] {
+    pub(crate) fn line(&self) -> &'t [u8] {
         self.line
     }
 
     /// The number of bytes left from the cursor to the line's end.
-    pub(super) fn rest_len(&self) -> usize {
+    pub(crate) fn rest_len(&self) -> usize {
         self.line.len() - self.pos
     }
 

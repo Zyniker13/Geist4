@@ -150,6 +150,55 @@ pub trait Extension: Send + Sync {
         let _ = ctx;
     }
 
+    /// Runs when a `[`…`]` group matched no link: neither an inline
+    /// `(` destination, nor a reference definition, nor an opener
+    /// match. The hook may claim the whole group as one inline node of
+    /// its own with [`claim`](InlineBracketCtx::claim). Check
+    /// [`content_starts_with`](InlineBracketCtx::content_starts_with)
+    /// before reading
+    /// [`content`](InlineBracketCtx::content) — content exists only
+    /// when the group is plain text and inline HTML, and building it
+    /// per close bracket would make bracket-heavy input quadratic.
+    /// An unclaimed group stays literal text, exactly as without the
+    /// hook.
+    fn inline_bracket(&self, ctx: &mut InlineBracketCtx<'_, '_, '_, '_>) {
+        let _ = ctx;
+    }
+
+    /// Whether this extension's blocks hold other blocks: while one of
+    /// them is open, the parser opens paragraphs, lists, quotes, code
+    /// and other blocks inside it, the way it opens blocks inside a
+    /// block quote or list item. Extension blocks without this are
+    /// line accumulators: their lines are kept in the hook's state and
+    /// [`close`](Extension::close) builds the children.
+    fn contains_blocks(&self) -> bool {
+        false
+    }
+
+    /// A pure look at a line, answering whether this extension would
+    /// start a block on it. The parser consults it when a lazy
+    /// paragraph continuation is considered, so a line that would open
+    /// one of this extension's blocks never lazily continues the
+    /// paragraph — the same role the built-in block starts play there.
+    /// It must not change any state.
+    fn block_start_looks(&self, line: &[u8]) -> bool {
+        let _ = line;
+        false
+    }
+
+    /// Runs once at the start of each HTML render, before the first
+    /// node is rendered. Hooks reset their per-render state here, so
+    /// extensions that count or wrap output start clean even though
+    /// the extension object itself is shared across renders.
+    fn begin_render(&self) {}
+
+    /// Runs once at the end of each HTML render, after the last node.
+    /// The hook appends its output to `out` — a wrapper an extension
+    /// opened during the render closes here.
+    fn document_suffix(&self, out: &mut String) {
+        let _ = out;
+    }
+
     /// Runs once after the document tree is complete, before the
     /// document is returned. Hooks may rewrite kinds, set attributes,
     /// or splice nodes; this is where heading identifiers, task list
@@ -220,7 +269,7 @@ pub trait Extension: Send + Sync {
     /// blocks. The hook may read the block's state; it should not
     /// depend on mutations here surviving, because a line that both
     /// continues the block and starts a new one closes it first.
-    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_>) -> bool {
+    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> bool {
         let _ = ctx;
         false
     }
@@ -301,13 +350,27 @@ pub struct BlockStartCtx<'p, 'a, 'l, 'ext> {
     pub(crate) inner: crate::parser::StartInner<'p, 'a, 'l, 'ext>,
 }
 
+/// The context an inline bracket hook runs with.
+///
+/// The inline parser hands the hook the plain-text content of a
+/// `[`…`]` group that matched no link, plus the input positions of the
+/// brackets. Claiming replaces the group — the `[`, the content nodes
+/// and the `]` — with one inline node of the hook's kind, the way the
+/// emphasis machinery replaces its run pairs.
+pub struct InlineBracketCtx<'p, 'defs, 'a, 'ext> {
+    pub(crate) inner: crate::inline::BracketInner<'p, 'defs, 'a, 'ext>,
+}
+
 /// The context of the block-continuation hook.
-pub struct BlockContinueCtx<'c, 's> {
+pub struct BlockContinueCtx<'c, 's, 'l> {
     /// The line's content from its first non-space byte, without the
     /// line ending.
     pub(crate) line: &'c [u8],
     /// The open block's state, taken out of the frame for the hook.
     pub(crate) state: Option<&'s mut dyn std::any::Any>,
+    /// The line cursor, positioned where the container prefixes left
+    /// it; a hook that consumes a prefix off the line advances it.
+    pub(crate) cursor: &'c mut crate::parser::Cursor<'l>,
 }
 
 /// The context of the block-close hook.
@@ -448,19 +511,57 @@ impl<'p, 'a, 'l, 'ext> BlockStartCtx<'p, 'a, 'l, 'ext> {
     ) -> crate::arena::NodeId {
         self.inner.open_extension(kind, state)
     }
+
+    /// Opens a block like
+    /// [`open_extension`](Self::open_extension), but leaves the rest of
+    /// the line — everything after the marker the hook matched — for
+    /// the parser to add to the new block as its first paragraph. Call
+    /// [`seek_content`](Self::seek_content) to place the cursor first.
+    pub fn open_extension_keep_rest(
+        &mut self,
+        kind: String,
+        state: Box<dyn std::any::Any + Send>,
+    ) -> crate::arena::NodeId {
+        self.inner.open_extension_keep_rest(kind, state)
+    }
+
+    /// Moves the cursor to the line's first non-space byte and then
+    /// `n` bytes further — the content after the marker bytes the hook
+    /// matched. The hook opened its block with
+    /// [`open_extension_keep_rest`](Self::open_extension_keep_rest).
+    pub fn seek_content(&mut self, n: usize) {
+        self.inner.cursor.skip_to_content();
+        self.inner.cursor.advance_bytes(n);
+    }
 }
 
-impl<'c, 's> BlockContinueCtx<'c, 's> {
+impl<'c, 's, 'l> BlockContinueCtx<'c, 's, 'l> {
     /// The line's content from its first non-space byte, without the
     /// line ending.
     pub fn line(&self) -> &'c [u8] {
         self.line
     }
 
+    /// Whether nothing but the container prefixes remains on the line:
+    /// the line is blank after the prefixes the walk already consumed.
+    /// A continuation hook that accepts this must consume the whole
+    /// line.
+    pub fn pure_blank(&self) -> bool {
+        self.cursor.rest_len() == 0
+    }
+
     /// The open block's state, downcast to the extension's own type.
     pub fn state<T: std::any::Any>(&mut self) -> Option<&mut T> {
         let state = self.state.as_deref_mut()?;
         state.downcast_mut::<T>()
+    }
+
+    /// Consumes `n` more columns off the line, advancing the cursor
+    /// the way a container prefix does — through tabs, in columns. The
+    /// parser opens whatever follows the consumed prefix inside the
+    /// block.
+    pub fn consume_cols(&mut self, n: usize) {
+        self.cursor.advance_cols(n);
     }
 }
 

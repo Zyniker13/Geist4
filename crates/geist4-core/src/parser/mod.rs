@@ -17,7 +17,7 @@ mod leaf;
 use crate::arena::{Arena, NodeId};
 use crate::node::{CodeBlockData, HeadingData, HtmlBlockData, ItemData, LinkDef, ListData, Node};
 use crate::span::Span;
-use cursor::Cursor;
+pub(crate) use cursor::Cursor;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -192,7 +192,7 @@ struct Parser<'a, 'ext> {
 /// the parser; hooks reach the state through the context's methods.
 pub(crate) struct StartInner<'p, 'a, 'l, 'ext> {
     parser: &'p mut Parser<'a, 'ext>,
-    cursor: &'p mut Cursor<'l>,
+    pub(crate) cursor: &'p mut Cursor<'l>,
     line_offset: usize,
     line_stop: usize,
     line: &'l [u8],
@@ -419,6 +419,45 @@ impl<'p, 'a, 'l, 'ext> StartInner<'p, 'a, 'l, 'ext> {
         self.fired_node = Some(id);
         id
     }
+
+    /// Opens an extension block like
+    /// [`open_extension`](Self::open_extension), but leaves the line's
+    /// remaining bytes at the cursor for the parser to add to the new
+    /// block — the way a list item's marker is consumed and the item's
+    /// first line stays. The hook calls
+    /// [`seek_content`](Self::seek_content) to move the cursor past
+    /// its marker first.
+    pub(crate) fn open_extension_keep_rest(
+        &mut self,
+        kind: String,
+        state: Box<dyn std::any::Any + Send>,
+    ) -> NodeId {
+        self.parser.interrupt_paragraph(self.line_stop);
+        self.parser.close_until_can_contain(self.line_stop);
+        let parent = self.parser.open.last().unwrap().id;
+        let id = self.parser.arena.alloc(
+            Node::Extension(crate::extension::ExtNode {
+                kind,
+                attrs: Vec::new(),
+            }),
+            Span::empty(self.line_offset),
+        );
+        self.parser.arena.push_child(parent, id);
+        self.parser.last_line_blank.push(false);
+        self.parser.open.push(Frame {
+            id,
+            kind: OpenKind::Extension {
+                index: self.extension,
+                state: Some(state),
+            },
+            start_line: self.parser.line_number,
+            start_offset: self.line_offset,
+            end_offset: self.line_stop,
+        });
+        self.fired = true;
+        self.fired_node = Some(id);
+        id
+    }
 }
 
 impl<'a, 'ext> Parser<'a, 'ext> {
@@ -534,6 +573,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 if self.deepest_is_paragraph()
                     && !cursor.blank_from_here()
                     && !self.block_start_matches(&cursor)
+                    && !self.extension_block_start_looks(&cursor)
                 {
                     // The line's leading whitespace stays in the buffer;
                     // the inline phase strips it after each newline, and a
@@ -578,9 +618,6 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             // Extension frames need mutable access to their state, so
             // they are matched before the shared-borrow match below.
             if let OpenKind::Extension { index, state } = &mut self.open[depth].kind {
-                if cursor.blank_from_here() {
-                    return WalkResult::FailedAt(depth);
-                }
                 let (pos, _) = cursor.find_nonspace();
                 let line = &cursor.line()[pos..];
                 let mut inner = state.take();
@@ -589,13 +626,15 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 let mut ctx = crate::extension::BlockContinueCtx {
                     line,
                     state: state_ref,
+                    cursor,
                 };
                 let matched = self.extensions.unwrap()[*index].try_continue(&mut ctx);
                 *state = inner;
                 if matched {
-                    // The reference leaves the offset at the last matched
-                    // container prefix; consuming the row here would erase
-                    // the line's indentation and hide later block starts.
+                    // The hook consumed its prefix, and any extra columns
+                    // it declared, through the context's cursor. Blank
+                    // lines reach the hook here too: unlike the built-in
+                    // containers, a hook decides on the whole line.
                 } else {
                     return WalkResult::FailedAt(depth);
                 }
@@ -690,6 +729,35 @@ impl<'a, 'ext> Parser<'a, 'ext> {
     /// Whether the deepest open block is a paragraph.
     fn deepest_is_paragraph(&self) -> bool {
         matches!(self.open.last().unwrap().kind, OpenKind::Paragraph { .. })
+    }
+
+    /// Whether a registered extension would start a block on this line;
+    /// the lazy continuation check consults it after the built-in starts.
+    fn extension_block_start_looks(&self, cursor: &Cursor<'_>) -> bool {
+        let Some(extensions) = self.extensions else {
+            return false;
+        };
+        let (pos, _) = cursor.find_nonspace();
+        if pos >= cursor.line().len() {
+            return false;
+        }
+        let line = &cursor.line()[pos..];
+        extensions
+            .iter()
+            .any(|extension| extension.block_start_looks(line))
+    }
+
+    /// Whether the deepest open frame is an extension block that holds
+    /// other blocks; such a frame is a container for the parser, like a
+    /// block quote or a list item.
+    fn deepest_extension_contains_blocks(&self) -> bool {
+        let Some(extensions) = self.extensions else {
+            return false;
+        };
+        match &self.open.last().unwrap().kind {
+            OpenKind::Extension { index, .. } => extensions[*index].contains_blocks(),
+            _ => false,
+        }
     }
 
     /// Whether the deepest open block is a leaf that takes no new children.
@@ -949,7 +1017,8 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         while !matches!(
             self.open.last().unwrap().kind,
             OpenKind::Document | OpenKind::BlockQuote | OpenKind::Item { .. }
-        ) {
+        ) && !self.deepest_extension_contains_blocks()
+        {
             self.close_last(line_stop);
         }
     }
@@ -961,7 +1030,8 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         while !matches!(
             self.open.last().unwrap().kind,
             OpenKind::Document | OpenKind::BlockQuote | OpenKind::Item { .. }
-        ) {
+        ) && !self.deepest_extension_contains_blocks()
+        {
             self.close_last(line_stop);
         }
     }
@@ -1304,15 +1374,29 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 self.append_paragraph_rest(id, cursor, line_offset);
                 Some(id)
             }
-            OpenKind::Extension { .. } => {
-                // The block-start hook consumed the line when it opened
-                // or continued the block; should a hook decline after its
-                // continuation matched, the leftover line is consumed
-                // here rather than lost.
-                if cursor.rest_len() > 0 {
-                    cursor.bump_all();
+            OpenKind::Extension { index, .. } => {
+                // An extension block that holds other blocks is a
+                // container here, like the block quote and item arms
+                // below: blank lines add nothing, other lines start a
+                // paragraph inside it. Line-accumulator blocks get the
+                // whole leftover line; should a hook decline after its
+                // continuation matched, that is the leftover's only use.
+                if self.extensions.is_some_and(|extensions| {
+                    extensions[*index].contains_blocks()
+                }) {
+                    if cursor.blank_from_here() {
+                        None
+                    } else {
+                        cursor.skip_to_content();
+                        let text = self.line_rest_string(cursor, line_offset);
+                        Some(self.open_paragraph(&text, line_offset))
+                    }
+                } else {
+                    if cursor.rest_len() > 0 {
+                        cursor.bump_all();
+                    }
+                    Some(id)
                 }
-                Some(id)
             }
             OpenKind::CodeBlock { .. } => {
                 self.append_code_rest(id, cursor, line_offset);
