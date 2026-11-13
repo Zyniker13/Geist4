@@ -93,6 +93,19 @@ swallows bytes that would otherwise start emphasis or an entity —
 while the email pass works on the second, the same order the
 reference implementation uses.
 
+## Output filtering
+
+An extension that wants to police raw HTML output implements
+`filters_html` (returns true) and `html_filter`. The HTML renderer
+then runs every raw HTML literal — HTML blocks and inline raw HTML
+alike — through the registered filters: at each `<` in the literal it
+presents the bytes from that `<` on, and any filter returning false
+replaces that one `<` with `&lt;`. Nothing else in the literal
+changes. Parsing is untouched; the filter decides only about output,
+which is why the tagfilter built-in needs no node kinds and no hooks
+besides the filter. When no registered extension filters, the
+renderer keeps its verbatim path and the check costs nothing.
+
 ## Where to look
 
 - `geist4-core/src/extension.rs` — the traits and context types.

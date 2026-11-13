@@ -159,6 +159,24 @@ pub trait Extension: Send + Sync {
         let _ = ctx;
     }
 
+    /// Whether the HTML renderer must run raw HTML literals past this
+    /// extension's [`html_filter`](Extension::html_filter) hook.
+    /// Default false, so documents without a filtering extension pay
+    /// nothing.
+    fn filters_html(&self) -> bool {
+        false
+    }
+
+    /// Decides whether a raw HTML literal that starts at `<` may pass
+    /// through the output as is. Returning false has the renderer
+    /// replace that one `<` with `&lt;`; every other `<` in the same
+    /// literal is checked on its own, exactly like the reference's
+    /// html-filter hook. The default allows everything.
+    fn html_filter(&self, literal: &[u8]) -> bool {
+        let _ = literal;
+        true
+    }
+
     /// Renders one of this extension's nodes. `children` is the
     /// rendered HTML of the node's children along with their nodes;
     /// the hook appends its output to `out`. Children of a kind that

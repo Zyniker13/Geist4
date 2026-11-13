@@ -36,6 +36,12 @@ pub fn render_with(
     let mut renderer = Renderer {
         arena: &document.arena,
         extensions: options.extensions(),
+        filters: options
+            .extensions()
+            .iter()
+            .filter(|extension| extension.filters_html())
+            .cloned()
+            .collect(),
         out: String::new(),
     };
     let mut stack: Vec<Step> = document
@@ -61,6 +67,9 @@ enum Step {
     Cr,
     /// Writes pre-rendered text.
     Text(String),
+    /// Writes pre-rendered raw HTML text, running each `<` past the
+    /// filtering extensions when any are registered.
+    Filtered(String),
     /// Renders one block node; `tight` is true inside a tight list's item.
     Block(NodeId, bool),
     /// Renders one list item, whose children get `tight`.
@@ -77,10 +86,42 @@ enum Step {
 pub(crate) struct Renderer<'a> {
     pub(crate) arena: &'a Arena<'a>,
     pub(crate) extensions: &'a [std::sync::Arc<dyn crate::extension::Extension>],
+    /// The registered extensions that filter raw HTML output; empty
+    /// when none do, which keeps raw literals on their verbatim path.
+    pub(crate) filters: Vec<std::sync::Arc<dyn crate::extension::Extension>>,
     pub(crate) out: String,
 }
 
 impl Renderer<'_> {
+    /// Emits a raw HTML literal, running each `<` past the filtering
+    /// extensions when any are registered. A literal that starts at
+    /// (or holds) a disallowed tag start — tag name matched
+    /// case-insensitively, followed by whitespace, `>` or `/>` — has
+    /// that `<` replaced with `&lt;`; everything else passes through
+    /// byte for byte.
+    fn push_filtered(&mut self, literal: &str) {
+        if self.filters.is_empty() {
+            self.out.push_str(literal);
+            return;
+        }
+        let bytes = literal.as_bytes();
+        let mut start = 0;
+        while start < bytes.len() {
+            let Some(at) = literal[start..].find('<') else {
+                self.out.push_str(&literal[start..]);
+                break;
+            };
+            let at = start + at;
+            self.out.push_str(&literal[start..at]);
+            let allowed = self
+                .filters
+                .iter()
+                .all(|extension| extension.html_filter(&bytes[at..]));
+            self.out.push_str(if allowed { "<" } else { "&lt;" });
+            start = at + 1;
+        }
+    }
+
     /// Renders one child of an extension node into a fresh string,
     /// as inline content or as a block per the parent kind's
     /// declaration.
@@ -88,6 +129,7 @@ impl Renderer<'_> {
         let mut sub = Renderer {
             arena: self.arena,
             extensions: self.extensions,
+            filters: self.filters.clone(),
             out: String::new(),
         };
         let mut stack: Vec<Step> = Vec::new();
@@ -143,6 +185,7 @@ impl Renderer<'_> {
         match step {
             Step::Cr => self.cr(),
             Step::Text(text) => self.out.push_str(&text),
+            Step::Filtered(text) => self.push_filtered(&text),
             Step::Block(id, tight) => self.block(id, tight, stack),
             Step::Item(id, tight) => self.item(id, tight, stack),
             Step::Inline(id) => self.inline(id, stack),
@@ -245,9 +288,10 @@ impl Renderer<'_> {
                 // The literal's lines are already newline-terminated; emit
                 // it as-is between conditional newlines, as the reference
                 // renderer does, so trailing blank lines inside the block
-                // are preserved.
+                // are preserved. Each `<` runs past the filtering
+                // extensions when any are registered.
                 self.cr();
-                self.out.push_str(&data.literal);
+                self.push_filtered(&data.literal);
                 self.cr();
             }
             Node::Text(_) => {
@@ -361,7 +405,7 @@ impl Renderer<'_> {
                 Node::CodeSpan(text) => {
                     stack.push(Step::Text(format!("<code>{}</code>", escape_html(text))))
                 }
-                Node::InlineHtml(raw) => stack.push(Step::Text(raw.to_string())),
+                Node::InlineHtml(raw) => stack.push(Step::Filtered(raw.to_string())),
                 Node::SoftBreak => stack.push(Step::Text("\n".to_owned())),
                 Node::HardBreak => stack.push(Step::Text("<br />\n".to_owned())),
                 Node::Emphasis => {

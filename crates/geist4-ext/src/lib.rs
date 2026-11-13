@@ -88,6 +88,13 @@ pub fn tasklist() -> std::sync::Arc<dyn Extension> {
     tasklist::tasklist()
 }
 
+/// The disallowed raw HTML filter extension as a shared extension value.
+#[must_use]
+pub fn tagfilter() -> std::sync::Arc<dyn Extension> {
+    tagfilter::tagfilter()
+}
+
 pub mod autolink;
 pub mod tables;
+pub mod tagfilter;
 pub mod tasklist;

@@ -14,6 +14,7 @@ const STRIKETHROUGH_SPEC: &str = include_str!("../spec/strikethrough.md");
 const TABLES_SPEC: &str = include_str!("../spec/tables.md");
 const AUTOLINK_SPEC: &str = include_str!("../spec/autolink.md");
 const TASKLIST_SPEC: &str = include_str!("../spec/tasklist.md");
+const TAGFILTER_SPEC: &str = include_str!("../spec/tagfilter.md");
 
 /// Runs a spec file with `options` and requires every example to pass.
 fn run_spec(name: &str, spec: &str, options: &Options) {
@@ -59,6 +60,39 @@ fn tasklist_spec() {
     let mut options = Options::new();
     options.extension(geist4_ext::tasklist());
     run_spec("tasklist", TASKLIST_SPEC, &options);
+}
+
+#[test]
+fn tagfilter_spec() {
+    let mut options = Options::new();
+    options.extension(geist4_ext::tagfilter());
+    run_spec("tagfilter", TAGFILTER_SPEC, &options);
+}
+
+/// With no extensions, blacklisted raw HTML passes through untouched:
+/// the same sources the filter rewrites with the extension must not
+/// change plain CommonMark output.
+#[test]
+fn tagfilter_off_leaves_plain_commonmark() {
+    let cases = [
+        "<script>alert(1)</script>\n",
+        "a <title>t</title> b\n",
+        "<style>\nx\n</style>\n",
+    ];
+    for source in cases {
+        let plain = render_with(&parse_with(source, &Options::new()), &Options::new());
+        assert!(
+            !plain.contains("&lt;"),
+            "without the extension the tags stay raw: {source:?}"
+        );
+        let mut options = Options::new();
+        options.extension(geist4_ext::tagfilter());
+        let filtered = render_with(&parse_with(source, &options), &options);
+        assert_ne!(
+            plain, filtered,
+            "the extension must change this output: {source:?}"
+        );
+    }
 }
 
 /// With no extensions, `[ ]`/`[x]` runs stay plain text: the same sources
