@@ -155,6 +155,9 @@ struct Parser<'defs, 'a> {
     /// absence, exactly as the reference parser gates them.
     scanned_for_backticks: bool,
     link_defs: &'defs HashMap<String, LinkDef<'a>>,
+    /// Reusable buffer for normalized link-label lookups; taken from the
+    /// session so one document's lookups share its capacity.
+    label_scratch: String,
 }
 
 /// Backtick runs longer than this are never scanned for closers, as in
@@ -179,6 +182,8 @@ pub(crate) struct InlineSession {
     brackets: Vec<Bracket>,
     backticks_memo: Vec<u64>,
     memo_gen: u64,
+    /// Scratch buffer reused for normalized link-label lookups.
+    label_scratch: String,
 }
 
 impl InlineSession {
@@ -189,6 +194,7 @@ impl InlineSession {
             brackets: Vec::new(),
             backticks_memo: Vec::new(),
             memo_gen: 0,
+            label_scratch: String::new(),
         }
     }
 }
@@ -219,6 +225,7 @@ pub(crate) fn parse_inlines_into(
         memo_gen: session.memo_gen.wrapping_add(1),
         scanned_for_backticks: false,
         link_defs,
+        label_scratch: std::mem::take(&mut session.label_scratch),
     };
     session.memo_gen = parser.memo_gen;
     parser.run();
@@ -235,6 +242,7 @@ pub(crate) fn parse_inlines_into(
     parser.brackets.clear();
     session.brackets = parser.brackets;
     session.backticks_memo = parser.backticks_memo;
+    session.label_scratch = parser.label_scratch;
 }
 
 /// Moves the surviving pool cells into the arena as children of `parent`,
@@ -752,8 +760,9 @@ impl<'defs, 'a> Parser<'defs, 'a> {
                 raw_label = Some(self.input[text_start..initial_pos - 1].to_string());
             }
             if let Some(label) = raw_label {
-                let key = normalize_label(&label);
-                if let Some(def) = self.link_defs.get(&key) {
+                self.label_scratch.clear();
+                crate::parser::normalize_label_into(&label, &mut self.label_scratch);
+                if let Some(def) = self.link_defs.get(self.label_scratch.as_str()) {
                     matched = Some((
                         def.destination.to_string(),
                         def.title.as_ref().map(|t| t.to_string()),
@@ -1139,10 +1148,6 @@ fn normalize_code(content: &str) -> String {
     }
     out
 }
-
-/// Normalizes a link label for lookup; shared with the block parser so
-/// definitions and uses always agree.
-use crate::parser::normalize_label;
 
 /// Scans whitespace, including newlines. Returns the number of bytes.
 fn scan_spacechars(bytes: &[u8], start: usize) -> usize {

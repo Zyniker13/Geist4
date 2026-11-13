@@ -1335,6 +1335,14 @@ fn decode_info_string(raw: &str) -> Option<String> {
 /// runs collapsed to a single space, as the reference parser does.
 pub(crate) fn normalize_label(label: &str) -> String {
     let mut out = String::new();
+    normalize_label_into(label, &mut out);
+    out
+}
+
+/// Writes the normalized form of `label` into `out`, which is cleared
+/// first; reuse the buffer to skip the allocation per lookup.
+pub(crate) fn normalize_label_into(label: &str, out: &mut String) {
+    out.clear();
     let mut pending_ws = false;
     for ch in label.chars() {
         if matches!(ch, ' ' | '\t' | '\n' | '\r' | '\u{b}' | '\u{c}') {
@@ -1352,5 +1360,4 @@ pub(crate) fn normalize_label(label: &str) -> String {
             out.extend(ch.to_lowercase());
         }
     }
-    out
 }
