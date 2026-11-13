@@ -67,11 +67,8 @@ jobs:
   instructions:
     name: Instruction-count gate
     runs-on: ubuntu-latest
-    # TEMP diagnostic only: statuses:write posts the log tail for offline
-    # reading; removed once the baseline is captured.
     permissions:
       contents: read
-      statuses: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install Rust (stable)
@@ -88,34 +85,14 @@ jobs:
       - name: Install iai-callgrind-runner
         run: cargo install --locked iai-callgrind-runner@0.14.2
       - name: Run the instruction-count benchmarks
+        # -j 2: runs at the default parallelism were killed mid-compile.
         run: |
-          set +e
-          df -h / | tail -1 > iai.log
-          free -m | head -2 >> iai.log
-          CARGO_BUILD_JOBS=2 cargo bench -p geist4-bench --bench iai > bench-out.log 2>&1
+          CARGO_BUILD_JOBS=2 cargo bench -p geist4-bench --bench iai > iai.log 2>&1
           code=$?
-          echo "BENCH_EXIT=$code" >> iai.log
-          df -h / | tail -1 >> iai.log
-          free -m | head -2 >> iai.log
-          echo "--- tail of bench-out:" >> iai.log
-          tail -30 bench-out.log >> iai.log
           tail -40 iai.log
           exit "$code"
       - name: Check the counts against the baseline
         run: python3 tools/check_iai.py iai.log bench/iai-baseline.txt
-      - name: TEMP diagnostic — post the iai log tail as commit statuses
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          base64 -i iai.log | tr -d '\n' > iai-b64.txt
-          mapfile -t chunks < <(fold -w 130 iai-b64.txt)
-          for i in "${!chunks[@]}"; do
-            gh api "repos/$GH_REPO/statuses/${{ github.sha }}" \
-              -f state=success -f context="iai-$((i+1))" -f description="${chunks[$i]}" > /dev/null
-          done
-          echo "posted ${#chunks[@]} statuses"
       - name: Upload the instruction-count log
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -19,7 +19,9 @@ import re
 import sys
 
 HEADER = re.compile(r"^\S")
-INSTRUCTIONS = re.compile(r"^\s+Instructions:\s+([0-9,]+)\s*$")
+INSTRUCTIONS = re.compile(
+    r"^\s+Instructions:\s+([0-9,]+)\s*(?:\|[^|]*)?(?:\([^)]*\))?\s*$"
+)
 
 
 def parse(text):
