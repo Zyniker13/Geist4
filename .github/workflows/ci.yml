@@ -69,7 +69,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      statuses: write # TEMP diagnostic only, removed with the next commit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install Rust (stable)
@@ -94,19 +93,6 @@ jobs:
           exit "$code"
       - name: Check the counts against the baseline
         run: python3 tools/check_iai.py iai.log bench/iai-baseline.txt
-      - name: TEMP diagnostic — post the check output as a status
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          python3 tools/check_iai.py iai.log bench/iai-baseline.txt > check-out.txt 2>&1 || true
-          DESC=$(head -c 140 check-out.txt | tr '\n' ' ' | tr -d '"')
-          gh api "repos/$GH_REPO/statuses/${{ github.sha }}" \
-            -f state=success -f context=iai-check -f description="$DESC" > /dev/null
-          DESC2=$(tail -c 140 check-out.txt | tr '\n' ' ' | tr -d '"')
-          gh api "repos/$GH_REPO/statuses/${{ github.sha }}" \
-            -f state=success -f context=iai-check2 -f description="$DESC2" > /dev/null
       - name: Upload the instruction-count log
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

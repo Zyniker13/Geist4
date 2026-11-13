@@ -22,10 +22,12 @@ HEADER = re.compile(r"^\S")
 INSTRUCTIONS = re.compile(
     r"^\s+Instructions:\s+([0-9,]+)\s*(?:\|[^|]*)?(?:\([^)]*\))?\s*$"
 )
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 def parse(text):
     """Return {benchmark header: instruction count} from iai output."""
+    text = ANSI.sub("", text)
     counts = {}
     current = None
     for line in text.splitlines():
@@ -55,9 +57,19 @@ def main():
     if len(sys.argv) < 2:
         sys.exit("usage: check_iai.py <iai-output-file> [baseline-file]")
     with open(sys.argv[1], encoding="utf-8") as handle:
-        counts = parse(handle.read())
+        text = handle.read()
+    counts = parse(text)
     if not counts:
-        sys.exit("no instruction counts found in the iai output")
+        sys.exit(
+            "no instruction counts found in the iai output (lines containing"
+            " 'Instructions': "
+            + "; ".join(
+                repr(ln.strip()[:80])
+                for ln in text.splitlines()
+                if "Instructions" in ln
+            )[:400]
+            + ")"
+        )
 
     baseline_path = sys.argv[2] if len(sys.argv) > 2 else "bench/iai-baseline.txt"
     if not os.path.exists(baseline_path):
