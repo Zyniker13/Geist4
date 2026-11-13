@@ -12,3 +12,4 @@ workspace = true
 
 [dev-dependencies]
 geist4-spec-harness = { path = "../geist4-spec-harness" }
+proptest = "1"

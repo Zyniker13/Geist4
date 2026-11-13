@@ -37,6 +37,9 @@ struct Cell {
     next: Option<u32>,
     first_child: Option<u32>,
     last_child: Option<u32>,
+    /// The container holding this cell, if any; lets `unlink` repair the
+    /// container's child endpoints in constant time.
+    parent: Option<u32>,
 }
 
 /// What a [`Cell`] holds.
@@ -149,6 +152,17 @@ struct Parser<'defs, 'a> {
     link_defs: &'defs HashMap<String, LinkDef<'a>>,
 }
 
+/// Drops an inline tree without recursive drop glue: children move onto
+/// a work stack, so a 10,000-deep emphasis tree cannot overflow the call
+/// stack when it is discarded.
+pub(crate) fn drop_inline_tree(roots: Vec<crate::inline::InlineNode>) {
+    let mut stack: Vec<crate::inline::InlineNode> = roots;
+    while let Some(mut inline) = stack.pop() {
+        stack.append(&mut inline.children);
+        // `inline` drops here with its children already drained.
+    }
+}
+
 /// Parses one block's inline content.
 ///
 /// Trailing whitespace comes off the subject first, as the reference
@@ -185,23 +199,68 @@ pub(crate) fn parse_inlines(
 }
 
 /// Converts the surviving pool cells of one list into inline nodes.
+///
+/// The conversion is iterative — a pre-order walk collects the tree,
+/// then children are assembled before their parents — so a 10,000-deep
+/// emphasis tree cannot overflow the call stack.
 fn to_nodes(pool: &[Cell], head: Option<u32>) -> Vec<InlineNode> {
+    let mut visit: Vec<u32> = Vec::new();
+    let mut id = head;
+    while let Some(current) = id {
+        if pool[current as usize].alive {
+            visit.push(current);
+        }
+        id = pool[current as usize].next;
+    }
+    visit.reverse();
+    let mut order: Vec<u32> = Vec::new();
+    while let Some(current) = visit.pop() {
+        order.push(current);
+        let mut kids: Vec<u32> = Vec::new();
+        let mut kid = pool[current as usize].first_child;
+        while let Some(child) = kid {
+            if pool[child as usize].alive {
+                kids.push(child);
+            }
+            kid = pool[child as usize].next;
+        }
+        kids.reverse();
+        visit.extend(kids);
+    }
+    // Children are assembled before their parents, so a parent can move
+    // its children out of the map wholesale.
+    let mut built: HashMap<u32, InlineNode> = HashMap::new();
+    for &current in order.iter().rev() {
+        let mut children = Vec::new();
+        let mut kid = pool[current as usize].first_child;
+        while let Some(child) = kid {
+            if pool[child as usize].alive {
+                children.push(built.remove(&child).expect("child built before parent"));
+            }
+            kid = pool[child as usize].next;
+        }
+        built.insert(
+            current,
+            InlineNode {
+                node: node_kind(pool, current),
+                children,
+            },
+        );
+    }
     let mut out = Vec::new();
     let mut id = head;
     while let Some(current) = id {
-        let cell = &pool[current as usize];
-        if cell.alive {
-            out.push(to_node(pool, current));
+        if pool[current as usize].alive {
+            out.push(built.remove(&current).expect("top-level cell built"));
         }
-        id = cell.next;
+        id = pool[current as usize].next;
     }
     out
 }
 
-/// Converts one pool cell and its children.
-fn to_node(pool: &[Cell], id: u32) -> InlineNode {
-    let cell = &pool[id as usize];
-    let node = match &cell.kind {
+/// The node kind of one pool cell.
+fn node_kind(pool: &[Cell], id: u32) -> Node<'static> {
+    match &pool[id as usize].kind {
         Kind::Text(text) => Node::Text(text.clone().into()),
         Kind::Code(text) => Node::CodeSpan(text.clone().into()),
         Kind::Html(text) => Node::InlineHtml(text.clone().into()),
@@ -214,9 +273,7 @@ fn to_node(pool: &[Cell], id: u32) -> InlineNode {
             title: title.clone().map(std::borrow::Cow::Owned),
             image: *image,
         }),
-    };
-    let children = to_nodes(pool, cell.first_child);
-    InlineNode { node, children }
+    }
 }
 
 impl<'defs, 'a> Parser<'defs, 'a> {
@@ -258,6 +315,7 @@ impl<'defs, 'a> Parser<'defs, 'a> {
             next: None,
             first_child: None,
             last_child: None,
+            parent: None,
         });
         if let Some(prev) = self.tail {
             self.pool[prev as usize].next = Some(id);
@@ -278,6 +336,7 @@ impl<'defs, 'a> Parser<'defs, 'a> {
             next: None,
             first_child: None,
             last_child: None,
+            parent: None,
         });
         id
     }
@@ -298,12 +357,23 @@ impl<'defs, 'a> Parser<'defs, 'a> {
         }
     }
 
-    /// Removes a cell from its list without freeing it.
+    /// Removes a cell from its list without freeing it. The container
+    /// holding this cell has its child endpoints repaired through the
+    /// cell's parent pointer, in constant time.
     fn unlink(&mut self, id: u32) {
-        let (prev, next) = {
+        let (prev, next, parent) = {
             let cell = &self.pool[id as usize];
-            (cell.prev, cell.next)
+            (cell.prev, cell.next, cell.parent)
         };
+        if let Some(p) = parent {
+            let container = &mut self.pool[p as usize];
+            if container.first_child == Some(id) {
+                container.first_child = next;
+            }
+            if container.last_child == Some(id) {
+                container.last_child = prev;
+            }
+        }
         if let Some(p) = prev {
             self.pool[p as usize].next = next;
         } else if self.head == Some(id) {
@@ -319,24 +389,10 @@ impl<'defs, 'a> Parser<'defs, 'a> {
         cell.next = None;
     }
 
-    /// Marks a cell dead and drops it from its list. Containers that held
-    /// this node as their first or last child are updated to hold its
-    /// former neighbor instead, so a killed delimiter text node does not
-    /// sever a container's child chain.
+    /// Marks a cell dead and drops it from its list. `unlink` already
+    /// repaired any container that held it as a child endpoint.
     fn kill(&mut self, id: u32) {
-        let (prev, next) = {
-            let cell = &self.pool[id as usize];
-            (cell.prev, cell.next)
-        };
         self.unlink(id);
-        for cell in self.pool.iter_mut() {
-            if cell.first_child == Some(id) {
-                cell.first_child = next;
-            }
-            if cell.last_child == Some(id) {
-                cell.last_child = prev;
-            }
-        }
         self.pool[id as usize].alive = false;
     }
 
@@ -663,6 +719,11 @@ impl<'defs, 'a> Parser<'defs, 'a> {
                     self.pool[link_id as usize].first_child = Some(f);
                     self.pool[link_id as usize].last_child = last;
                     self.pool[f as usize].prev = None;
+                    let mut id = Some(f);
+                    while let Some(current) = id {
+                        self.pool[current as usize].parent = Some(link_id);
+                        id = self.pool[current as usize].next;
+                    }
                     if let Some(l) = last {
                         self.pool[l as usize].next = None;
                     }
@@ -803,6 +864,8 @@ impl<'defs, 'a> Parser<'defs, 'a> {
         // Move the nodes between the two text nodes into the emphasis.
         let first = self.pool[opener_node as usize].next;
         let last = self.pool[closer_node as usize].prev;
+        let emph_parent = self.pool[opener_node as usize].parent;
+        self.pool[emph as usize].parent = emph_parent;
         if first.is_some() && first != Some(closer_node) {
             self.pool[emph as usize].first_child = first;
             self.pool[emph as usize].last_child = last;
@@ -813,6 +876,7 @@ impl<'defs, 'a> Parser<'defs, 'a> {
                 }
                 let next = self.pool[current as usize].next;
                 self.pool[current as usize].prev = None;
+                self.pool[current as usize].parent = Some(emph);
                 self.pool[current as usize].next = if next == Some(closer_node) {
                     None
                 } else {
@@ -906,6 +970,7 @@ impl<'defs, 'a> Parser<'defs, 'a> {
             image: false,
         });
         let text_id = self.alloc(Kind::Text(text));
+        self.pool[text_id as usize].parent = Some(link);
         self.pool[link as usize].first_child = Some(text_id);
         self.pool[link as usize].last_child = Some(text_id);
         self.append(link);

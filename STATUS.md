@@ -1,8 +1,8 @@
 # Status
 
 - **Current milestone:** M3 (Hardening) — M1 and M2 complete
-- **Last done:** All 652 CommonMark 0.31.2 examples pass (`spec/progress.json`). CI green on all three OSes + MSRV (run 43360678153, commit `43c9ac3`) after replacing the failing toolchain-setup action with plain rustup steps and fixing the cargo-deny version pin. 16 block-phase unit tests; `scripts/check.sh` green locally.
-- **Next step:** M3 hardening — pathological-input tests with linear-scaling checks, cargo-fuzz targets, proptest property tests, differential tests against cmark, security defaults and `docs/security-model.md`, regression corpus.
+- **Last done:** M3 first wave landed: proptest property tests (`tests/properties.rs`: no-panic, deterministic render, balanced emitted tags, span bounds), the reference implementation's pathological suite ported to `tests/pathological.rs` (14 emphasis/bracket/link families with n-vs-10n linear-scaling assertions, deep nesting, fixed cases), and the performance/stack defects those tests exposed fixed: the renderer, the inline post-pass, pool-to-node conversion and inline-tree drop are all iterative; delimiter-node removal no longer scans the whole pool (parent pointers on inline cells); NUL bytes become U+FFFD per line as in the reference parser. Spec stays 652/652; `scripts/check.sh` green locally. Generated-table tooling checked in under `tools/` with the vendored WHATWG entity list (commit `a54add0`, CI green).
+- **Next step:** M3 continued — cargo-fuzz targets (parser, renderer) with a short CI fuzz run and longer local runs, differential tests against cmark 0.31.2 (installed locally; CI needs a cmark package on ubuntu/macOS), `docs/security-model.md` covering the URL policy and raw-HTML defaults, and a regression corpus layout under `tests/regressions/`.
 - **Blocked on:** nothing
 
 ## Log
@@ -25,3 +25,5 @@
 - 2026-11-12: `scripts/check.sh` green at 652/652. Temporary probe/bisect/dump examples removed before the milestone commit.
 - 2026-11-13: CI discovery — the CI workflow had never passed (the earlier green run was the CodeQL setup workflow). The toolchain-setup action failed on every run on all systems, and the pinned cargo-deny version did not exist. CI rewritten with plain rustup and cargo steps; run 43360678153 green on all three OSes + MSRV.
 - 2026-11-13: M1 and M2 complete per their done-when lines: every block-section example passes, the renderer matches the spec byte for byte, and all 652 examples pass with none skipped or special-cased, on all three systems.
+- 2026-11-13: Decision 0009 — generated tables are checked in; generators and the WHATWG entity data live under `tools/`; regeneration reproduces the checked-in files byte for byte (`a54add0`, CI run 43362090828 green).
+- 2026-11-13: M3 wave 1 — property tests (proptest) and the pathological suite (ported from the reference implementation's test file, linear-scaling assertions at n vs 10n). Found and fixed: renderer/post-pass/conversion/drop recursion (stack overflow at ~16k nesting depth), O(depth) paragraph-text append scans, the O(n²) full-pool scan in inline-cell removal (replaced with parent pointers and constant-time unlink repair), and NUL handling (U+FFFD replacement per line). Deep-nesting cases at 500–10,000 levels complete; the 14 emphasis/bracket/link families scale linearly; spec remains 652/652.

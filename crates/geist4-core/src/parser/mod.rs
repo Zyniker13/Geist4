@@ -165,6 +165,26 @@ impl<'a> Parser<'a> {
             let line = &bytes[line_start..end];
             self.line_number += 1;
             let line_stop = line_start + line.len();
+            // NUL bytes become U+FFFD replacement characters before any
+            // processing, as the reference implementation does when it
+            // reads a line.
+            let replaced;
+            let line: &[u8] = if line.contains(&0u8) {
+                replaced = line
+                    .iter()
+                    .copied()
+                    .flat_map(|b| {
+                        if b == 0 {
+                            [0xEF, 0xBF, 0xBD].to_vec()
+                        } else {
+                            vec![b]
+                        }
+                    })
+                    .collect::<Vec<u8>>();
+                &replaced
+            } else {
+                line
+            };
             self.process_line(line, line_start, line_stop);
             line_start = if has_newline { line_end + 1 } else { line_end };
         }
@@ -757,45 +777,47 @@ impl<'a> Parser<'a> {
     ///
     /// This runs after the whole block parse, so every reference
     /// definition in the document is visible to every leaf block's inline
-    /// content, as in the reference parser.
+    /// content, as in the reference parser. The walk is iterative so
+    /// arbitrarily deep nesting cannot overflow the call stack.
     fn parse_all_inlines(&mut self, root: NodeId) {
-        for child in self.arena.children(root).to_vec() {
-            self.parse_inlines_below(child);
-        }
-    }
-
-    /// Walks one node, converting paragraphs and headings.
-    fn parse_inlines_below(&mut self, id: NodeId) {
-        let is_leaf = matches!(self.arena.kind(id), Node::Paragraph | Node::Heading(_));
-        if is_leaf {
-            let text: String = self
-                .arena
-                .children(id)
-                .iter()
-                .filter_map(|child| match self.arena.kind(*child) {
-                    Node::Text(part) => Some(part.to_string()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-                .join("");
-            let inlines = crate::inline::parse_inlines(&text, &self.link_defs);
-            self.arena.entry_mut(id).children.clear();
-            for inline in &inlines {
-                self.attach_inline_node(id, inline);
-            }
-        } else {
-            for child in self.arena.children(id).to_vec() {
-                self.parse_inlines_below(child);
+        let mut stack: Vec<NodeId> = self.arena.children(root).to_vec();
+        while let Some(id) = stack.pop() {
+            if matches!(self.arena.kind(id), Node::Paragraph | Node::Heading(_)) {
+                let text: String = self
+                    .arena
+                    .children(id)
+                    .iter()
+                    .filter_map(|child| match self.arena.kind(*child) {
+                        Node::Text(part) => Some(part.to_string()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("");
+                let inlines = crate::inline::parse_inlines(&text, &self.link_defs);
+                self.arena.entry_mut(id).children.clear();
+                self.attach_inline_nodes(id, &inlines);
+                crate::inline::drop_inline_tree(inlines);
+            } else {
+                stack.extend(self.arena.children(id).iter().copied());
             }
         }
     }
 
-    /// Attaches one parsed inline node and its children to the arena.
-    fn attach_inline_node(&mut self, parent: NodeId, inline: &crate::inline::InlineNode) {
-        let id = self.arena.alloc(inline.node.clone(), Span::empty(0));
-        self.arena.push_child(parent, id);
-        for child in &inline.children {
-            self.attach_inline_node(id, child);
+    /// Attaches parsed inline nodes and their children to the arena. The
+    /// walk is iterative so deeply nested emphasis cannot overflow the
+    /// call stack.
+    fn attach_inline_nodes(&mut self, parent: NodeId, inlines: &[crate::inline::InlineNode]) {
+        let mut work: Vec<(NodeId, &crate::inline::InlineNode)> = inlines
+            .iter()
+            .rev()
+            .map(|inline| (parent, inline))
+            .collect();
+        while let Some((arena_parent, inline)) = work.pop() {
+            let id = self.arena.alloc(inline.node.clone(), Span::empty(0));
+            self.arena.push_child(arena_parent, id);
+            for child in inline.children.iter().rev() {
+                work.push((id, child));
+            }
         }
     }
 

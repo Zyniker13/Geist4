@@ -8,6 +8,10 @@
 //! examples compare byte for byte. Inline content is escaped and emitted as
 //! plain text; the full inline parser and the real HTML renderer arrive in
 //! milestone M2, when this module is replaced by `geist4-html`.
+//!
+//! The walk is explicit: both the block and the inline recursion are
+//! flattened into a work stack, so arbitrarily deep nesting cannot
+//! overflow the call stack.
 
 use crate::arena::{Arena, NodeId};
 use crate::node::{ListData, Node};
@@ -18,18 +22,38 @@ use crate::node::{ListData, Node};
 /// expected values.
 #[must_use]
 pub fn render(document: &crate::parser::Document<'_>) -> String {
-    let mut out = Renderer {
+    let mut renderer = Renderer {
         arena: &document.arena,
         out: String::new(),
     };
-    for child in out.arena.children(document.root) {
-        let child = *child;
-        out.block(child, false);
+    let mut stack: Vec<Step> = document
+        .arena
+        .children(document.root)
+        .iter()
+        .rev()
+        .map(|child| Step::Block(*child, false))
+        .collect();
+    while let Some(step) = stack.pop() {
+        renderer.run(step, &mut stack);
     }
-    if out.out.ends_with('\n') {
-        out.out.pop();
+    if renderer.out.ends_with('\n') {
+        renderer.out.pop();
     }
-    out.out
+    renderer.out
+}
+
+/// One pending piece of rendering work.
+enum Step {
+    /// Writes a newline unless the output already ends with one.
+    Cr,
+    /// Writes pre-rendered text.
+    Text(String),
+    /// Renders one block node; `tight` is true inside a tight list's item.
+    Block(NodeId, bool),
+    /// Renders one list item, whose children get `tight`.
+    Item(NodeId, bool),
+    /// Renders one node's inline children.
+    Inline(NodeId),
 }
 
 struct Renderer<'a> {
@@ -38,6 +62,16 @@ struct Renderer<'a> {
 }
 
 impl Renderer<'_> {
+    fn run(&mut self, step: Step, stack: &mut Vec<Step>) {
+        match step {
+            Step::Cr => self.cr(),
+            Step::Text(text) => self.out.push_str(&text),
+            Step::Block(id, tight) => self.block(id, tight, stack),
+            Step::Item(id, tight) => self.item(id, tight, stack),
+            Step::Inline(id) => self.inline(id, stack),
+        }
+    }
+
     /// Writes a newline unless the output is empty or already ends with one.
     fn cr(&mut self) {
         if !self.out.is_empty() && !self.out.ends_with('\n') {
@@ -45,37 +79,37 @@ impl Renderer<'_> {
         }
     }
 
-    /// Renders one block node. `tight` is true for direct children of a
-    /// tight list's item, where paragraphs lose their tags.
-    fn block(&mut self, id: NodeId, tight: bool) {
+    /// Pushes `id`'s children as block steps, in document order.
+    fn push_children(&self, id: NodeId, tight: bool, stack: &mut Vec<Step>) {
+        for child in self.arena.children(id).iter().rev() {
+            stack.push(Step::Block(*child, tight));
+        }
+    }
+
+    /// Expands one block node into work-stack steps.
+    fn block(&mut self, id: NodeId, tight: bool, stack: &mut Vec<Step>) {
         match self.arena.kind(id) {
             Node::Document => unreachable!("the document root has no parent to render it"),
             Node::BlockQuote => {
                 self.cr();
                 self.out.push_str("<blockquote>\n");
-                for child in self.arena.children(id) {
-                    let child = *child;
-                    self.block(child, false);
-                }
-                self.cr();
-                self.out.push_str("</blockquote>\n");
+                stack.push(Step::Text("</blockquote>\n".to_owned()));
+                stack.push(Step::Cr);
+                self.push_children(id, false, stack);
             }
             Node::List(data) => {
-                let tight = data.tight;
+                let item_tight = data.tight;
+                let open = self.list_open_tag(data);
                 self.cr();
-                self.list_open_tag(data);
-                for item in self.arena.children(id) {
-                    let item = *item;
-                    self.cr();
-                    self.out.push_str("<li>");
-                    for child in self.arena.children(item) {
-                        let child = *child;
-                        self.block(child, tight);
-                    }
-                    self.out.push_str("</li>\n");
+                self.out.push_str(&open);
+                stack.push(Step::Text(if data.ordered {
+                    "</ol>\n".to_owned()
+                } else {
+                    "</ul>\n".to_owned()
+                }));
+                for item in self.arena.children(id).iter().rev() {
+                    stack.push(Step::Item(*item, item_tight));
                 }
-                self.out
-                    .push_str(if data.ordered { "</ol>\n" } else { "</ul>\n" });
             }
             Node::Item(_) => {
                 // Items are rendered by their list.
@@ -83,14 +117,13 @@ impl Renderer<'_> {
             }
             Node::Heading(data) => {
                 let level = data.level;
+                let level_char = char::from(b'0' + level);
                 self.cr();
                 self.out.push_str("<h");
-                self.out.push(char::from(b'0' + level));
+                self.out.push(level_char);
                 self.out.push('>');
-                self.inline(id);
-                self.out.push_str("</h");
-                self.out.push(char::from(b'0' + level));
-                self.out.push_str(">\n");
+                stack.push(Step::Text(format!("</h{level_char}>\n")));
+                stack.push(Step::Inline(id));
             }
             Node::ThematicBreak => {
                 self.cr();
@@ -98,12 +131,12 @@ impl Renderer<'_> {
             }
             Node::Paragraph => {
                 if tight {
-                    self.inline(id);
+                    stack.push(Step::Inline(id));
                 } else {
                     self.cr();
                     self.out.push_str("<p>");
-                    self.inline(id);
-                    self.out.push_str("</p>\n");
+                    stack.push(Step::Text("</p>\n".to_owned()));
+                    stack.push(Step::Inline(id));
                 }
             }
             Node::CodeBlock(data) => {
@@ -138,87 +171,98 @@ impl Renderer<'_> {
         }
     }
 
+    /// Expands one list item: `<li>`, its children, then `</li>`.
+    fn item(&mut self, id: NodeId, tight: bool, stack: &mut Vec<Step>) {
+        self.cr();
+        self.out.push_str("<li>");
+        stack.push(Step::Text("</li>\n".to_owned()));
+        self.push_children(id, tight, stack);
+    }
+
     /// Writes the opening tag of a list: `<ol>` with a `start` attribute
     /// when the first item is not numbered one.
-    fn list_open_tag(&mut self, data: &ListData) {
+    fn list_open_tag(&self, data: &ListData) -> String {
         if data.ordered {
-            self.out.push_str("<ol");
+            let mut tag = String::from("<ol");
             if data.start != 1 {
-                self.out.push_str(" start=\"");
-                self.out.push_str(&data.start.to_string());
-                self.out.push('"');
+                tag.push_str(" start=\"");
+                tag.push_str(&data.start.to_string());
+                tag.push('"');
             }
-            self.out.push_str(">\n");
+            tag.push_str(">\n");
+            tag
         } else {
-            self.out.push_str("<ul>\n");
+            String::from("<ul>\n")
         }
     }
 
-    /// Renders a leaf block's inline content.
-    fn inline(&mut self, id: NodeId) {
-        for child in self.arena.children(id) {
+    /// Expands a leaf block's inline content into work-stack steps.
+    fn inline(&mut self, id: NodeId, stack: &mut Vec<Step>) {
+        for child in self.arena.children(id).iter().rev() {
             let child = *child;
             match self.arena.kind(child) {
-                Node::Text(text) => self.out.push_str(&escape_html(text)),
+                Node::Text(text) => stack.push(Step::Text(escape_html(text))),
                 Node::CodeSpan(text) => {
-                    self.out.push_str("<code>");
-                    self.out.push_str(&escape_html(text));
-                    self.out.push_str("</code>");
+                    stack.push(Step::Text(format!("<code>{}</code>", escape_html(text))))
                 }
-                Node::InlineHtml(raw) => self.out.push_str(raw),
-                Node::SoftBreak => self.out.push('\n'),
-                Node::HardBreak => self.out.push_str("<br />\n"),
-                Node::Emphasis => self.container(child, "<em>", "</em>"),
-                Node::Strong => self.container(child, "<strong>", "</strong>"),
+                Node::InlineHtml(raw) => stack.push(Step::Text(raw.to_string())),
+                Node::SoftBreak => stack.push(Step::Text("\n".to_owned())),
+                Node::HardBreak => stack.push(Step::Text("<br />\n".to_owned())),
+                Node::Emphasis => {
+                    stack.push(Step::Text("</em>".to_owned()));
+                    stack.push(Step::Inline(child));
+                    stack.push(Step::Text("<em>".to_owned()));
+                }
+                Node::Strong => {
+                    stack.push(Step::Text("</strong>".to_owned()));
+                    stack.push(Step::Inline(child));
+                    stack.push(Step::Text("<strong>".to_owned()));
+                }
                 Node::Link(data) if data.image => {
-                    self.out.push_str("<img src=\"");
+                    let mut tag = String::from("<img src=\"");
                     if !data.url.is_empty() && !is_dangerous_url(&data.url) {
-                        self.out.push_str(&escape_href(&data.url));
+                        tag.push_str(&escape_href(&data.url));
                     }
-                    self.out.push_str("\" alt=\"");
-                    self.out.push_str(&escape_html(&self.plain_text(child)));
+                    tag.push_str("\" alt=\"");
+                    tag.push_str(&escape_html(&self.plain_text(child)));
                     if let Some(title) = &data.title {
-                        self.out.push_str("\" title=\"");
-                        self.out.push_str(&escape_html(title));
+                        tag.push_str("\" title=\"");
+                        tag.push_str(&escape_html(title));
                     }
-                    self.out.push_str("\" />");
+                    tag.push_str("\" />");
+                    stack.push(Step::Text(tag));
                 }
                 Node::Link(data) => {
-                    self.out.push_str("<a href=\"");
+                    let mut tag = String::from("<a href=\"");
                     if !data.url.is_empty() && !is_dangerous_url(&data.url) {
-                        self.out.push_str(&escape_href(&data.url));
+                        tag.push_str(&escape_href(&data.url));
                     }
                     if let Some(title) = &data.title {
-                        self.out.push_str("\" title=\"");
-                        self.out.push_str(&escape_html(title));
+                        tag.push_str("\" title=\"");
+                        tag.push_str(&escape_html(title));
                     }
-                    self.out.push_str("\">");
-                    self.inline(child);
-                    self.out.push_str("</a>");
+                    tag.push_str("\">");
+                    stack.push(Step::Text("</a>".to_owned()));
+                    stack.push(Step::Inline(child));
+                    stack.push(Step::Text(tag));
                 }
                 _ => {}
             }
         }
     }
 
-    /// Renders an inline container's children between two tags.
-    fn container(&mut self, id: NodeId, open: &str, close: &str) {
-        self.out.push_str(open);
-        self.inline(id);
-        self.out.push_str(close);
-    }
-
-    /// The plain text of an inline subtree, as image alt text.
+    /// The plain text of an inline subtree, as image alt text. The walk is
+    /// iterative so deeply nested images cannot overflow the stack.
     fn plain_text(&self, id: NodeId) -> String {
         let mut out = String::new();
-        for child in self.arena.children(id) {
-            let child = *child;
-            match self.arena.kind(child) {
+        let mut stack: Vec<NodeId> = self.arena.children(id).iter().rev().copied().collect();
+        while let Some(node) = stack.pop() {
+            match self.arena.kind(node) {
                 Node::Text(text) | Node::CodeSpan(text) | Node::InlineHtml(text) => {
                     out.push_str(text)
                 }
                 Node::SoftBreak | Node::HardBreak => out.push(' '),
-                _ => out.push_str(&self.plain_text(child)),
+                _ => stack.extend(self.arena.children(node).iter().rev().copied()),
             }
         }
         out
