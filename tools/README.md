@@ -9,7 +9,15 @@ python3 tools/gen_unicode.py    # inline/unicode.rs — whitespace and
                                 # punctuation/symbol code point ranges
 python3 tools/gen_entities.py   # inline/entity_table.rs — HTML5 entities
 python3 tools/gen_fold.py       # inline/fold.rs — case-fold overrides
+python3 tools/gen_regressions.py # tests/regressions/*.html — expected
+                                 # HTML for the regression corpus, from
+                                 # the reference implementation
 ```
+
+`gen_regressions.py` is a helper for maintaining the corpus, not a
+source of checked-in engine code: run it after adding a `.md` case to
+regenerate the paired `.html` expectation from the reference
+implementation, then read the diff before committing.
 
 ## Data sources
 
