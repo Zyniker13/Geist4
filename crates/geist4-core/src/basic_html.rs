@@ -358,15 +358,37 @@ fn escape_href(url: &str) -> String {
 /// Escapes text the way the reference implementation does: `&`, `<`, `>` and
 /// `"` become entities; `'` and `/` stay raw.
 fn escape_html(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            _ => out.push(ch),
+    // Byte-level scan with bulk runs between escapes: the escapable bytes
+    // are all ASCII, so a non-ASCII byte can never start an escape and
+    // runs may be copied verbatim, including multi-byte characters.
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len() + 16);
+    let mut run = 0usize;
+    for (i, &byte) in bytes.iter().enumerate() {
+        match byte {
+            b'&' => {
+                out.push_str(&text[run..i]);
+                out.push_str("&amp;");
+                run = i + 1;
+            }
+            b'<' => {
+                out.push_str(&text[run..i]);
+                out.push_str("&lt;");
+                run = i + 1;
+            }
+            b'>' => {
+                out.push_str(&text[run..i]);
+                out.push_str("&gt;");
+                run = i + 1;
+            }
+            b'"' => {
+                out.push_str(&text[run..i]);
+                out.push_str("&quot;");
+                run = i + 1;
+            }
+            _ => {}
         }
     }
+    out.push_str(&text[run..]);
     out
 }

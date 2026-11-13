@@ -47,6 +47,12 @@ impl<'a> Arena<'a> {
         Arena { nodes: Vec::new() }
     }
 
+    /// Reserves room for `additional` more nodes, so bulk allocation does
+    /// not repeatedly move the whole node vector.
+    pub fn reserve(&mut self, additional: usize) {
+        self.nodes.reserve(additional);
+    }
+
     /// Allocates a node with no children and returns its id.
     pub fn alloc(&mut self, kind: Node<'a>, span: Span) -> NodeId {
         let id = NodeId(self.nodes.len());

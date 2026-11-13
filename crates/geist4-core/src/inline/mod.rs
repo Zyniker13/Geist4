@@ -82,6 +82,7 @@ struct DelimCell {
 }
 
 /// The delimiter stack, a doubly-linked list walked from the tail.
+#[derive(Default)]
 struct DelimList {
     cells: Vec<DelimCell>,
     last: Option<u32>,
@@ -150,10 +151,17 @@ struct Parser<'defs, 'a> {
     skip_declaration: bool,
     skip_pi: bool,
     /// Positions of backtick runs seen while scanning for code-span
-    /// closers, as in the reference parser's memo table. Entries persist
+    /// closers, as in the reference parser's memo table, with the
+    /// recording call's generation in the high bits. Entries persist
     /// across scans, including successful ones that exited early, which
-    /// is what the reference implementation does.
-    backticks_memo: Vec<usize>,
+    /// is what the reference implementation does; the generation makes
+    /// entries from earlier subjects read as "never seen" without
+    /// re-zeroing the table.
+    backticks_memo: Vec<u64>,
+    memo_gen: u64,
+    /// Whether a code-span scan has run to the end of this subject
+    /// without finding a closer; only then do memo entries prove
+    /// absence, exactly as the reference parser gates them.
     scanned_for_backticks: bool,
     link_defs: &'defs HashMap<String, LinkDef<'a>>,
 }
@@ -173,12 +181,40 @@ pub(crate) fn drop_inline_tree(roots: Vec<crate::inline::InlineNode>) {
 /// the reference implementation's `MAXBACKTICKS`.
 const MAXBACKTICKS: usize = 1000;
 
+/// The bits of a memo entry that hold the recorded run position; the
+/// bits above them hold the recording call's generation.
+const MEMO_POS_MASK: u64 = (1 << 40) - 1;
+
 /// Parses one block's inline content.
 ///
 /// Trailing whitespace comes off the subject first, as the reference
 /// parser rtrims each block's inline text. `link_defs` holds the
 /// document's reference definitions; every leaf block sees them all.
-pub(crate) fn parse_inlines(
+/// Scratch buffers reused across one document's inline parses: the cell
+/// pool, delimiter list, bracket stack and backtick memo would otherwise
+/// be reallocated for every leaf block.
+pub(crate) struct InlineSession {
+    pool: Vec<Cell>,
+    delims: DelimList,
+    brackets: Vec<Bracket>,
+    backticks_memo: Vec<u64>,
+    memo_gen: u64,
+}
+
+impl InlineSession {
+    pub(crate) fn new() -> Self {
+        InlineSession {
+            pool: Vec::new(),
+            delims: DelimList::default(),
+            brackets: Vec::new(),
+            backticks_memo: Vec::new(),
+            memo_gen: 0,
+        }
+    }
+}
+
+pub(crate) fn parse_inlines_with(
+    session: &mut InlineSession,
     text: &str,
     link_defs: &HashMap<String, LinkDef<'_>>,
 ) -> Vec<InlineNode> {
@@ -187,27 +223,35 @@ pub(crate) fn parse_inlines(
         input: text,
         bytes: text.as_bytes(),
         pos: 0,
-        pool: Vec::new(),
+        pool: std::mem::take(&mut session.pool),
         head: None,
         tail: None,
-        delims: DelimList {
-            cells: Vec::new(),
-            last: None,
-        },
-        brackets: Vec::new(),
+        delims: std::mem::take(&mut session.delims),
+        brackets: std::mem::take(&mut session.brackets),
         no_link_openers: true,
         skip_comment: false,
         skip_cdata: false,
         skip_declaration: false,
         skip_pi: false,
-        backticks_memo: vec![0; 1001],
+        backticks_memo: std::mem::take(&mut session.backticks_memo),
+        memo_gen: session.memo_gen.wrapping_add(1),
         scanned_for_backticks: false,
         link_defs,
     };
+    session.memo_gen = parser.memo_gen;
     parser.run();
-    let pool = std::mem::take(&mut parser.pool);
-    let head = parser.head;
-    to_nodes(&pool, head)
+    let out = to_nodes(&parser.pool, parser.head);
+    // Give the grown buffers back to the session so the next leaf block
+    // reuses their capacity instead of allocating from scratch.
+    parser.pool.clear();
+    session.pool = parser.pool;
+    parser.delims.cells.clear();
+    parser.delims.last = None;
+    session.delims = parser.delims;
+    parser.brackets.clear();
+    session.brackets = parser.brackets;
+    session.backticks_memo = parser.backticks_memo;
+    out
 }
 
 /// Converts the surviving pool cells of one list into inline nodes.
@@ -509,9 +553,22 @@ impl<'defs, 'a> Parser<'defs, 'a> {
             numticks += 1;
         }
         let startpos = self.pos;
-        if numticks > MAXBACKTICKS
-            || (self.scanned_for_backticks && self.backticks_memo[numticks] <= startpos)
-        {
+        // The reference parser's optimistic check: only after a scan has
+        // run to the end without a closer does the memo prove absence.
+        // The generation makes entries from earlier subjects read as
+        // zero — the fresh-table state — without re-zeroing the buffer.
+        let optimistic_fail = if self.scanned_for_backticks && numticks <= MAXBACKTICKS {
+            let entry = self.backticks_memo.get(numticks).copied().unwrap_or(0);
+            let last_seen = if entry >> 40 == self.memo_gen {
+                (entry & MEMO_POS_MASK) as usize
+            } else {
+                0
+            };
+            last_seen <= startpos
+        } else {
+            false
+        };
+        if numticks > MAXBACKTICKS || optimistic_fail {
             self.push(Kind::Text("`".repeat(numticks)));
             return;
         }
@@ -544,7 +601,11 @@ impl<'defs, 'a> Parser<'defs, 'a> {
                 }
                 let numticks = pos - run_start;
                 if numticks <= MAXBACKTICKS {
-                    self.backticks_memo[numticks] = run_start;
+                    if self.backticks_memo.len() <= numticks {
+                        self.backticks_memo.resize(numticks + 1, 0);
+                    }
+                    self.backticks_memo[numticks] =
+                        (self.memo_gen << 40) | (run_start as u64 & MEMO_POS_MASK);
                 }
                 if numticks == length {
                     self.pos = pos;

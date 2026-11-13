@@ -130,6 +130,12 @@ struct Parser<'a> {
 impl<'a> Parser<'a> {
     fn new(src: &'a str) -> Self {
         let mut arena = Arena::new();
+        // Bulk-reserve nodes by input size so the arena vector does not
+        // grow (and memmove its contents) repeatedly mid-parse. The
+        // density is measured against the benchmark corpus (one node per
+        // ~38.5 bytes of prose); the divisor only has to under-count,
+        // extra capacity is wasted memory but not time.
+        arena.reserve(src.len() / 32 + 64);
         let root = arena.alloc(Node::Document, Span::new(0, src.len()));
         Parser {
             src,
@@ -789,20 +795,20 @@ impl<'a> Parser<'a> {
     /// content, as in the reference parser. The walk is iterative so
     /// arbitrarily deep nesting cannot overflow the call stack.
     fn parse_all_inlines(&mut self, root: NodeId) {
+        let mut session = crate::inline::InlineSession::new();
         let mut stack: Vec<NodeId> = self.arena.children(root).to_vec();
         while let Some(id) = stack.pop() {
             if matches!(self.arena.kind(id), Node::Paragraph | Node::Heading(_)) {
-                let text: String = self
-                    .arena
-                    .children(id)
-                    .iter()
-                    .filter_map(|child| match self.arena.kind(*child) {
-                        Node::Text(part) => Some(part.to_string()),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("");
-                let inlines = crate::inline::parse_inlines(&text, &self.link_defs);
+                // One append per text part: the parts already borrow the
+                // source, so no intermediate strings are built.
+                let mut text = String::new();
+                for child in self.arena.children(id) {
+                    if let Node::Text(part) = self.arena.kind(*child) {
+                        text.push_str(part);
+                    }
+                }
+                let inlines =
+                    crate::inline::parse_inlines_with(&mut session, &text, &self.link_defs);
                 self.arena.entry_mut(id).children.clear();
                 self.attach_inline_nodes(id, &inlines);
                 crate::inline::drop_inline_tree(inlines);
@@ -1232,6 +1238,18 @@ impl<'a> Parser<'a> {
     /// Only whitespace may separate consecutive definitions; the first
     /// non-definition text stops the scan.
     fn extract_link_defs(&mut self, text: &str) -> usize {
+        // Definitions start with `[` after leading whitespace, and the
+        // scan only continues after a successful definition, so when the
+        // first non-whitespace byte is not `[` nothing can be consumed.
+        // The pre-check skips the scanner for those paragraphs.
+        let bytes = text.as_bytes();
+        let mut probe = 0usize;
+        while matches!(bytes.get(probe), Some(b' ') | Some(b'\t') | Some(b'\n')) {
+            probe += 1;
+        }
+        if bytes.get(probe) != Some(&b'[') {
+            return 0;
+        }
         let mut consumed = 0usize;
         loop {
             let mut skip = 0usize;
