@@ -6,6 +6,7 @@
 //! it on Linux and macOS; Windows has no package, so the differential
 //! layer runs only where the reference binary exists).
 
+use std::path::PathBuf;
 use std::process::Command;
 
 /// The seed for the deterministic generator; fixed so failures reproduce.
@@ -193,6 +194,70 @@ fn differential_against_reference() {
     if let Some((input, ours, theirs)) = first_difference {
         panic!(
             "{failures} of 400 differential cases differ\ninput: {input:?}\nours:   {ours}\ntheirs: {theirs}"
+        );
+    }
+}
+
+/// The fuzzer's minimized corpus, double-checked against the reference
+/// implementation: every input the fuzzer found interesting must render
+/// identically, not merely without crashing. Runs only where the
+/// reference binary exists at the pinned version; skips when the corpus
+/// has not been checked out.
+#[test]
+fn differential_over_fuzz_corpus() {
+    let version = match cmark_version() {
+        None => {
+            eprintln!("skipping: the cmark reference binary is not installed");
+            return;
+        }
+        Some(version) if version != "0.31.2" => {
+            eprintln!("skipping: the installed cmark is {version}, not 0.31.2");
+            return;
+        }
+        Some(_) => {}
+    };
+    let _ = version;
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fuzz/corpus");
+    let Ok(corpus_dirs) = std::fs::read_dir(&dir) else {
+        eprintln!("skipping: no fuzz corpus directory");
+        return;
+    };
+    let mut files: Vec<PathBuf> = corpus_dirs
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|path| path.is_dir())
+        .flat_map(|sub| std::fs::read_dir(sub).expect("read corpus subdirectory"))
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|path| path.is_file())
+        .collect();
+    files.sort();
+    if files.is_empty() {
+        eprintln!("skipping: the fuzz corpus is empty");
+        return;
+    }
+    let mut failures = 0usize;
+    let mut checked = 0usize;
+    let mut first_difference: Option<(PathBuf, String, String, String)> = None;
+    for path in files {
+        let bytes = std::fs::read(&path).expect("read corpus input");
+        if bytes.len() > 256 * 1024 {
+            continue;
+        }
+        let input = String::from_utf8_lossy(&bytes).into_owned();
+        let theirs = reference_html(&input);
+        let ours = ours_html(&input);
+        checked += 1;
+        if ours_ending_in_newline(&ours) != theirs {
+            failures += 1;
+            if first_difference.is_none() {
+                first_difference = Some((path, input, ours, theirs));
+            }
+        }
+    }
+    assert!(checked > 0, "no corpus inputs were checked");
+    if let Some((path, input, ours, theirs)) = first_difference {
+        panic!(
+            "{failures} of {checked} fuzz-corpus inputs differ\nfile: {}\ninput: {input:?}\nours:   {ours}\ntheirs: {theirs}",
+            path.display()
         );
     }
 }
