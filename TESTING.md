@@ -54,17 +54,38 @@ cargo fuzz cmin to_html                                 # minimize the corpus
 
 A three-minute run per target is what CI (`.github/workflows/fuzz.yml`)
 executes on every push; the hour-long runs are for after each milestone,
-with results recorded under Results below. The minimized corpus is
-checked in so every future run starts from everything the fuzzer has
-learned.
+with results recorded under Results below.
+
+The minimized corpus is not committed in full (it is tens of megabytes
+of near-duplicate files); instead a deterministic subset is checked in
+under `fuzz/seeds/`, produced by selecting one file per coverage edge
+from the minimized corpus, so every local run starts from the fuzzer's
+learned edges. `tests/differential.rs` runs the entire seed set against
+cmark 0.31.2 on every `cargo test`, byte-identical output required, so
+fuzzer-found inputs become a permanent differential fixture.
 
 Document each other command here as it exists (benchmarks, mutation
 testing), with the time it takes.
 
 ## Known Differences
 
-List here every case where the output deliberately differs from the reference implementation in the differential suite, with the reason and a link to the decision record. The list starts empty and should stay short.
+List here every case where the output deliberately differs from the reference implementation in the differential suite, with the reason and a link to a decision record. The list starts empty and should stay short.
 
 ## Results
 
-Record the latest long-run results here: fuzzing hours per target and findings, mutation testing survival rate and the explained survivors, coverage per crate, and the date of each.
+Latest long-run results (2026-11-13):
+
+- `to_html` (full pipeline): 1 hour, 8.27M executions, 0 crashes, 0
+  hangs, 0 OOMs. One real panic found in an earlier run (title
+  post-processing slicing past a one-byte quoted title) fixed and made a
+  regression test.
+- `parse_document` (parser only): 1 hour, 11.67M executions, 0 crashes,
+  0 hangs, 0 OOMs.
+- Corpora after `cargo fuzz cmin`: 9,334 files (`to_html`), 8,919 files
+  (`parse_document`), from ~35k raw files per target.
+- Seed subset committed: 490 files (`to_html`), 472 files
+  (`parse_document`), one per coverage edge; all 962 pass the
+  differential test.
+
+Mutation testing, coverage numbers and benchmark numbers are recorded
+here as those workstreams come online.
