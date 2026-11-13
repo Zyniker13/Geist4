@@ -205,7 +205,7 @@ fn differential_against_reference() {
 /// has not been checked out.
 #[test]
 fn differential_over_fuzz_corpus() {
-    let version = match cmark_version() {
+    match cmark_version() {
         None => {
             eprintln!("skipping: the cmark reference binary is not installed");
             return;
@@ -215,8 +215,7 @@ fn differential_over_fuzz_corpus() {
             return;
         }
         Some(_) => {}
-    };
-    let _ = version;
+    }
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fuzz/corpus");
     let Ok(corpus_dirs) = std::fs::read_dir(&dir) else {
         eprintln!("skipping: no fuzz corpus directory");

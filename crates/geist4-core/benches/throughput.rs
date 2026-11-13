@@ -6,6 +6,10 @@
 //! local use; CI's regression gate uses instruction counts instead
 //! (see docs/benchmarks.md).
 
+// criterion's macros expand undocumented items; benches are not a
+// published API, so the missing-docs lint does not apply here.
+#![allow(missing_docs)]
+
 use std::hint::black_box;
 use std::path::Path;
 
