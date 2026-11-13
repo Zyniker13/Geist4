@@ -100,7 +100,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          DESC=$(grep -o "Instructions: *[0-9]*" iai.log | grep -o "[0-9]*" | tr '\n' ' ')
+          DESC=$(sed $'s/\x1b\\[[0-9;]*[a-zA-Z]//g' iai.log | grep -o "Instructions:[^0-9]*[0-9]*" | grep -o "[0-9]*$" | tr '\n' ' ')
           gh api "repos/$GH_REPO/statuses/${{ github.sha }}" \
             -f state=success -f context=iai-counts -f description="$DESC" > /dev/null
       - name: Upload the instruction-count log
