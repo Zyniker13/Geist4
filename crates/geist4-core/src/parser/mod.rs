@@ -257,6 +257,35 @@ impl<'p, 'a, 'l, 'ext> StartInner<'p, 'a, 'l, 'ext> {
         self.fired = true;
     }
 
+    /// Consumes `bytes` more bytes of the line at the current content
+    /// position without marking the line consumed or stopping later
+    /// hooks: the remaining line still opens a paragraph in the open
+    /// container as usual, with the reference's exact walk-break
+    /// behavior for hooks that peel a prefix off a kept line.
+    pub(crate) fn consume(&mut self, bytes: usize) {
+        self.cursor.bump_n(bytes);
+    }
+
+    /// The full current line, from its first byte, without its line
+    /// ending. The cursor holds the line slice for its whole life, so
+    /// container prefixes and leading whitespace are still in it.
+    pub(crate) fn raw_line(&self) -> &'l [u8] {
+        self.cursor.line()
+    }
+
+    /// The deepest open frame's node when it is a plain container.
+    pub(crate) fn container_node(&self) -> Option<NodeId> {
+        let frame = self.parser.open.last().unwrap();
+        match frame.kind {
+            OpenKind::Paragraph { .. }
+            | OpenKind::Extension { .. }
+            | OpenKind::Heading
+            | OpenKind::CodeBlock { .. }
+            | OpenKind::HtmlBlock { .. } => None,
+            _ => Some(frame.id),
+        }
+    }
+
     /// What the new block would open in.
     pub(crate) fn container(&self) -> crate::extension::StartContainer {
         match &self.parser.open.last().unwrap().kind {
@@ -1725,8 +1754,11 @@ fn decode_info_string(raw: &str) -> Option<String> {
         return None;
     }
     let unescaped = crate::inline::unescape_entities(raw);
+    // The trim follows the reference's `cmark_isspace`, whose class is
+    // the spec's whitespace definition: vertical tab and form feed are
+    // whitespace and trim away.
     let trimmed =
-        unescaped.trim_matches(|c: char| matches!(c, ' ' | '\t' | '\u{b}' | '\u{c}' | '\r' | '\n'));
+        unescaped.trim_matches(|c: char| matches!(c, ' ' | '\t' | '\x0B' | '\x0C' | '\r' | '\n'));
     if trimmed.is_empty() {
         return None;
     }
@@ -1753,7 +1785,10 @@ pub(crate) fn normalize_label_into(label: &str, out: &mut String) {
     out.clear();
     let mut pending_ws = false;
     for ch in label.chars() {
-        if matches!(ch, ' ' | '\t' | '\n' | '\r' | '\u{b}' | '\u{c}') {
+        // The reference's label whitespace is `cmark_isspace`, whose
+        // class is the spec's whitespace definition: vertical tab and
+        // form feed are whitespace in a label too.
+        if matches!(ch, ' ' | '\t' | '\x0B' | '\x0C' | '\n' | '\r') {
             pending_ws = true;
             continue;
         }

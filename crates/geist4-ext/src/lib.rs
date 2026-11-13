@@ -82,5 +82,12 @@ pub fn tables() -> std::sync::Arc<dyn Extension> {
     std::sync::Arc::new(tables::Tables)
 }
 
+/// The task list item extension as a shared extension value.
+#[must_use]
+pub fn tasklist() -> std::sync::Arc<dyn Extension> {
+    tasklist::tasklist()
+}
+
 pub mod autolink;
 pub mod tables;
+pub mod tasklist;

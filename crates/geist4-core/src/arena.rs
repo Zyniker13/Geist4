@@ -1,5 +1,6 @@
 //! The document tree: nodes in one arena, referred to by index.
 
+use crate::extension::AttrValue;
 use crate::node::Node;
 use crate::span::Span;
 
@@ -38,13 +39,24 @@ pub struct NodeEntry<'a> {
 #[derive(Debug, Default)]
 pub struct Arena<'a> {
     nodes: Vec<NodeEntry<'a>>,
+    /// Per-node extension attributes, indexed by node id. Entries stay
+    /// empty (and unallocated) until a hook sets an attribute.
+    attrs: Vec<Vec<(String, crate::extension::AttrValue)>>,
+    /// Per-node owning extension, indexed by node id: the extension's
+    /// position in the parse options' extension list, set when the parse
+    /// phase claims a built-in node for an extension.
+    ext_owner: Vec<Option<usize>>,
 }
 
 impl<'a> Arena<'a> {
     /// Creates an empty arena.
     #[must_use]
     pub fn new() -> Self {
-        Arena { nodes: Vec::new() }
+        Arena {
+            nodes: Vec::new(),
+            attrs: Vec::new(),
+            ext_owner: Vec::new(),
+        }
     }
 
     /// Reserves room for `additional` more nodes, so bulk allocation does
@@ -113,6 +125,67 @@ impl<'a> Arena<'a> {
     /// Removes and returns the last child of `parent`, if any.
     pub fn pop_child(&mut self, parent: NodeId) -> Option<NodeId> {
         self.nodes[parent.0].children.pop()
+    }
+
+    /// Sets an attribute on a node, replacing a same-named attribute and
+    /// keeping the first set order otherwise. Attributes carry extension
+    /// state on a node the parse phase claimed; the renderer hands them
+    /// to the claiming extension's render override.
+    pub fn set_attr(&mut self, id: NodeId, name: impl Into<String>, value: AttrValue) {
+        let slot = self.attr_slot(id);
+        let name = name.into();
+        if let Some(existing) = slot.iter_mut().find(|(n, _)| *n == name) {
+            existing.1 = value;
+        } else {
+            slot.push((name, value));
+        }
+    }
+
+    /// The named attribute's value on a node, if a hook set one.
+    #[must_use]
+    pub fn attr(&self, id: NodeId, name: &str) -> Option<&AttrValue> {
+        self.attrs
+            .get(id.0)
+            .and_then(|attrs| attrs.iter().find(|(n, _)| n == name))
+            .map(|(_, value)| value)
+    }
+
+    /// The attributes set on a node, in set order; empty when none were.
+    #[must_use]
+    pub fn attrs(&self, id: NodeId) -> &[(String, AttrValue)] {
+        self.attrs.get(id.0).map_or(&[], Vec::as_slice)
+    }
+
+    /// Marks the node as claimed by the extension at `index` in the
+    /// parse options' extension list. A claimed node renders through
+    /// that extension's [`Extension::render_override`](crate::extension::Extension::render_override()) hook instead of
+    /// its built-in renderer.
+    pub fn set_extension(&mut self, id: NodeId, index: usize) {
+        let slot = self.owner_slot(id);
+        *slot = Some(index);
+    }
+
+    /// The index of the extension that claimed the node during parsing,
+    /// if any.
+    #[must_use]
+    pub fn extension_of(&self, id: NodeId) -> Option<usize> {
+        self.ext_owner.get(id.0).copied().flatten()
+    }
+
+    /// The attribute slot for `id`, grown to fit.
+    fn attr_slot(&mut self, id: NodeId) -> &mut Vec<(String, AttrValue)> {
+        if self.attrs.len() <= id.0 {
+            self.attrs.resize_with(id.0 + 1, Vec::new);
+        }
+        &mut self.attrs[id.0]
+    }
+
+    /// The owner slot for `id`, grown to fit.
+    fn owner_slot(&mut self, id: NodeId) -> &mut Option<usize> {
+        if self.ext_owner.len() <= id.0 {
+            self.ext_owner.resize_with(id.0 + 1, || None);
+        }
+        &mut self.ext_owner[id.0]
     }
 
     /// Inserts `child` into `parent`'s children at `index`, shifting the

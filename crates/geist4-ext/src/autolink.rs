@@ -24,9 +24,10 @@ pub struct Autolink;
 pub const NAME: &str = "autolink";
 
 /// ASCII whitespace, the class the matchers' byte tests use
-/// (`cmark_isspace`).
+/// (`cmark_isspace`: space, tab, newline, carriage return — vertical
+/// tab and form feed are ordinary bytes to it).
 fn is_space_byte(b: u8) -> bool {
-    matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0B | 0x0C)
+    matches!(b, b' ' | b'\t' | b'\n' | b'\r')
 }
 
 /// Decodes the UTF-8 character at the start of `data`, as the

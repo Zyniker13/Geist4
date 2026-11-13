@@ -72,10 +72,12 @@ enum Step {
     Extension(crate::extension::ExtNode, NodeId),
 }
 
-struct Renderer<'a> {
-    arena: &'a Arena<'a>,
-    extensions: &'a [std::sync::Arc<dyn crate::extension::Extension>],
-    out: String,
+/// The renderer's internals, visible to the extension context types in
+/// `extension` that drive them.
+pub(crate) struct Renderer<'a> {
+    pub(crate) arena: &'a Arena<'a>,
+    pub(crate) extensions: &'a [std::sync::Arc<dyn crate::extension::Extension>],
+    pub(crate) out: String,
 }
 
 impl Renderer<'_> {
@@ -258,11 +260,73 @@ impl Renderer<'_> {
     }
 
     /// Expands one list item: `<li>`, its children, then `</li>`.
+    ///
+    /// An item the parse phase claimed for an extension renders through
+    /// that extension's render override instead.
     fn item(&mut self, id: NodeId, tight: bool, stack: &mut Vec<Step>) {
+        if let Some(ext_index) = self.arena.extension_of(id) {
+            if let Some(ext) = self.extensions.get(ext_index) {
+                self.render_marked_item(ext, id, tight);
+                return;
+            }
+            // The claiming extension is not registered for this render;
+            // the item falls back to its built-in rendering.
+        }
         self.cr();
         self.out.push_str("<li>");
         stack.push(Step::Text("</li>\n".to_owned()));
         self.push_children(id, tight, stack);
+    }
+
+    /// Renders a claimed item through its extension's render override:
+    /// the hook writes the whole item's output, pulling the children in
+    /// through the override children so each child renders with the
+    /// built-in renderer's exact conventions.
+    fn render_marked_item(
+        &mut self,
+        ext: &std::sync::Arc<dyn crate::extension::Extension>,
+        id: NodeId,
+        tight: bool,
+    ) {
+        self.cr();
+        let kind = match self.arena.kind(id) {
+            Node::Item(_) => "item",
+            _ => return,
+        };
+        let attrs = self.arena.attrs(id).to_vec();
+        let children_ids = self.arena.children(id).to_vec();
+        let mut saved = std::mem::take(&mut self.out);
+        let mut children = crate::extension::OverrideChildren {
+            renderer: self,
+            children: &children_ids,
+            tight,
+            next: 0,
+        };
+        let core = crate::extension::CoreNode {
+            kind,
+            attrs: &attrs,
+        };
+        ext.render_override(&core, &mut children, &mut saved);
+        self.out = saved;
+    }
+
+    /// Renders one block node into a given output string with the same
+    /// walk and conventions as the main rendering pass. The override
+    /// children use it, with `self.out` swapped out for the caller's
+    /// buffer so every conditional newline sees the output as it stands.
+    pub(crate) fn render_block_into(&mut self, id: NodeId, tight: bool, out: &mut String) {
+        std::mem::swap(self.out_mut(), out);
+        let mut stack = Vec::new();
+        stack.push(Step::Block(id, tight));
+        while let Some(step) = stack.pop() {
+            self.run(step, &mut stack);
+        }
+        std::mem::swap(self.out_mut(), out);
+    }
+
+    /// The renderer's output buffer, borrowed mutably through the field.
+    fn out_mut(&mut self) -> &mut String {
+        &mut self.out
     }
 
     /// Writes the opening tag of a list: `<ol>` with a `start` attribute

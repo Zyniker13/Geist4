@@ -69,6 +69,55 @@ pub struct RenderedChild<'a> {
     pub html: String,
 }
 
+/// A core node an extension claimed during parsing, handed to
+/// [`Extension::render_override`](crate::extension::Extension::render_override()).
+///
+/// Claiming happens through [`crate::arena::Arena::set_extension`] (with attributes
+/// set alongside through [`crate::arena::Arena::set_attr`]); the node then renders
+/// through the claiming extension instead of its built-in renderer,
+/// which is how task list items turn a list item into a checkbox.
+pub struct CoreNode<'a> {
+    /// The node kind's name: `"item"`, `"heading"`, `"paragraph"` and
+    /// so on, matching the crate's node names.
+    pub kind: &'a str,
+    /// The attributes the parse phase set on the node, in set order.
+    pub attrs: &'a [(String, AttrValue)],
+}
+
+/// The children of a claimed core node, handed to
+/// [`Extension::render_override`](crate::extension::Extension::render_override()).
+///
+/// The hook writes to the output it is given and pulls the node's
+/// children in, in order, with [`render_next`](Self::render_next),
+/// which renders each child the way the built-in renderer would,
+/// including its conditional newlines, against the output as it
+/// stands. Children the hook never pulls produce no output.
+pub struct OverrideChildren<'c, 'doc> {
+    pub(crate) renderer: &'c mut crate::basic_html::Renderer<'doc>,
+    pub(crate) children: &'c [crate::arena::NodeId],
+    pub(crate) tight: bool,
+    pub(crate) next: usize,
+}
+
+impl OverrideChildren<'_, '_> {
+    /// How many children have not been rendered yet.
+    #[must_use]
+    pub fn remaining(&self) -> usize {
+        self.children.len() - self.next
+    }
+
+    /// Renders the next child into `out` with the built-in renderer's
+    /// conventions. Returns false when no child remains.
+    pub fn render_next(&mut self, out: &mut String) -> bool {
+        let Some(&child) = self.children.get(self.next) else {
+            return false;
+        };
+        self.next += 1;
+        self.renderer.render_block_into(child, self.tight, out);
+        true
+    }
+}
+
 /// An extension: hooks for block starts and continuation, inline
 /// triggers, post-processing passes, and renderers for its node kinds.
 ///
@@ -117,6 +166,22 @@ pub trait Extension: Send + Sync {
     /// inline content, others as blocks. Unrendered kinds produce no
     /// output and are reported by `check`.
     fn render(&self, node: &ExtNode, children: &[RenderedChild<'_>], out: &mut String) {
+        let _ = (node, children, out);
+    }
+
+    /// Renders a core node this extension claimed during parsing with
+    /// [`crate::arena::Arena::set_extension`]. Runs instead of the node's built-in
+    /// renderer: the hook writes the node's whole output — opening,
+    /// children, closing — to `out`, pulling the children in with
+    /// [`OverrideChildren::render_next`]. The children arrive the way
+    /// the built-in renderer would have rendered them, so a hook that
+    /// changes only the wrapping keeps the built-in child output.
+    fn render_override(
+        &self,
+        node: &CoreNode<'_>,
+        children: &mut OverrideChildren<'_, '_>,
+        out: &mut String,
+    ) {
         let _ = (node, children, out);
     }
 
@@ -291,6 +356,33 @@ impl<'p, 'a, 'l, 'ext> BlockStartCtx<'p, 'a, 'l, 'ext> {
     /// extension block directly.
     pub fn absorb_line(&mut self) {
         self.inner.absorb_line();
+    }
+
+    /// Consumes `bytes` more bytes of the line at the current content
+    /// position without opening a block. The rest of the line becomes
+    /// content of the open container as usual — typically a paragraph
+    /// — and no further block-start scanning happens on the line. A
+    /// hook that peels a prefix off a line the container itself keeps
+    /// uses this, as the task list marker does.
+    pub fn consume(&mut self, bytes: usize) {
+        self.inner.consume(bytes);
+    }
+
+    /// The full current line, from its first byte — container prefixes
+    /// and leading whitespace included — without its line ending. The
+    /// hook's [`line`](Self::line) starts at the first non-space byte
+    /// of the content; a hook that must match the line the way the
+    /// reference implementation's scanners see it — from the very
+    /// start, list markers and quote marks included — scans this.
+    pub fn raw_line(&self) -> &'l [u8] {
+        self.inner.raw_line()
+    }
+
+    /// The deepest open block's node when it is a plain container (the
+    /// document, a block quote, a list or a list item), so a hook can
+    /// inspect it and mark it with the arena.
+    pub fn container_node(&self) -> Option<crate::arena::NodeId> {
+        self.inner.container_node()
     }
 
     /// The open paragraph's accumulated text, if the deepest open

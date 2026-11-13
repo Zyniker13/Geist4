@@ -48,18 +48,75 @@ fn setext_headings() {
 
 #[test]
 fn reference_whitespace_and_control_bytes() {
-    // The reference scanner's whitespace includes VT and FF: list markers,
-    // HTML block starts and tag scanning accept them, and a line's
-    // trailing run of them is trimmed before inline parsing.
+    // The reference's `cmark_isspace` class is the spec's whitespace
+    // definition and includes vertical tab and form feed: they are
+    // whitespace to the marker checks, the per-line trailing trim, the
+    // fence-info trim, link destinations and label normalization. The
+    // re2c scanner classes and the emphasis flanking class match that
+    // definition. These expectations come from the reference binary.
     assert_eq!(html("+\u{b}"), "<ul>\n<li></li>\n</ul>");
     assert_eq!(html("*\u{c}"), "<ul>\n<li></li>\n</ul>");
+    assert_eq!(html("-\u{b} foo"), "<ul>\n<li>\u{b} foo</li>\n</ul>");
+    assert_eq!(html("\u{b}"), "<p></p>");
+    assert_eq!(html(" \u{b} \n"), "<p></p>");
+    assert_eq!(html("foo \u{b}\n"), "<p>foo</p>");
     assert_eq!(html("a\u{b} \nb"), "<p>a\nb</p>");
+    assert_eq!(html("a\u{b}\nb"), "<p>a\nb</p>");
+    assert_eq!(html("a\u{b}b"), "<p>a\u{b}b</p>");
     assert_eq!(html("0!\n<P\u{b}"), "<p>0!</p>\n<P\u{b}");
     assert_eq!(html("a\r\rb"), "<p>a</p>\n<p>b</p>");
+    assert_eq!(html("#\u{b}"), "<p>#</p>");
+    assert_eq!(html("# \u{b}"), "<h1></h1>");
+    assert_eq!(html("# \u{b}c"), "<h1>\u{b}c</h1>");
+    // A thematic break's trailing run stops at vertical tab.
+    assert_eq!(
+        html("* * *\u{b}"),
+        "<ul>\n<li>\n<ul>\n<li>\n<ul>\n<li></li>\n</ul>\n</li>\n</ul>\n</li>\n</ul>"
+    );
+    assert_eq!(html(">\u{b}"), "<blockquote>\n<p></p>\n</blockquote>");
+    // A fence info keeps interior VT and FF but loses them at the ends.
     assert_eq!(html("```\t\u{c}\nx\n```"), "<pre><code>x\n</code></pre>");
+    assert_eq!(
+        html("```\u{c}foo\nx\n```"),
+        "<pre><code class=\"language-foo\">x\n</code></pre>"
+    );
+    assert_eq!(
+        html("```a\u{b}\nx\n```"),
+        "<pre><code class=\"language-a\">x\n</code></pre>"
+    );
     // Control bytes that are not reference whitespace may appear in a
     // bare link destination; they are percent-encoded on output.
     assert_eq!(html("[a]:\u{2}\n\n[a]"), "<p><a href=\"%02\">a</a></p>");
+    // A destination ends at a vertical tab: the definition fails and the
+    // inline link keeps its text.
+    assert_eq!(html("[a]: /u\u{b}\n\n[a]"), "<p>[a]: /u</p>\n<p>[a]</p>");
+    assert_eq!(html("[a](/u\u{b}v)"), "<p>[a](/u\u{b}v)</p>");
+    assert_eq!(
+        html("[a](/u\u{b} \"t\")"),
+        "<p><a href=\"/u\" title=\"t\">a</a></p>"
+    );
+    // A pointy destination may hold them; the ends trim away, the
+    // interior percent-encodes.
+    assert_eq!(html("[a](<\u{b}/u\u{c}>)"), "<p><a href=\"/u\">a</a></p>");
+    assert_eq!(html("[a](<u\u{b}v>)"), "<p><a href=\"u%0Bv\">a</a></p>");
+    // A title keeps interior VT and FF.
+    assert_eq!(
+        html("[a]: /u \"a\u{b}b\"\n\n[a]"),
+        "<p><a href=\"/u\" title=\"a\u{b}b\">a</a></p>"
+    );
+    // A link label's whitespace runs collapse per `cmark_isspace`; NBSP
+    // is not label whitespace.
+    assert_eq!(
+        html("[a\u{b}b]: /u\n\n[a b]"),
+        "<p><a href=\"/u\">a b</a></p>"
+    );
+    assert_eq!(html("[a\u{a0}b]: /u\n\n[A B]"), "<p>[A B]</p>");
+    // Flanking whitespace is the spec's Unicode set: VT is not one, FF
+    // and NBSP are.
+    assert_eq!(html("**a\u{b}** b"), "<p><strong>a\u{b}</strong> b</p>");
+    assert_eq!(html("**a\u{c}** b"), "<p>**a\u{c}** b</p>");
+    assert_eq!(html("**a\u{a0}** b"), "<p>**a\u{a0}** b</p>");
+    assert_eq!(html("a\u{a0}**b**"), "<p>a\u{a0}<strong>b</strong></p>");
     // An indented code block's final whitespace-only line is dropped.
     assert_eq!(html("\tx\u{1f}\n\t\t"), "<pre><code>x\u{1f}\n</code></pre>");
     // A lazy continuation line keeps its leading whitespace, and a

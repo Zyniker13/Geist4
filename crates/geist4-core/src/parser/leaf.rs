@@ -827,7 +827,7 @@ fn scan_destination(text: &str) -> Option<(String, usize)> {
                 depth -= 1;
                 i += 1;
             }
-            b' ' | b'\t' | b'\n' | b'\x0B' | b'\x0C' | b'\r' => break,
+            b' ' | b'\t' | b'\x0B' | b'\x0C' | b'\n' | b'\r' => break,
             _ => i += 1,
         }
     }

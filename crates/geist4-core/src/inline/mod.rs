@@ -226,7 +226,10 @@ pub(crate) fn parse_inlines_into(
     parent: crate::arena::NodeId,
     extensions: Option<&[std::sync::Arc<dyn crate::extension::Extension>]>,
 ) {
-    let text = text.trim_end_matches([' ', '\t', '\u{b}', '\u{c}', '\r', '\n']);
+    // The paragraph's text loses trailing whitespace, as the reference's
+    // `cmark_isspace` rtrim does; the spec's whitespace definition
+    // includes vertical tab and form feed.
+    let text = text.trim_end_matches([' ', '\t', '\x0B', '\x0C', '\r', '\n']);
     // Each extension's trigger bytes join the dispatch table; the same
     // byte from several extensions calls each hook in registration
     // order.
@@ -758,8 +761,9 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
             end += 1;
         }
         let mut text = self.input[start..end].to_string();
-        // A text run ending at a newline loses its trailing spaces, tabs,
-        // vertical tabs and form feeds, as in the reference rtrim.
+        // A text run ending at a newline loses its trailing whitespace,
+        // as the reference's newline handling does; the spec's whitespace
+        // definition includes vertical tab and form feed.
         if end < self.bytes.len() && matches!(self.bytes[end], b'\n' | b'\r') {
             while matches!(
                 text.as_bytes().last(),
@@ -1747,8 +1751,11 @@ pub(crate) fn unescape_entities(text: &str) -> String {
 /// Cleans a link destination: trims whitespace, decodes entities, then
 /// removes backslash escapes.
 pub(crate) fn clean_url(url: &str) -> String {
+    // The trim follows the reference's `cmark_isspace`, whose class is
+    // the spec's whitespace definition: vertical tab and form feed are
+    // whitespace and trim away.
     let trimmed =
-        url.trim_matches(|c: char| matches!(c, ' ' | '\t' | '\u{b}' | '\u{c}' | '\r' | '\n'));
+        url.trim_matches(|c: char| matches!(c, ' ' | '\t' | '\x0B' | '\x0C' | '\r' | '\n'));
     let decoded = entities::unescape_html_f(trimmed);
     unescape_backslashes(&decoded)
 }
@@ -1775,8 +1782,11 @@ pub(crate) fn clean_title(title: &str) -> Option<String> {
 /// Cleans an autolink destination: trims, prepends `mailto:` for email
 /// autolinks, then decodes entities.
 fn clean_autolink(url: &str, is_email: bool) -> String {
+    // The trim follows the reference's `cmark_isspace`, whose class is
+    // the spec's whitespace definition: vertical tab and form feed are
+    // whitespace and trim away.
     let trimmed =
-        url.trim_matches(|c: char| matches!(c, ' ' | '\t' | '\u{b}' | '\u{c}' | '\r' | '\n'));
+        url.trim_matches(|c: char| matches!(c, ' ' | '\t' | '\x0B' | '\x0C' | '\r' | '\n'));
     let mut out = String::new();
     if is_email {
         out.push_str("mailto:");
