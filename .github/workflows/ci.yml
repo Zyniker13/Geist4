@@ -73,8 +73,8 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal --no-self-update
           rustup default stable
-      - name: Check valgrind is available
-        run: valgrind --version
+      - name: Install valgrind
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends valgrind && valgrind --version
       - name: Check the runner version matches Cargo.lock
         run: |
           lock=$(python3 -c "import re;s=open('Cargo.lock').read();m=re.search(r'name = \"iai-callgrind\"\\nversion = \"([^\"]+)\"',s);print(m.group(1))")
