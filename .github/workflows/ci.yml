@@ -51,6 +51,12 @@ jobs:
         with:
           name: check-log-${{ matrix.os }}
           path: check.log
+      - name: Publish the failure tail as commit statuses (temporary diagnostic)
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/ci_publish_tail.py "${{ github.sha }}" "${{ github.repository }}" "$GH_TOKEN"
 
   msrv:
     name: MSRV check
