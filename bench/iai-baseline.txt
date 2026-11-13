@@ -1,4 +1,4 @@
 # Instruction counts from `cargo bench -p geist4-bench --bench iai` (iai-callgrind, Linux).
 # Update with tools/update_iai_baseline.py after a deliberate, reviewed performance change.
-iai::parse_to_html_group::spec_parse_to_html spec 30023245
-iai::parse_to_html_group::corpus_parse_to_html corpus:corpus_text() 13360644
+iai::parse_to_html_group::spec_parse_to_html spec 22350528
+iai::parse_to_html_group::corpus_parse_to_html corpus:corpus_text() 10953331
