@@ -114,12 +114,17 @@ fn generate(rng: &mut Rng, token_count: usize) -> String {
     out
 }
 
-fn cmark_available() -> bool {
-    Command::new("cmark")
-        .arg("--version")
-        .output()
-        .map(|out| out.status.success())
-        .unwrap_or(false)
+/// Returns the reference implementation's version, or `None` when the
+/// binary is missing. Only 0.31.2 output matches this suite: other
+/// versions differ by spec changes, so they must not be compared.
+fn cmark_version() -> Option<String> {
+    let out = Command::new("cmark").arg("--version").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let version = text.split_whitespace().nth(2)?;
+    Some(version.trim().to_owned())
 }
 
 fn reference_html(src: &str) -> String {
@@ -154,9 +159,19 @@ fn ours_ending_in_newline(ours: &str) -> String {
 
 #[test]
 fn differential_against_reference() {
-    if !cmark_available() {
-        eprintln!("skipping: the cmark reference binary is not installed");
-        return;
+    match cmark_version() {
+        None => {
+            eprintln!("skipping: the cmark reference binary is not installed");
+            return;
+        }
+        Some(version) if version != "0.31.2" => {
+            eprintln!(
+                "skipping: the installed cmark is {version}, but this suite \
+                 compares against 0.31.2; install cmark 0.31.2 to run it"
+            );
+            return;
+        }
+        Some(_) => {}
     }
     let mut rng = Rng(SEED);
     let mut failures = 0usize;
