@@ -803,12 +803,14 @@ impl<'a> Parser<'a> {
     /// arbitrarily deep nesting cannot overflow the call stack.
     fn parse_all_inlines(&mut self, root: NodeId) {
         let mut session = crate::inline::InlineSession::new();
+        // One join buffer reused across every leaf block's inline text.
+        let mut text = String::new();
         let mut stack: Vec<NodeId> = self.arena.children(root).to_vec();
         while let Some(id) = stack.pop() {
             if matches!(self.arena.kind(id), Node::Paragraph | Node::Heading(_)) {
                 // One append per text part: the parts already borrow the
                 // source, so no intermediate strings are built.
-                let mut text = String::new();
+                text.clear();
                 for child in self.arena.children(id) {
                     if let Node::Text(part) = self.arena.kind(*child) {
                         text.push_str(part);

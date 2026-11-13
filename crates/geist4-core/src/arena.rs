@@ -101,7 +101,13 @@ impl<'a> Arena<'a> {
 
     /// Appends `child` as the last child of `parent`.
     pub fn push_child(&mut self, parent: NodeId, child: NodeId) {
-        self.nodes[parent.0].children.push(child);
+        let kids = &mut self.nodes[parent.0].children;
+        // Most containers hold a handful of children; one reserve keeps
+        // the 1 -> 2 -> 4 regrowth from reallocating per append.
+        if kids.capacity() == 0 {
+            kids.reserve(4);
+        }
+        kids.push(child);
     }
 
     /// Removes and returns the last child of `parent`, if any.
