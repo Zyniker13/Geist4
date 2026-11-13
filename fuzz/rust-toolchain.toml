@@ -1,0 +1,5 @@
+# cargo-fuzz builds with libFuzzer instrumentation flags that need the
+# nightly compiler; this file scopes nightly to the fuzz crate only,
+# while the rest of the workspace stays on the stable toolchain.
+[toolchain]
+channel = "nightly"

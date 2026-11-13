@@ -39,7 +39,27 @@ Each suite below says where it lives and how it runs. Paths and commands are the
 scripts/check.sh            # exactly what CI runs
 ```
 
-Document each other command here as it exists (fuzzing, long property runs, benchmarks, mutation testing), with the time it takes.
+### Fuzzing
+
+The `fuzz/` crate holds the targets; it builds with nightly (a scoped
+`fuzz/rust-toolchain.toml`) and is excluded from the workspace. Run
+from inside `fuzz/`:
+
+```sh
+cd fuzz
+cargo fuzz run to_html        -- -max_total_time=3600  # the full pipeline
+cargo fuzz run parse_document -- -max_total_time=3600  # parser only
+cargo fuzz cmin to_html                                 # minimize the corpus
+```
+
+A three-minute run per target is what CI (`.github/workflows/fuzz.yml`)
+executes on every push; the hour-long runs are for after each milestone,
+with results recorded under Results below. The minimized corpus is
+checked in so every future run starts from everything the fuzzer has
+learned.
+
+Document each other command here as it exists (benchmarks, mutation
+testing), with the time it takes.
 
 ## Known Differences
 
