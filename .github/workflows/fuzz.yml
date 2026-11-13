@@ -32,6 +32,11 @@ jobs:
           rustup default nightly
       - name: Install cargo-fuzz
         run: cargo install --locked cargo-fuzz@0.13.2
+      - name: Seed the corpus from the checked-in seeds
+        working-directory: fuzz
+        run: |
+          mkdir -p corpus/${{ matrix.target }}
+          cp seeds/${{ matrix.target }}/* corpus/${{ matrix.target }}/
       - name: Run (3 minutes)
         working-directory: fuzz
         run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=180 -max_len=4096

@@ -149,6 +149,12 @@ struct Parser<'defs, 'a> {
     skip_cdata: bool,
     skip_declaration: bool,
     skip_pi: bool,
+    /// Positions of backtick runs seen while scanning for code-span
+    /// closers, as in the reference parser's memo table. Entries persist
+    /// across scans, including successful ones that exited early, which
+    /// is what the reference implementation does.
+    backticks_memo: Vec<usize>,
+    scanned_for_backticks: bool,
     link_defs: &'defs HashMap<String, LinkDef<'a>>,
 }
 
@@ -162,6 +168,10 @@ pub(crate) fn drop_inline_tree(roots: Vec<crate::inline::InlineNode>) {
         // `inline` drops here with its children already drained.
     }
 }
+
+/// Backtick runs longer than this are never scanned for closers, as in
+/// the reference implementation's `MAXBACKTICKS`.
+const MAXBACKTICKS: usize = 1000;
 
 /// Parses one block's inline content.
 ///
@@ -190,6 +200,8 @@ pub(crate) fn parse_inlines(
         skip_cdata: false,
         skip_declaration: false,
         skip_pi: false,
+        backticks_memo: vec![0; 1001],
+        scanned_for_backticks: false,
         link_defs,
     };
     parser.run();
@@ -420,9 +432,13 @@ impl<'defs, 'a> Parser<'defs, 'a> {
             end += 1;
         }
         let mut text = self.input[start..end].to_string();
-        // A text run ending at a newline loses its trailing spaces and tabs.
+        // A text run ending at a newline loses its trailing spaces, tabs,
+        // vertical tabs and form feeds, as in the reference rtrim.
         if end < self.bytes.len() && matches!(self.bytes[end], b'\n' | b'\r') {
-            while text.ends_with(' ') || text.ends_with('\t') {
+            while matches!(
+                text.as_bytes().last(),
+                Some(b' ') | Some(b'\t') | Some(b'\x0B') | Some(b'\x0C')
+            ) {
                 text.pop();
             }
         }
@@ -482,29 +498,42 @@ impl<'defs, 'a> Parser<'defs, 'a> {
         }
     }
 
-    /// Handles a code span or a run of literal backticks.
+    /// Handles a code span or a run of literal backticks, following the
+    /// reference parser: scan forward for a closer of exactly the opener's
+    /// length, remembering the position of every run passed on the way. If
+    /// no closer exists, remember that fact and treat the opener as literal.
     fn handle_backticks(&mut self) {
-        let start = self.pos;
         let mut numticks = 0usize;
         while self.bytes.get(self.pos) == Some(&b'`') {
             self.pos += 1;
             numticks += 1;
         }
-        if let Some(closer) = self.scan_to_closing_backticks(numticks) {
-            let content = &self.input[start + numticks..closer - numticks];
-            let normalized = normalize_code(content);
-            self.pos = closer;
-            self.push(Kind::Code(normalized));
-        } else {
-            // No closer: the opening run is literal text, and the scan
-            // resumes after it.
-            self.pos = start + numticks;
+        let startpos = self.pos;
+        if numticks > MAXBACKTICKS
+            || (self.scanned_for_backticks && self.backticks_memo[numticks] <= startpos)
+        {
             self.push(Kind::Text("`".repeat(numticks)));
+            return;
+        }
+        match self.scan_to_closing_backticks(numticks) {
+            Some(closer) => {
+                let content = &self.input[startpos..closer - numticks];
+                let normalized = normalize_code(content);
+                self.pos = closer;
+                self.push(Kind::Code(normalized));
+            }
+            None => {
+                self.scanned_for_backticks = true;
+                self.pos = startpos;
+                self.push(Kind::Text("`".repeat(numticks)));
+            }
         }
     }
 
     /// Scans forward for a backtick run of exactly `length` backticks.
-    /// Returns the position just past the closing run, or `None`.
+    /// Returns the position just past the closing run, or `None`. Records
+    /// every run it passes in the memo table, exactly as the reference
+    /// scanner does — including on the way to a successful match.
     fn scan_to_closing_backticks(&mut self, length: usize) -> Option<usize> {
         let mut pos = self.pos;
         while pos < self.bytes.len() {
@@ -513,7 +542,11 @@ impl<'defs, 'a> Parser<'defs, 'a> {
                 while self.bytes.get(pos) == Some(&b'`') {
                     pos += 1;
                 }
-                if pos - run_start == length {
+                let numticks = pos - run_start;
+                if numticks <= MAXBACKTICKS {
+                    self.backticks_memo[numticks] = run_start;
+                }
+                if numticks == length {
                     self.pos = pos;
                     return Some(pos);
                 }
@@ -1417,10 +1450,14 @@ fn scan_html_comment(bytes: &[u8], start: usize) -> Option<usize> {
     let len = bytes.len();
     let mut i = start;
     while i < len {
-        // Runs of non-dash characters, a dash followed by a non-dash, or
-        // two dashes followed by anything but `>`.
+        // Runs of non-dash non-NUL characters, a dash followed by a
+        // non-dash, or two dashes followed by anything but `>`. A NUL
+        // byte is not comment content in the reference scanner.
+        if bytes[i] == 0 {
+            return None;
+        }
         if bytes[i] != b'-' {
-            while i < len && bytes[i] != b'-' {
+            while i < len && bytes[i] != b'-' && bytes[i] != 0 {
                 i += 1;
             }
         } else if bytes[i] == b'-' && bytes.get(i + 1) == Some(&b'-') {
@@ -1428,10 +1465,10 @@ fn scan_html_comment(bytes: &[u8], start: usize) -> Option<usize> {
                 Some(&b'>') => return Some(i - start),
                 // `--` followed by any other byte (a dash included) is
                 // comment content, as in the reference scanner.
-                Some(_) => i += 3,
-                None => return None,
+                Some(&b) if b != 0 => i += 3,
+                _ => return None,
             }
-        } else if bytes.get(i + 1).is_some_and(|&b| b != b'-') {
+        } else if bytes.get(i + 1).is_some_and(|&b| b != b'-' && b != 0) {
             i += 2;
         } else {
             // A dash at end of input.
@@ -1447,6 +1484,10 @@ fn scan_html_pi(bytes: &[u8], start: usize) -> Option<usize> {
     let len = bytes.len();
     let mut i = start;
     while i < len {
+        // A NUL byte cannot appear in the instruction body.
+        if bytes[i] == 0 {
+            return None;
+        }
         if bytes[i] == b'?' {
             if bytes.get(i + 1) == Some(&b'>') {
                 return Some(i - start);
@@ -1472,7 +1513,11 @@ fn scan_html_declaration(bytes: &[u8], start: usize) -> Option<usize> {
     if i == start {
         return None;
     }
+    // The declaration body stops at `>` and cannot contain a NUL byte.
     while i < len && bytes[i] != b'>' {
+        if bytes[i] == 0 {
+            return None;
+        }
         i += 1;
     }
     Some(i - start)
@@ -1488,17 +1533,20 @@ fn scan_html_cdata(bytes: &[u8], start: usize) -> Option<usize> {
     let mut i = start + PREFIX.len();
     let len = bytes.len();
     while i < len {
+        if bytes[i] == 0 {
+            return None;
+        }
         if bytes[i] != b']' {
-            while i < len && bytes[i] != b']' {
+            while i < len && bytes[i] != b']' && bytes[i] != 0 {
                 i += 1;
             }
         } else if bytes.get(i + 1) == Some(&b']') {
             match bytes.get(i + 2) {
                 Some(&b'>') => return Some(i - start),
-                Some(_) => i += 3,
-                None => return None,
+                Some(&b) if b != 0 => i += 3,
+                _ => return None,
             }
-        } else if bytes.get(i + 1).is_some_and(|&b| b != b']') {
+        } else if bytes.get(i + 1).is_some_and(|&b| b != b']' && b != 0) {
             i += 2;
         } else {
             return None;
@@ -1613,10 +1661,14 @@ fn scan_attribute_value(bytes: &[u8], start: usize) -> Option<usize> {
     match bytes.get(start) {
         Some(&q @ (b'"' | b'\'')) => {
             let mut i = start + 1;
-            while i < len && bytes[i] != q {
+            while i < len && bytes[i] != q && bytes[i] != 0 {
                 i += 1;
             }
-            if i < len { Some(i + 1 - start) } else { None }
+            if i < len && bytes[i] == q {
+                Some(i + 1 - start)
+            } else {
+                None
+            }
         }
         Some(_) => {
             let mut i = start;
@@ -1628,6 +1680,7 @@ fn scan_attribute_value(bytes: &[u8], start: usize) -> Option<usize> {
                         | b'\x0C'
                         | b'\r'
                         | b'\n'
+                        | b'\0'
                         | b'"'
                         | b'\''
                         | b'='

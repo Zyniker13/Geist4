@@ -191,7 +191,10 @@ pub(super) fn atx_heading(c: &Cursor) -> Option<(u8, String)> {
         }
     }
     let mut text = String::from_utf8_lossy(content).into_owned();
-    while text.ends_with(' ') || text.ends_with('\t') {
+    while matches!(
+        text.as_bytes().last(),
+        Some(b' ') | Some(b'\t') | Some(b'\x0B') | Some(b'\x0C')
+    ) {
         text.pop();
     }
     Some((level, text))
@@ -248,6 +251,12 @@ pub(super) fn fence_close(c: &Cursor, ch: u8, len: usize) -> bool {
     p >= line.len()
 }
 
+/// Whether `b` counts as HTML whitespace in tag scanning: the reference
+/// scanner's `spacechar` is exactly ` \t\v\f\r\n`.
+fn is_html_space(b: u8) -> bool {
+    matches!(b, b' ' | b'\t' | b'\x0B' | b'\x0C' | b'\r' | b'\n')
+}
+
 /// Scans an HTML block start at the cursor. `allow_kind7` is false when the
 /// line might be a lazy continuation or interrupt a paragraph, which rules
 /// out kind 7.
@@ -265,7 +274,8 @@ pub(super) fn html_block_start(c: &Cursor, allow_kind7: bool) -> Option<HtmlStar
             let after = tag.len();
             match rest.get(after) {
                 None => return Some(HtmlStart { kind: 1 }),
-                Some(b' ') | Some(b'\t') | Some(b'>') => return Some(HtmlStart { kind: 1 }),
+                Some(b'>') => return Some(HtmlStart { kind: 1 }),
+                Some(&b) if is_html_space(b) => return Some(HtmlStart { kind: 1 }),
                 Some(_) => {}
             }
         }
@@ -303,7 +313,7 @@ pub(super) fn html_block_start(c: &Cursor, allow_kind7: bool) -> Option<HtmlStar
 }
 
 /// Checks whether the bytes after `<` or `</` name a block tag and are
-/// followed by a space, a tab, `>`, `/>`, or the end of the line.
+/// followed by HTML whitespace, `>`, `/>`, or the end of the line.
 fn block_tag_at(rest: &[u8]) -> Option<u8> {
     let mut name_end = 0usize;
     while name_end < rest.len() && rest[name_end].is_ascii_alphanumeric() {
@@ -318,7 +328,8 @@ fn block_tag_at(rest: &[u8]) -> Option<u8> {
     }
     match rest.get(name_end) {
         None => Some(6),
-        Some(b' ') | Some(b'\t') | Some(b'>') => Some(6),
+        Some(b'>') => Some(6),
+        Some(&b) if is_html_space(b) => Some(6),
         Some(b'/') if rest.get(name_end + 1) == Some(&b'>') => Some(6),
         Some(_) => None,
     }
@@ -335,7 +346,11 @@ fn complete_tag_alone(rest: &[u8]) -> bool {
     let Some(consumed) = consumed else {
         return false;
     };
-    rest[consumed..].iter().all(|&b| b == b' ' || b == b'\t')
+    // The reference scanner allows the trailing run `[ \t\n\f]*` before the
+    // line ending; a vertical tab is not allowed there.
+    rest[consumed..]
+        .iter()
+        .all(|&b| matches!(b, b' ' | b'\t' | b'\x0C' | b'\n'))
 }
 
 /// The length of a closing tag (`</name>`) at the start of `rest`.
@@ -349,7 +364,7 @@ fn closing_tag_len(rest: &[u8]) -> Option<usize> {
         return None;
     }
     pos += name_len;
-    while matches!(rest.get(pos), Some(b' ') | Some(b'\t')) {
+    while rest.get(pos).is_some_and(|&b| is_html_space(b)) {
         pos += 1;
     }
     if rest.get(pos) == Some(&b'>') {
@@ -372,7 +387,7 @@ fn open_tag_len(rest: &[u8]) -> Option<usize> {
     pos += name_len;
     loop {
         let ws_start = pos;
-        while matches!(rest.get(pos), Some(b' ') | Some(b'\t')) {
+        while rest.get(pos).is_some_and(|&b| is_html_space(b)) {
             pos += 1;
         }
         if rest.get(pos) == Some(&b'>') {
@@ -422,18 +437,18 @@ fn attribute_len(rest: &[u8], pos: usize) -> bool {
     }
     // Optional =value.
     let after_name = p;
-    while matches!(rest.get(p), Some(b' ') | Some(b'\t')) {
+    while rest.get(p).is_some_and(|&b| is_html_space(b)) {
         p += 1;
     }
     if rest.get(p) == Some(&b'=') {
         p += 1;
-        while matches!(rest.get(p), Some(b' ') | Some(b'\t')) {
+        while rest.get(p).is_some_and(|&b| is_html_space(b)) {
             p += 1;
         }
         match rest.get(p) {
             Some(b'\'') => {
                 p += 1;
-                while rest.get(p).is_some_and(|&b| b != b'\'') {
+                while rest.get(p).is_some_and(|&b| b != b'\'' && b != 0) {
                     p += 1;
                 }
                 if rest.get(p) != Some(&b'\'') {
@@ -442,7 +457,7 @@ fn attribute_len(rest: &[u8], pos: usize) -> bool {
             }
             Some(b'"') => {
                 p += 1;
-                while rest.get(p).is_some_and(|&b| b != b'"') {
+                while rest.get(p).is_some_and(|&b| b != b'"' && b != 0) {
                     p += 1;
                 }
                 if rest.get(p) != Some(&b'"') {
@@ -451,7 +466,21 @@ fn attribute_len(rest: &[u8], pos: usize) -> bool {
             }
             Some(_) => {
                 while rest.get(p).is_some_and(|&b| {
-                    !matches!(b, b' ' | b'\t' | b'"' | b'\'' | b'=' | b'<' | b'>' | b'`')
+                    !matches!(
+                        b,
+                        b' ' | b'\t'
+                            | b'\x0B'
+                            | b'\x0C'
+                            | b'\r'
+                            | b'\n'
+                            | b'\0'
+                            | b'"'
+                            | b'\''
+                            | b'='
+                            | b'<'
+                            | b'>'
+                            | b'`'
+                    )
                 }) {
                     p += 1;
                 }
@@ -475,32 +504,46 @@ fn skip_attribute(rest: &[u8], pos: usize) -> Option<usize> {
         p += 1;
     }
     let after_name = p;
-    while matches!(rest.get(p), Some(b' ') | Some(b'\t')) {
+    while rest.get(p).is_some_and(|&b| is_html_space(b)) {
         p += 1;
     }
     if rest.get(p) == Some(&b'=') {
         p += 1;
-        while matches!(rest.get(p), Some(b' ') | Some(b'\t')) {
+        while rest.get(p).is_some_and(|&b| is_html_space(b)) {
             p += 1;
         }
         match rest.get(p) {
             Some(b'\'') => {
                 p += 1;
-                while rest.get(p).is_some_and(|&b| b != b'\'') {
+                while rest.get(p).is_some_and(|&b| b != b'\'' && b != 0) {
                     p += 1;
                 }
                 p += 1;
             }
             Some(b'"') => {
                 p += 1;
-                while rest.get(p).is_some_and(|&b| b != b'"') {
+                while rest.get(p).is_some_and(|&b| b != b'"' && b != 0) {
                     p += 1;
                 }
                 p += 1;
             }
             Some(_) => {
                 while rest.get(p).is_some_and(|&b| {
-                    !matches!(b, b' ' | b'\t' | b'"' | b'\'' | b'=' | b'<' | b'>' | b'`')
+                    !matches!(
+                        b,
+                        b' ' | b'\t'
+                            | b'\x0B'
+                            | b'\x0C'
+                            | b'\r'
+                            | b'\n'
+                            | b'\0'
+                            | b'"'
+                            | b'\''
+                            | b'='
+                            | b'<'
+                            | b'>'
+                            | b'`'
+                    )
                 }) {
                     p += 1;
                 }
@@ -589,12 +632,13 @@ pub(super) fn list_marker(c: &Cursor) -> Option<ListMarker> {
     })
 }
 
-/// Whether the marker at the cursor is followed by a space, a tab, or the
-/// end of the line, which a list marker requires.
+/// Whether the marker at the cursor is followed by reference whitespace
+/// (which includes a vertical tab or form feed) or the end of the line,
+/// which a list marker requires.
 pub(super) fn marker_followed_by_space(c: &Cursor, width: usize) -> bool {
     match c.peek_at(width) {
         None => true,
-        Some(b' ') | Some(b'\t') => true,
+        Some(b' ') | Some(b'\t') | Some(b'\x0B') | Some(b'\x0C') | Some(b'\r') => true,
         Some(_) => false,
     }
 }
@@ -762,7 +806,6 @@ fn scan_destination(text: &str) -> Option<(String, usize)> {
                 b'\\' => i += escape_step(bytes, i),
                 b'>' => return Some((String::from_utf8_lossy(&bytes[1..i]).into_owned(), i + 1)),
                 b'<' | b'\n' => return None,
-                b if b.is_ascii_control() => return None,
                 _ => i += 1,
             }
         }
@@ -784,8 +827,7 @@ fn scan_destination(text: &str) -> Option<(String, usize)> {
                 depth -= 1;
                 i += 1;
             }
-            b' ' | b'\t' | b'\n' => break,
-            b if b.is_ascii_control() => break,
+            b' ' | b'\t' | b'\n' | b'\x0B' | b'\x0C' | b'\r' => break,
             _ => i += 1,
         }
     }

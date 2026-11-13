@@ -47,6 +47,44 @@ fn setext_headings() {
 }
 
 #[test]
+fn reference_whitespace_and_control_bytes() {
+    // The reference scanner's whitespace includes VT and FF: list markers,
+    // HTML block starts and tag scanning accept them, and a line's
+    // trailing run of them is trimmed before inline parsing.
+    assert_eq!(html("+\u{b}"), "<ul>\n<li></li>\n</ul>");
+    assert_eq!(html("*\u{c}"), "<ul>\n<li></li>\n</ul>");
+    assert_eq!(html("a\u{b} \nb"), "<p>a\nb</p>");
+    assert_eq!(html("0!\n<P\u{b}"), "<p>0!</p>\n<P\u{b}");
+    assert_eq!(html("a\r\rb"), "<p>a</p>\n<p>b</p>");
+    assert_eq!(html("```\t\u{c}\nx\n```"), "<pre><code>x\n</code></pre>");
+    // Control bytes that are not reference whitespace may appear in a
+    // bare link destination; they are percent-encoded on output.
+    assert_eq!(html("[a]:\u{2}\n\n[a]"), "<p><a href=\"%02\">a</a></p>");
+    // An indented code block's final whitespace-only line is dropped.
+    assert_eq!(html("\tx\u{1f}\n\t\t"), "<pre><code>x\u{1f}\n</code></pre>");
+    // A lazy continuation line keeps its leading whitespace, and a
+    // consumed reference definition does not hide it.
+    assert_eq!(
+        html(">[-]:x\n    >"),
+        "<blockquote>\n<p>    &gt;</p>\n</blockquote>"
+    );
+}
+
+#[test]
+fn code_span_backtick_memo() {
+    // The reference parser's backtick memo table: after an unmatched
+    // longer run has scanned the subject, later runs of a length whose
+    // last recorded position is at or before the current position are
+    // treated as literal, even when a closer would exist.
+    assert_eq!(html("``a`b`c`d`"), "<p>``a<code>b</code>c`d`</p>");
+    assert_eq!(html("a`b`c`d`"), "<p>a<code>b</code>c<code>d</code></p>");
+    assert_eq!(
+        html("``\u{0}`F`\u{0}`F`"),
+        "<p>``\u{fffd}<code>F</code>\u{fffd}`F`</p>"
+    );
+}
+
+#[test]
 fn thematic_breaks() {
     assert_eq!(html("***"), "<hr />");
     assert_eq!(html("___"), "<hr />");

@@ -2,3 +2,5 @@
 # come out with LF endings everywhere, so byte-exact test fixtures and
 # expectations do not depend on which platform ran the checkout.
 * text=auto eol=lf
+# Fuzz corpus seeds are raw fuzzer input, possibly binary: no conversion.
+fuzz/seeds/** -text

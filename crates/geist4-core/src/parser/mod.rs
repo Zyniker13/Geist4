@@ -153,16 +153,22 @@ impl<'a> Parser<'a> {
         let bytes = self.src.as_bytes();
         let mut line_start = 0usize;
         while line_start < bytes.len() {
+            // Lines end at `\n`, at `\r\n`, or at a bare `\r`, as in the
+            // reference implementation; the carriage return itself is
+            // never part of the line's content.
             let mut line_end = line_start;
-            while line_end < bytes.len() && bytes[line_end] != b'\n' {
+            while line_end < bytes.len() && bytes[line_end] != b'\n' && bytes[line_end] != b'\r' {
                 line_end += 1;
             }
             let has_newline = line_end < bytes.len();
-            let mut end = line_end;
-            if end > line_start && bytes[end - 1] == b'\r' {
-                end -= 1;
+            let mut next_start = line_end;
+            if has_newline {
+                next_start += 1;
+                if bytes[line_end] == b'\r' && bytes.get(next_start) == Some(&b'\n') {
+                    next_start += 1;
+                }
             }
-            let line = &bytes[line_start..end];
+            let line = &bytes[line_start..line_end];
             self.line_number += 1;
             let line_stop = line_start + line.len();
             // NUL bytes become U+FFFD replacement characters before any
@@ -186,7 +192,7 @@ impl<'a> Parser<'a> {
                 line
             };
             self.process_line(line, line_start, line_stop);
-            line_start = if has_newline { line_end + 1 } else { line_end };
+            line_start = next_start;
         }
         let final_offset = self.src.len();
         while self.open.len() > 1 {
@@ -212,7 +218,10 @@ impl<'a> Parser<'a> {
                     && !cursor.blank_from_here()
                     && !self.block_start_matches(&cursor)
                 {
-                    let text = strip_leading_ws(&cursor.rest());
+                    // The line's leading whitespace stays in the buffer;
+                    // the inline phase strips it after each newline, and a
+                    // consumed reference definition must not hide it.
+                    let text = String::from_utf8_lossy(&cursor.rest()).into_owned();
                     let id = self.open.last().unwrap().id;
                     self.append_paragraph_text(id, &text);
                     self.set_frame_end(line_stop);
@@ -874,8 +883,11 @@ impl<'a> Parser<'a> {
         let id = self.open.last().unwrap().id;
         match &self.open.last().unwrap().kind {
             OpenKind::Paragraph { .. } => {
+                // A normal continuation line: its leading whitespace is
+                // consumed here, as the reference parser does. Lazy lines
+                // (handled in the walk) keep theirs.
                 cursor.skip_nonspace();
-                let text = strip_leading_ws(&cursor.rest());
+                let text = String::from_utf8_lossy(&cursor.rest()).into_owned();
                 self.append_paragraph_text(id, &text);
                 Some(id)
             }
@@ -1074,14 +1086,24 @@ impl<'a> Parser<'a> {
                 literal,
                 ..
             } => {
-                // Trim trailing blank lines; drop a block with no content.
+                // Remove trailing blank lines: walk back over spaces, tabs
+                // and line ends to the last real byte, then cut at the next
+                // line end and re-add one, as the reference finalize does.
                 let mut text = std::mem::take(literal);
-                while text.ends_with('\n') {
-                    text.pop();
+                let mut end = text.len();
+                while end > 0 && matches!(text.as_bytes()[end - 1], b' ' | b'\t' | b'\r' | b'\n') {
+                    end -= 1;
                 }
-                if text.is_empty() {
+                if end == 0 {
                     self.remove_last_child_of_parent(frame.id);
                 } else {
+                    // The first line end at or after the last real byte
+                    // marks the start of the trailing blank lines.
+                    let cut = text.as_bytes()[end..]
+                        .iter()
+                        .position(|&b| b == b'\n' || b == b'\r')
+                        .map_or(text.len(), |pos| end + pos);
+                    text.truncate(cut);
                     text.push('\n');
                     self.arena.set_kind(
                         frame.id,
@@ -1244,7 +1266,8 @@ fn decode_info_string(raw: &str) -> Option<String> {
         return None;
     }
     let unescaped = crate::inline::unescape_entities(raw);
-    let trimmed = unescaped.trim_matches(|c: char| c == ' ' || c == '\t');
+    let trimmed =
+        unescaped.trim_matches(|c: char| matches!(c, ' ' | '\t' | '\u{b}' | '\u{c}' | '\r' | '\n'));
     if trimmed.is_empty() {
         return None;
     }

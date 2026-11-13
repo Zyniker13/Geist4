@@ -124,8 +124,21 @@ fn cmark_version() -> Option<String> {
         return None;
     }
     let text = String::from_utf8_lossy(&out.stdout);
-    let version = text.split_whitespace().nth(2)?;
-    Some(version.trim().to_owned())
+    // The first line looks like `cmark 0.31.2 - CommonMark converter`;
+    // pick the token that is a dotted triple of numbers rather than
+    // counting positions, which vary between builds.
+    text.split_whitespace()
+        .find(|token| is_version_token(token))
+        .map(|version| version.trim().to_owned())
+}
+
+fn is_version_token(token: &str) -> bool {
+    let all_digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+    let mut parts = token.split('.');
+    all_digits(parts.next().unwrap_or(""))
+        && all_digits(parts.next().unwrap_or(""))
+        && all_digits(parts.next().unwrap_or(""))
+        && parts.next().is_none()
 }
 
 fn reference_html(src: &str) -> String {
@@ -151,11 +164,12 @@ fn ours_html(src: &str) -> String {
     geist4_core::basic_html::render(&geist4_core::parser::parse_document(src))
 }
 
-/// Our output with the final newline the reference CLI emits.
-fn ours_ending_in_newline(ours: &str) -> String {
-    let mut out = ours.to_owned();
-    out.push('\n');
-    out
+/// The reference CLI's output, with its one trailing newline removed,
+/// compared against our own output which never ends in a newline. For an
+/// empty render the reference emits nothing at all, so appending to ours
+/// would invent a newline that has no counterpart.
+fn theirs_without_newline(theirs: &str) -> &str {
+    theirs.strip_suffix('\n').unwrap_or(theirs)
 }
 
 #[test]
@@ -184,7 +198,7 @@ fn differential_against_reference() {
         let ours = ours_html(&input);
         // The reference CLI ends its output with a newline; our renderer
         // does not (the spec suite's convention). Compare modulo that.
-        if ours_ending_in_newline(&ours) != theirs {
+        if ours != theirs_without_newline(&theirs) {
             failures += 1;
             if first_difference.is_none() {
                 first_difference = Some((input, ours, theirs));
@@ -216,9 +230,9 @@ fn differential_over_fuzz_corpus() {
         }
         Some(_) => {}
     }
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fuzz/corpus");
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fuzz/seeds");
     let Ok(corpus_dirs) = std::fs::read_dir(&dir) else {
-        eprintln!("skipping: no fuzz corpus directory");
+        eprintln!("skipping: no fuzz seed corpus directory");
         return;
     };
     let mut files: Vec<PathBuf> = corpus_dirs
@@ -245,8 +259,17 @@ fn differential_over_fuzz_corpus() {
         let theirs = reference_html(&input);
         let ours = ours_html(&input);
         checked += 1;
-        if ours_ending_in_newline(&ours) != theirs {
+        if ours != theirs_without_newline(&theirs) {
             failures += 1;
+            if std::env::var_os("GEIST4_DIFF_DUMP").is_some() {
+                let name = format!("{:04}", failures);
+                let dir = std::path::PathBuf::from(
+                    std::env::var_os("GEIST4_DIFF_DUMP").expect("dump dir"),
+                );
+                std::fs::write(dir.join(format!("{name}.md")), &input).ok();
+                std::fs::write(dir.join(format!("{name}.ours")), &ours).ok();
+                std::fs::write(dir.join(format!("{name}.theirs")), &theirs).ok();
+            }
             if first_difference.is_none() {
                 first_difference = Some((path, input, ours, theirs));
             }
