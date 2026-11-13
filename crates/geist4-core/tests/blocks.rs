@@ -1,0 +1,212 @@
+//! Unit tests for the block phase, separate from the spec examples.
+//!
+//! Each test covers one block kind or one tricky rule: lazy continuation,
+//! list-item indentation, the end conditions of HTML blocks, tab handling,
+//! and link reference definitions. Trees are checked through the debug
+//! printer, rendering through the HTML renderer.
+
+use geist4_core::basic_html::render;
+use geist4_core::debug;
+use geist4_core::parser::parse_document;
+
+fn html(src: &str) -> String {
+    render(&parse_document(src))
+}
+
+fn tree(src: &str) -> String {
+    let doc = parse_document(src);
+    debug::print(&doc.arena, doc.root)
+}
+
+#[test]
+fn paragraph_with_soft_break() {
+    assert_eq!(html("a\nb"), "<p>a\nb</p>");
+}
+
+#[test]
+fn hard_break_needs_two_spaces() {
+    assert_eq!(html("a  \nb"), "<p>a<br />\nb</p>");
+    // One trailing space is a soft break.
+    assert_eq!(html("a \nb"), "<p>a\nb</p>");
+}
+
+#[test]
+fn atx_headings() {
+    assert_eq!(html("# h1"), "<h1>h1</h1>");
+    assert_eq!(html("## h2 ##"), "<h2>h2</h2>");
+    assert_eq!(html("# five #"), "<h1>five</h1>");
+    assert_eq!(html("####### seven"), "<p>####### seven</p>");
+}
+
+#[test]
+fn setext_headings() {
+    assert_eq!(html("Foo\n==="), "<h1>Foo</h1>");
+    assert_eq!(html("Foo\n---"), "<h2>Foo</h2>");
+    // An underline indented four or more spaces is not a setext underline.
+    assert_eq!(html("Foo\n    ---"), "<p>Foo\n---</p>");
+}
+
+#[test]
+fn thematic_breaks() {
+    assert_eq!(html("***"), "<hr />");
+    assert_eq!(html("___"), "<hr />");
+    assert_eq!(html("  ---"), "<hr />");
+    // Not a thematic break after a paragraph line.
+    assert_eq!(html("Foo\n***"), "<p>Foo</p>\n<hr />");
+}
+
+#[test]
+fn indented_code_blocks() {
+    assert_eq!(html("    a\n    b"), "<pre><code>a\nb\n</code></pre>");
+    // Interior blank lines keep their indentation only.
+    assert_eq!(html("    a\n\n    b"), "<pre><code>a\n\nb\n</code></pre>");
+    // A tab counts as four columns and is stripped whole.
+    assert_eq!(html("\tfoo"), "<pre><code>foo\n</code></pre>");
+    // Up to three spaces of indent do not make a code block.
+    assert_eq!(html("   x"), "<p>x</p>");
+}
+
+#[test]
+fn fenced_code_blocks() {
+    assert_eq!(html("```\na\n```"), "<pre><code>a\n</code></pre>");
+    assert_eq!(html("~~~\na\n~~~"), "<pre><code>a\n</code></pre>");
+    // A closing fence may be longer, never shorter, and needs no match after
+    // a shorter opener's run.
+    assert_eq!(
+        html("```\na\n`````\n```\nb"),
+        "<pre><code>a\n</code></pre>\n<pre><code>b\n</code></pre>"
+    );
+    // The info string becomes a language class.
+    assert_eq!(
+        html("``` rust\nfn x() {}\n```"),
+        "<pre><code class=\"language-rust\">fn x() {}\n</code></pre>"
+    );
+    // An unclosed fence runs to the end of the document.
+    assert_eq!(html("```\na"), "<pre><code>a\n</code></pre>");
+    // Entity references in the info string are decoded.
+    assert_eq!(
+        html("``` f&ouml;&ouml;\nfoo\n```"),
+        "<pre><code class=\"language-föö\">foo\n</code></pre>"
+    );
+}
+
+#[test]
+fn html_block_kinds_one_through_five() {
+    // Kind 1 ends at a line containing the closing tag.
+    assert_eq!(
+        html("<script>\nx\n</script>\ny"),
+        "<script>\nx\n</script>\n<p>y</p>"
+    );
+    // Kind 2 ends at the line containing `-->`.
+    assert_eq!(html("<!-- c -->\nz"), "<!-- c -->\n<p>z</p>");
+    // Kind 3 is a processing instruction.
+    assert_eq!(html("<?php echo 1; ?>\nz"), "<?php echo 1; ?>\n<p>z</p>");
+    // Kind 4 is a declaration.
+    assert_eq!(html("<!DOCTYPE html>\nz"), "<!DOCTYPE html>\n<p>z</p>");
+    // Kind 5 is CDATA.
+    assert_eq!(html("<![CDATA[x]]>\nz"), "<![CDATA[x]]>\n<p>z</p>");
+}
+
+#[test]
+fn html_block_kind_six_ends_at_blank_line() {
+    assert_eq!(
+        html("<table><tr><td>\n<pre>\nx\n</pre>\n</td></tr></table>\n\nafter"),
+        "<table><tr><td>\n<pre>\nx\n</pre>\n</td></tr></table>\n<p>after</p>"
+    );
+}
+
+#[test]
+fn html_block_kind_seven_needs_a_lone_tag() {
+    assert_eq!(
+        html("<span data-x=\"1\">\ntext"),
+        "<span data-x=\"1\">\ntext"
+    );
+    // A paragraph continuation or any following text keeps it a paragraph.
+    assert_eq!(html("<span>x\ny"), "<p><span>x\ny</p>");
+}
+
+#[test]
+fn link_reference_definitions() {
+    // A definition may appear after the paragraph that uses it.
+    assert_eq!(
+        html("[foo]\n\n[foo]: /bar"),
+        "<p><a href=\"/bar\">foo</a></p>"
+    );
+    // The first definition wins.
+    assert_eq!(
+        html("[foo]: /one\n[foo]: /two\n\n[foo]"),
+        "<p><a href=\"/one\">foo</a></p>"
+    );
+    // A text line before a definition keeps the definition as text.
+    assert_eq!(html("x\n[foo]: /bar"), "<p>x\n[foo]: /bar</p>");
+    // The title may be on the next line.
+    assert_eq!(
+        html("[foo]\n\n[foo]: /bar\n\"t\""),
+        "<p><a href=\"/bar\" title=\"t\">foo</a></p>"
+    );
+    // Labels are folded case-insensitively.
+    assert_eq!(html("[ẞ]\n\n[SS]: /url"), "<p><a href=\"/url\">ẞ</a></p>");
+}
+
+#[test]
+fn block_quotes_nest_and_take_lazy_lines() {
+    // A block quote interrupts the paragraph and nests inside the quote.
+    assert_eq!(
+        html("> a\n> > b"),
+        "<blockquote>\n<p>a</p>\n<blockquote>\n<p>b</p>\n</blockquote>\n</blockquote>"
+    );
+    // A lazy continuation line joins the paragraph inside the quote.
+    assert_eq!(html("> a\nb"), "<blockquote>\n<p>a\nb</p>\n</blockquote>");
+    // A blank line ends a block quote.
+    assert_eq!(
+        html("> a\n\nb"),
+        "<blockquote>\n<p>a</p>\n</blockquote>\n<p>b</p>"
+    );
+}
+
+#[test]
+fn list_items_and_indentation() {
+    assert_eq!(html("- a\n- b"), "<ul>\n<li>a</li>\n<li>b</li>\n</ul>");
+    // Content beyond the marker's column continues the item.
+    assert_eq!(html("- a\n  b"), "<ul>\n<li>a\nb</li>\n</ul>");
+    // A nested list needs at least the item's content column.
+    assert_eq!(
+        html("- a\n  - b"),
+        "<ul>\n<li>a\n<ul>\n<li>b</li>\n</ul>\n</li>\n</ul>"
+    );
+    // A blank line between items makes the list loose.
+    assert_eq!(
+        html("- a\n\n- b"),
+        "<ul>\n<li>\n<p>a</p>\n</li>\n<li>\n<p>b</p>\n</li>\n</ul>"
+    );
+    assert_eq!(html("1. a\n2. b"), "<ol>\n<li>a</li>\n<li>b</li>\n</ol>");
+}
+
+#[test]
+fn tabs_are_expanded_for_structure() {
+    // A tab after the marker spaces the content to the next stop.
+    assert_eq!(html("-\tfoo"), "<ul>\n<li>foo</li>\n</ul>");
+    // A tab-indented block quote line still matches.
+    assert_eq!(html("\t>\tfoo"), "<pre><code>&gt;\tfoo\n</code></pre>");
+}
+
+#[test]
+fn debug_printer_shows_the_tree() {
+    let out = tree("a");
+    assert!(
+        out.contains("Document"),
+        "printer should name the root: {out}"
+    );
+    assert!(
+        out.contains("Paragraph"),
+        "printer should name the paragraph: {out}"
+    );
+}
+
+#[test]
+fn spans_cover_the_source() {
+    let doc = parse_document("# hi");
+    let span = doc.arena.span(doc.root);
+    assert_eq!(span.start, 0);
+    assert_eq!(span.end, 4);
+}

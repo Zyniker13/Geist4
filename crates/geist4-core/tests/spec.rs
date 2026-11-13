@@ -1,10 +1,11 @@
 //! Runs the vendored CommonMark specification through the core and enforces
 //! the pass count recorded in `spec/progress.json`.
 //!
-//! Until block parsing lands (milestone M1), the render function is a
-//! placeholder that returns a marker no example expects, so the recorded
-//! count starts at zero and grows only as real parsing replaces it.
+//! In milestone M1 the render function is the block-level renderer with
+//! plain-text inline content, so only block-structure behavior is measured;
+//! the count grows as milestones replace it with the full renderer.
 
+use geist4_core::{basic_html, parse_document};
 use geist4_spec_harness::{Example, parse, run};
 
 /// The vendored spec must keep exactly this many examples. See
@@ -53,9 +54,8 @@ fn commonmark_spec_progress() {
          constant and to spec/progress.json"
     );
 
-    let mut render = |_example: &Example| -> String {
-        String::from("<!-- geist4: parsing not implemented yet -->")
-    };
+    let mut render =
+        |example: &Example| -> String { basic_html::render(&parse_document(&example.markdown)) };
     let report = run(&examples, &mut render);
 
     let recorded_total = json_number(PROGRESS, "total_examples")
