@@ -8,11 +8,11 @@ import urllib.error
 import urllib.request
 
 lines = [line[:130] for line in open("check.log", encoding="utf-8", errors="replace").read().splitlines()[-6:]]
-sha, repo, token = sys.argv[1], sys.argv[2], sys.argv[3]
+sha, repo, token, os_name = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 posted = 0
 last_error = ""
 for i, line in enumerate(lines):
-    body = json.dumps({"state": "failure", "context": f"ci/tail{i}", "description": line}).encode()
+    body = json.dumps({"state": "failure", "context": f"ci/{os_name}/tail{i}", "description": line}).encode()
     req = urllib.request.Request(
         f"https://api.github.com/repos/{repo}/statuses/{sha}",
         data=body,

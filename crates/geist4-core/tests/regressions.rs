@@ -18,6 +18,14 @@ fn html(src: &str) -> String {
     geist4_core::basic_html::render(&geist4_core::parser::parse_document(src))
 }
 
+/// Line endings are transport, not content: a checkout may carry CRLF
+/// (Windows), while the expectations were generated with LF. Normalize
+/// both sides before comparing; the parser treats the three line-ending
+/// forms identically.
+fn normalize(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 /// Drops the leading `////` comment lines, keeping the body bytes.
 fn strip_header(text: &str) -> &str {
     let mut rest = text;
@@ -49,8 +57,8 @@ fn regression_corpus() {
             .unwrap_or_else(|_| panic!("{} has no paired .html", markdown_path.display()));
         cases += 1;
         assert_eq!(
-            html(strip_header(&markdown)),
-            expected,
+            html(&normalize(strip_header(&markdown))),
+            normalize(&expected),
             "{} failed",
             markdown_path.display()
         );

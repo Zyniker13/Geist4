@@ -1,0 +1,4 @@
+# Checkouts are byte-deterministic across operating systems: text files
+# come out with LF endings everywhere, so byte-exact test fixtures and
+# expectations do not depend on which platform ran the checkout.
+* text=auto eol=lf
