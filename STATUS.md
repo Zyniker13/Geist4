@@ -1,8 +1,8 @@
 # Status
 
-- **Current milestone:** M1 (Block Structure) — complete, pending CI
-- **Last done:** Full parser (blocks + inlines + HTML renderer) passes all 652 CommonMark 0.31.2 examples. `spec/progress.json` records 652. 16 block-phase unit tests in `tests/blocks.rs`. `scripts/check.sh` green locally (fmt, clippy -D warnings, tests, doc, cargo-deny).
-- **Next step:** Commit M1, push, verify CI on all 3 OSes + MSRV, then start M2 (Inline Content and Full Conformance polish: the spec suite is already at 652, so M2 focuses on the byte-for-byte renderer guarantees, property groundwork, and any follow-ups from the inline work).
+- **Current milestone:** M3 (Hardening) — M1 and M2 complete
+- **Last done:** All 652 CommonMark 0.31.2 examples pass (`spec/progress.json`). CI green on all three OSes + MSRV (run 43360678153, commit `43c9ac3`) after replacing the failing toolchain-setup action with plain rustup steps and fixing the cargo-deny version pin. 16 block-phase unit tests; `scripts/check.sh` green locally.
+- **Next step:** M3 hardening — pathological-input tests with linear-scaling checks, cargo-fuzz targets, proptest property tests, differential tests against cmark, security defaults and `docs/security-model.md`, regression corpus.
 - **Blocked on:** nothing
 
 ## Log
@@ -23,3 +23,5 @@
 - 2026-11-12: Reference-def cleaning moved to definition-insert time (`clean_url`/`clean_title`: trim, entity-decode, backslash-unescape); destinations/titles stored raw by the block scanner; info strings decoded with the full entity table; labels trimmed with empty-label rejection.
 - 2026-11-12: **All 652 of 652 spec examples pass.** progress.json updated. 16 block-phase unit tests added (`tests/blocks.rs`, separate from the spec examples, exercising lazy continuation, list indentation, HTML end conditions, tabs, definitions). Warnings eliminated; clippy clean under -D warnings.
 - 2026-11-12: `scripts/check.sh` green at 652/652. Temporary probe/bisect/dump examples removed before the milestone commit.
+- 2026-11-13: CI discovery — the CI workflow had never passed (the earlier green run was the CodeQL setup workflow). The toolchain-setup action failed on every run on all systems, and the pinned cargo-deny version did not exist. CI rewritten with plain rustup and cargo steps; run 43360678153 green on all three OSes + MSRV.
+- 2026-11-13: M1 and M2 complete per their done-when lines: every block-section example passes, the renderer matches the spec byte for byte, and all 652 examples pass with none skipped or special-cased, on all three systems.

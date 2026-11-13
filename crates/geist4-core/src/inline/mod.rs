@@ -8,6 +8,7 @@
 //! per-delimiter-class opener boundaries that keep lookups linear.
 
 mod entities;
+mod entity_table;
 pub(crate) mod fold;
 mod unicode;
 
