@@ -9,6 +9,10 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: short
 
+permissions:
+  contents: read
+  statuses: write
+
 jobs:
   check:
     name: Check & Test (${{ matrix.os }})
