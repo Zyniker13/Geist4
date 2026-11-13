@@ -67,6 +67,11 @@ jobs:
   instructions:
     name: Instruction-count gate
     runs-on: ubuntu-latest
+    # TEMP diagnostic only: statuses:write posts the log tail for offline
+    # reading; removed once the baseline is captured.
+    permissions:
+      contents: read
+      statuses: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install Rust (stable)
@@ -88,6 +93,18 @@ jobs:
           exit "${PIPESTATUS[0]}"
       - name: Check the counts against the baseline
         run: python3 tools/check_iai.py iai.log bench/iai-baseline.txt
+      - name: TEMP diagnostic — post the iai log tail as a commit status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tail -40 iai.log > iai-tail.txt || true
+          DESC=$(head -c 140 iai-tail.txt | tr '\n' ' ' | tr -d '"')
+          curl -s -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"state\":\"success\",\"description\":\"$DESC\",\"context\":\"iai-tail\"}" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" > /dev/null
       - name: Upload the instruction-count log
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
