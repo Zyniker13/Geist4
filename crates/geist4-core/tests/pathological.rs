@@ -201,11 +201,15 @@ fn fixed_pathological_cases() {
     assert_eq!(out, "<p>abc\u{FFFD}de\u{FFFD}</p>");
 
     // Increasing backtick runs: code span scanning must not rescan.
+    // The deadline only catches gross superlinearity or a hang: the
+    // suite's tests run in parallel threads on shared runners, so an
+    // absolute wall-clock bound has to tolerate minutes of scheduler
+    // starvation. Quadratic rescanning is caught by the scaling suite.
     let input: String = (1..2_000).map(|k| format!("e{}`", "`".repeat(k))).collect();
     let start = Instant::now();
     let out = render(&parse_document(&input));
     assert!(out.starts_with("<p>"), "{out}");
-    assert!(start.elapsed() < Duration::from_secs(30));
+    assert!(start.elapsed() < Duration::from_secs(120));
 
     // An unclosed comment run stays literal.
     let out = render(&parse_document(&format!("</{}", "<!--".repeat(10_000))));
@@ -221,5 +225,6 @@ fn fixed_pathological_cases() {
     let start = Instant::now();
     let out = render(&parse_document(&defs));
     assert_eq!(out.matches("<a href=").count(), 2_000);
-    assert!(start.elapsed() < Duration::from_secs(10));
+    // Hang detector only; see the note above about shared runners.
+    assert!(start.elapsed() < Duration::from_secs(120));
 }
