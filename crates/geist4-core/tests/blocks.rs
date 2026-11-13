@@ -71,6 +71,16 @@ fn reference_whitespace_and_control_bytes() {
 }
 
 #[test]
+fn nul_replacement_lines() {
+    // Lines containing NUL bytes are rebuilt with U+FFFD replacement
+    // characters, which makes them longer than their source slice; the
+    // following lines must still render their own content.
+    assert_eq!(html("a\u{0}b\nc\n"), "<p>a\u{fffd}b\nc</p>");
+    assert_eq!(html("x\n\n\u{0}y\nz"), "<p>x</p>\n<p>\u{fffd}y\nz</p>");
+    assert_eq!(html("a\0b\0\0c"), "<p>a\u{fffd}b\u{fffd}\u{fffd}c</p>");
+}
+
+#[test]
 fn code_span_backtick_memo() {
     // The reference parser's backtick memo table: after an unmatched
     // longer run has scanned the subject, later runs of a length whose

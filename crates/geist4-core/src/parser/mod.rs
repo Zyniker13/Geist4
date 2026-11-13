@@ -125,6 +125,10 @@ struct Parser<'a> {
     last_line_blank: Vec<bool>,
     /// Whether the text being added is a lazy paragraph continuation.
     adding_lazy: bool,
+    /// Whether the line being processed is a plain slice of the source.
+    /// A line containing NUL bytes is rebuilt with U+FFFD replacements
+    /// and is not, so its content must not be borrowed from the source.
+    line_is_src: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -151,6 +155,7 @@ impl<'a> Parser<'a> {
             link_defs: HashMap::new(),
             last_line_blank: vec![false],
             adding_lazy: false,
+            line_is_src: true,
         }
     }
 
@@ -179,24 +184,27 @@ impl<'a> Parser<'a> {
             let line_stop = line_start + line.len();
             // NUL bytes become U+FFFD replacement characters before any
             // processing, as the reference implementation does when it
-            // reads a line.
+            // reads a line. The replaced line is no longer a slice of the
+            // source, so the parser must not borrow source bytes for it.
+            let has_nul = line.contains(&0u8);
             let replaced;
-            let line: &[u8] = if line.contains(&0u8) {
-                replaced = line
-                    .iter()
-                    .copied()
-                    .flat_map(|b| {
-                        if b == 0 {
-                            [0xEF, 0xBF, 0xBD].to_vec()
-                        } else {
-                            vec![b]
-                        }
-                    })
-                    .collect::<Vec<u8>>();
+            let line: &[u8] = if has_nul {
+                let mut out = Vec::with_capacity(line.len() + 16);
+                let mut run_start = 0usize;
+                for (i, &b) in line.iter().enumerate() {
+                    if b == 0 {
+                        out.extend_from_slice(&line[run_start..i]);
+                        out.extend_from_slice(&[0xEF, 0xBF, 0xBD]);
+                        run_start = i + 1;
+                    }
+                }
+                out.extend_from_slice(&line[run_start..]);
+                replaced = out;
                 &replaced
             } else {
                 line
             };
+            self.line_is_src = !has_nul;
             self.process_line(line, line_start, line_stop);
             line_start = next_start;
         }
@@ -227,9 +235,8 @@ impl<'a> Parser<'a> {
                     // The line's leading whitespace stays in the buffer;
                     // the inline phase strips it after each newline, and a
                     // consumed reference definition must not hide it.
-                    let text = String::from_utf8_lossy(&cursor.rest()).into_owned();
                     let id = self.open.last().unwrap().id;
-                    self.append_paragraph_text(id, &text);
+                    self.append_paragraph_rest(id, &cursor, line_offset);
                     self.set_frame_end(line_stop);
                     self.update_last_line_blank(self.open[depth - 1].id, Some(depth - 1), false);
                     return;
@@ -287,7 +294,7 @@ impl<'a> Parser<'a> {
                             // across a blank line.
                             false
                         } else {
-                            cursor.skip_nonspace();
+                            cursor.skip_to_content();
                             true
                         }
                     } else {
@@ -307,7 +314,7 @@ impl<'a> Parser<'a> {
                         cursor.advance_cols(4);
                         true
                     } else if cursor.blank_from_here() {
-                        cursor.skip_nonspace();
+                        cursor.skip_to_content();
                         true
                     } else {
                         false
@@ -892,22 +899,22 @@ impl<'a> Parser<'a> {
                 // A normal continuation line: its leading whitespace is
                 // consumed here, as the reference parser does. Lazy lines
                 // (handled in the walk) keep theirs.
-                cursor.skip_nonspace();
-                let text = String::from_utf8_lossy(&cursor.rest()).into_owned();
-                self.append_paragraph_text(id, &text);
+                cursor.skip_to_content();
+                self.append_paragraph_rest(id, cursor, line_offset);
                 Some(id)
             }
             OpenKind::CodeBlock { .. } => {
-                let text = cursor.rest();
-                self.append_code_text(id, &text);
+                self.append_code_rest(id, cursor, line_offset);
                 Some(id)
             }
             OpenKind::HtmlBlock { kind, .. } => {
                 let kind = *kind;
-                let text = cursor.rest();
-                self.append_html_text(id, &text);
-                if kind <= 5 && leaf::html_block_end(kind, leaf::trim_ascii(&text)) {
-                    self.close_last(line_stop);
+                self.append_html_rest(id, cursor, line_offset);
+                if kind <= 5 {
+                    let text = self.line_rest_bytes(cursor);
+                    if leaf::html_block_end(kind, leaf::trim_ascii(&text)) {
+                        self.close_last(line_stop);
+                    }
                 }
                 Some(id)
             }
@@ -919,8 +926,8 @@ impl<'a> Parser<'a> {
                 if cursor.blank_from_here() {
                     None
                 } else {
-                    cursor.skip_nonspace();
-                    let text = strip_leading_ws(&cursor.rest());
+                    cursor.skip_to_content();
+                    let text = self.line_rest_string(cursor, line_offset);
                     self.close_until_can_contain(line_stop);
                     Some(self.open_paragraph(&text, line_offset))
                 }
@@ -984,12 +991,52 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Appends one line to a code block's literal.
-    fn append_code_text(&mut self, id: NodeId, text: &[u8]) {
+    /// The `len` source bytes at `offset` as a `&str`, borrowed when the
+    /// range sits on char boundaries (every scanner stops at an ASCII
+    /// byte, which is always one) and lossy-converted otherwise, matching
+    /// what the byte-oriented call sites produced before.
+    fn src_from(&self, offset: usize, len: usize) -> std::borrow::Cow<'a, str> {
+        match self.src.get(offset..offset + len) {
+            Some(text) => std::borrow::Cow::Borrowed(text),
+            None => String::from_utf8_lossy(&self.src.as_bytes()[offset..offset + len]),
+        }
+    }
+
+    /// The cursor's remaining line as a `&str`: borrowed from the source
+    /// when the rest is a plain slice (no partially consumed tab) and the
+    /// tab-expanded bytes converted otherwise.
+    fn line_rest(&self, cursor: &Cursor<'_>, line_offset: usize) -> std::borrow::Cow<'a, str> {
+        if self.line_is_src && cursor.rest_is_slice() {
+            self.src_from(line_offset + cursor.pos(), cursor.rest_len())
+        } else {
+            std::borrow::Cow::Owned(String::from_utf8_lossy(&cursor.rest()).into_owned())
+        }
+    }
+
+    /// The cursor's remaining line as owned text, for callers that need a
+    /// `String` regardless.
+    fn line_rest_string(&self, cursor: &Cursor<'_>, line_offset: usize) -> String {
+        self.line_rest(cursor, line_offset).into_owned()
+    }
+
+    /// The cursor's remaining line as bytes, for byte-oriented checks.
+    fn line_rest_bytes(&self, cursor: &Cursor<'_>) -> Vec<u8> {
+        cursor.rest()
+    }
+
+    /// Appends the cursor's remaining line to the open paragraph's text.
+    fn append_paragraph_rest(&mut self, id: NodeId, cursor: &Cursor<'_>, line_offset: usize) {
+        let text = self.line_rest(cursor, line_offset);
+        self.append_paragraph_text(id, &text);
+    }
+
+    /// Appends the cursor's remaining line to a code block's literal.
+    fn append_code_rest(&mut self, id: NodeId, cursor: &Cursor<'_>, line_offset: usize) {
+        let text = self.line_rest(cursor, line_offset);
         for frame in self.open.iter_mut().rev() {
             if frame.id == id {
                 if let OpenKind::CodeBlock { literal, .. } = &mut frame.kind {
-                    literal.push_str(&String::from_utf8_lossy(text));
+                    literal.push_str(&text);
                     literal.push('\n');
                     return;
                 }
@@ -997,12 +1044,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Appends one line to an HTML block's literal.
-    fn append_html_text(&mut self, id: NodeId, text: &[u8]) {
+    /// Appends the cursor's remaining line to an HTML block's literal.
+    fn append_html_rest(&mut self, id: NodeId, cursor: &Cursor<'_>, line_offset: usize) {
+        let text = self.line_rest(cursor, line_offset);
         for frame in self.open.iter_mut().rev() {
             if frame.id == id {
                 if let OpenKind::HtmlBlock { literal, .. } = &mut frame.kind {
-                    literal.push_str(&String::from_utf8_lossy(text));
+                    literal.push_str(&text);
                     literal.push('\n');
                     return;
                 }
@@ -1296,15 +1344,6 @@ fn decode_info_string(raw: &str) -> Option<String> {
     } else {
         Some(final_unescaped)
     }
-}
-
-/// Strips leading spaces and tabs from a line's content.
-fn strip_leading_ws(bytes: &[u8]) -> String {
-    let mut start = 0usize;
-    while matches!(bytes.get(start), Some(b' ') | Some(b'\t')) {
-        start += 1;
-    }
-    String::from_utf8_lossy(&bytes[start..]).into_owned()
 }
 
 /// Normalizes a link label: Unicode case folding with ASCII whitespace

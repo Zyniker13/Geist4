@@ -134,7 +134,7 @@ impl<'t> Cursor<'t> {
     }
 
     /// Moves the cursor to the first non-space byte from here.
-    pub(super) fn skip_nonspace(&mut self) {
+    pub(super) fn skip_to_content(&mut self) {
         let (pos, col) = self.find_nonspace();
         self.pos = pos;
         self.col = col;
@@ -144,6 +144,18 @@ impl<'t> Cursor<'t> {
     /// The line's bytes, without its line ending.
     pub(super) fn line(&self) -> &'t [u8] {
         self.line
+    }
+
+    /// The number of bytes left from the cursor to the line's end.
+    pub(super) fn rest_len(&self) -> usize {
+        self.line.len() - self.pos
+    }
+
+    /// Whether the rest of the line is a plain slice of the line's bytes.
+    /// A partially consumed tab makes `rest` synthesize its bytes instead,
+    /// so source offsets no longer describe it.
+    pub(super) fn rest_is_slice(&self) -> bool {
+        self.partial_tab == 0
     }
 
     /// Moves the cursor to byte `pos` at virtual column `col`, clearing any
