@@ -34,7 +34,7 @@ struct Cell {
 }
 
 /// What a [`Cell`] holds.
-enum Kind {
+pub(crate) enum Kind {
     /// Literal text; emphasis processing shortens these in place.
     Text(String),
     /// A code span's content, already normalized.
@@ -49,6 +49,12 @@ enum Kind {
     Emph,
     /// Strong emphasis; children are its content.
     Strong,
+    /// An extension's node; children are its content, and the kind
+    /// name selects the extension's renderer.
+    Ext {
+        /// The kind name, as the extension declared it.
+        kind: String,
+    },
     /// A link or image; children are its content.
     Link {
         url: String,
@@ -58,7 +64,7 @@ enum Kind {
 }
 
 /// One emphasis delimiter run.
-struct DelimCell {
+pub(crate) struct DelimCell {
     alive: bool,
     ch: u8,
     can_open: bool,
@@ -68,6 +74,10 @@ struct DelimCell {
     position: usize,
     /// The text node holding the delimiter characters.
     node: u32,
+    /// For a run an extension pushed: the extension node kind its
+    /// pairs wrap their content in. `None` for the built-in emphasis
+    /// delimiters, whose pairing the engine owns.
+    ext_kind: Option<String>,
     prev: Option<u32>,
     next: Option<u32>,
 }
@@ -124,7 +134,7 @@ struct Bracket {
 }
 
 /// The inline parser state.
-struct Parser<'defs, 'a> {
+struct Parser<'defs, 'a, 'ext> {
     input: &'a str,
     bytes: &'a [u8],
     pos: usize,
@@ -141,6 +151,15 @@ struct Parser<'defs, 'a> {
     skip_cdata: bool,
     skip_declaration: bool,
     skip_pi: bool,
+    /// The registered extensions, or `None` on the plain path; the
+    /// hook sites short-circuit on `None`.
+    extensions: Option<&'ext [std::sync::Arc<dyn crate::extension::Extension>]>,
+    /// `(trigger byte, extension index)` pairs, in registration order;
+    /// empty on the plain path.
+    triggers: Vec<(u8, usize)>,
+    /// The distinct trigger bytes; text runs stop at them so their
+    /// hooks can fire. Empty on the plain path.
+    trigger_bytes: Vec<u8>,
     /// Positions of backtick runs seen while scanning for code-span
     /// closers, as in the reference parser's memo table, with the
     /// recording call's generation in the high bits. Entries persist
@@ -205,8 +224,29 @@ pub(crate) fn parse_inlines_into(
     link_defs: &HashMap<String, LinkDef<'_>>,
     arena: &mut crate::arena::Arena<'_>,
     parent: crate::arena::NodeId,
+    extensions: Option<&[std::sync::Arc<dyn crate::extension::Extension>]>,
 ) {
     let text = text.trim_end_matches([' ', '\t', '\u{b}', '\u{c}', '\r', '\n']);
+    // Each extension's trigger bytes join the dispatch table; the same
+    // byte from several extensions calls each hook in registration
+    // order.
+    let mut triggers: Vec<(u8, usize)> = Vec::new();
+    if let Some(extensions) = extensions {
+        for (index, ext) in extensions.iter().enumerate() {
+            for byte in ext.inline_triggers() {
+                triggers.push((*byte, index));
+            }
+        }
+    }
+    let trigger_bytes: Vec<u8> = {
+        let mut bytes = Vec::new();
+        for (byte, _) in &triggers {
+            if !bytes.contains(byte) {
+                bytes.push(*byte);
+            }
+        }
+        bytes
+    };
     let mut parser = Parser {
         input: text,
         bytes: text.as_bytes(),
@@ -221,6 +261,9 @@ pub(crate) fn parse_inlines_into(
         skip_cdata: false,
         skip_declaration: false,
         skip_pi: false,
+        extensions,
+        triggers,
+        trigger_bytes,
         backticks_memo: std::mem::take(&mut session.backticks_memo),
         memo_gen: session.memo_gen.wrapping_add(1),
         scanned_for_backticks: false,
@@ -298,6 +341,10 @@ fn node_from_kind(kind: Kind) -> Node<'static> {
         Kind::HardBreak => Node::HardBreak,
         Kind::Emph => Node::Emphasis,
         Kind::Strong => Node::Strong,
+        Kind::Ext { kind } => Node::Extension(crate::extension::ExtNode {
+            kind,
+            attrs: Vec::new(),
+        }),
         Kind::Link { url, title, image } => Node::Link(crate::node::LinkData {
             url: url.into(),
             title: title.map(std::borrow::Cow::Owned),
@@ -306,7 +353,78 @@ fn node_from_kind(kind: Kind) -> Node<'static> {
     }
 }
 
-impl<'defs, 'a> Parser<'defs, 'a> {
+/// The state an inline trigger hook drives. Private to the engine; the
+/// public wrapper is `crate::extension::InlineTriggerCtx`.
+pub(crate) struct TriggerInner<'p, 'defs, 'a, 'ext> {
+    /// The byte the hook was called for.
+    byte: u8,
+    /// The run `scan_run` created but `push_delim` has not consumed.
+    pending: Option<(u32, usize)>,
+    parser: &'p mut Parser<'defs, 'a, 'ext>,
+}
+
+impl<'p, 'defs, 'a, 'ext> crate::extension::InlineTriggerCtx<'p, 'defs, 'a, 'ext> {
+    /// The trigger byte the hook was called for.
+    #[must_use]
+    pub fn byte(&self) -> u8 {
+        self.inner.byte
+    }
+
+    /// The cursor's position in the inline subject, in bytes.
+    #[must_use]
+    pub fn position(&self) -> usize {
+        self.inner.parser.pos
+    }
+
+    /// Scans a delimiter run of the trigger byte at the cursor: the
+    /// run's characters are consumed and their text node is pushed,
+    /// exactly as the emphasis machinery scans `*` and `_` runs,
+    /// including the flanking rules. The run stays pending;
+    /// [`push_delim`](crate::extension::InlineTriggerCtx::push_delim)
+    /// decides whether it joins the delimiter stack.
+    pub fn scan_run(&mut self) -> crate::extension::Run {
+        let (length, can_open, can_close) = self.inner.parser.scan_delims(self.inner.byte);
+        let text = self.inner.parser.input[self.inner.parser.pos - length..self.inner.parser.pos]
+            .to_string();
+        let node = self.inner.parser.push(Kind::Text(text));
+        self.inner.pending = Some((node, self.inner.parser.pos));
+        crate::extension::Run {
+            length,
+            can_open,
+            can_close,
+        }
+    }
+
+    /// Puts the pending run from
+    /// [`scan_run`](crate::extension::InlineTriggerCtx::scan_run) on
+    /// the delimiter stack, tagged with `kind`. When a later run of the
+    /// same byte and the same kind closes against it, the content
+    /// between the two runs is wrapped in an extension node of `kind`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when no run was scanned, or when `scan_run` was followed
+    /// by another `scan_run` without an intervening `push_delim`.
+    pub fn push_delim(&mut self, run: &crate::extension::Run, kind: &str) {
+        let Some((node, position)) = self.inner.pending.take() else {
+            panic!("push_delim without a pending scan_run");
+        };
+        self.inner.parser.delims.push(DelimCell {
+            alive: true,
+            ch: self.inner.byte,
+            can_open: run.can_open,
+            can_close: run.can_close,
+            length: run.length,
+            position,
+            node,
+            ext_kind: Some(kind.to_owned()),
+            prev: None,
+            next: None,
+        });
+    }
+}
+
+impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
     /// The main scan loop.
     fn run(&mut self) {
         while self.pos < self.bytes.len() {
@@ -329,10 +447,49 @@ impl<'defs, 'a> Parser<'defs, 'a> {
                     }
                 }
                 b']' => self.handle_close_bracket(),
-                _ => self.handle_text(),
+                _ => self.handle_text_or_trigger(),
             }
         }
         self.process_emphasis(0);
+    }
+
+    /// Either hands the cursor to the extensions whose trigger byte is
+    /// here, or takes the byte as literal text.
+    fn handle_text_or_trigger(&mut self) {
+        let byte = self.bytes[self.pos];
+        if self.triggers.is_empty() {
+            self.handle_text();
+            return;
+        }
+        let hits: Vec<usize> = self
+            .triggers
+            .iter()
+            .filter(|(trigger, _)| *trigger == byte)
+            .map(|(_, index)| *index)
+            .collect();
+        if hits.is_empty() {
+            self.handle_text();
+            return;
+        }
+        for index in hits {
+            let before = self.pos;
+            let ext =
+                std::sync::Arc::clone(&self.extensions.expect("triggers imply extensions")[index]);
+            let mut ctx = crate::extension::InlineTriggerCtx {
+                inner: TriggerInner {
+                    byte,
+                    pending: None,
+                    parser: self,
+                },
+            };
+            ext.inline_trigger(&mut ctx);
+            // A hook that leaves the cursor at the trigger byte took
+            // nothing; the byte is literal text.
+            if self.pos == before {
+                self.handle_text();
+                return;
+            }
+        }
     }
 
     /// Allocates a cell and appends it to the output list.
@@ -446,7 +603,10 @@ impl<'defs, 'a> Parser<'defs, 'a> {
     fn handle_text(&mut self) {
         let start = self.pos;
         let mut end = self.pos + 1;
-        while end < self.bytes.len() && !SPECIAL_CHARS[self.bytes[end] as usize] {
+        while end < self.bytes.len()
+            && !SPECIAL_CHARS[self.bytes[end] as usize]
+            && (self.triggers.is_empty() || !self.trigger_bytes.contains(&self.bytes[end]))
+        {
             end += 1;
         }
         let mut text = self.input[start..end].to_string();
@@ -621,6 +781,7 @@ impl<'defs, 'a> Parser<'defs, 'a> {
                 // The position after the run, as in the reference parser.
                 position: self.pos,
                 node: id,
+                ext_kind: None,
                 prev: None,
                 next: None,
             });
@@ -628,6 +789,11 @@ impl<'defs, 'a> Parser<'defs, 'a> {
     }
 
     /// Measures a delimiter run at the cursor, applying the flanking rules.
+    ///
+    /// Extension trigger bytes are transparent when measuring the
+    /// characters around a run, as in the reference implementations'
+    /// skip-character walk: in `a\~~b` the run's preceding character is
+    /// `a`, not the escaped tilde.
     fn scan_delims(&mut self, ch: u8) -> (usize, bool, bool) {
         let before_char = self.char_before(self.pos);
         let mut numdelims = 0usize;
@@ -657,16 +823,31 @@ impl<'defs, 'a> Parser<'defs, 'a> {
         (numdelims, can_open, can_close)
     }
 
+    /// Whether a byte is transparent in the flanking walk: a UTF-8
+    /// continuation byte, or an extension trigger byte on the
+    /// extension path.
+    fn is_walk_through(&self, byte: u8) -> bool {
+        byte & 0xC0 == 0x80
+            || (!self.trigger_bytes.is_empty() && self.trigger_bytes.contains(&byte))
+    }
+
     /// The character before `pos`, or a newline stand-in at the start.
+    ///
+    /// The walk steps over transparent bytes; when it reaches the
+    /// subject's start through them, the before-character is the
+    /// newline stand-in, as in the reference implementation.
     fn char_before(&self, pos: usize) -> Option<char> {
         if pos == 0 {
             return Some('\n');
         }
         let bytes = &self.bytes[..pos];
-        // Step back over UTF-8 continuation bytes.
+        // Step back over transparent bytes.
         let mut start = pos - 1;
-        while start > 0 && bytes[start] & 0xC0 == 0x80 {
+        while start > 0 && self.is_walk_through(bytes[start]) {
             start -= 1;
+        }
+        if self.is_walk_through(bytes[start]) {
+            return Some('\n');
         }
         std::str::from_utf8(&bytes[start..])
             .ok()
@@ -675,8 +856,13 @@ impl<'defs, 'a> Parser<'defs, 'a> {
     }
 
     /// The character at `pos`, or a newline stand-in at the end of the
-    /// input, as the reference parser's decoder yields.
+    /// input, as the reference parser's decoder yields. Transparent
+    /// bytes are stepped over first.
     fn char_at(&self, pos: usize) -> Option<char> {
+        let mut pos = pos;
+        while pos < self.bytes.len() && self.is_walk_through(self.bytes[pos]) {
+            pos += 1;
+        }
         if pos >= self.bytes.len() {
             return Some('\n');
         }
@@ -816,8 +1002,15 @@ impl<'defs, 'a> Parser<'defs, 'a> {
     }
 
     /// Resolves the delimiter stack from `stack_bottom` onward.
+    ///
+    /// The built-in emphasis delimiters follow the CommonMark 0.31.2
+    /// reference's openers-bottom indexing; extension delimiters follow
+    /// the reference implementations' `[length % 3][char]` indexing and
+    /// the same odd-match rule, which is what makes `~a~~b~` wrap
+    /// around the middle run.
     fn process_emphasis(&mut self, stack_bottom: usize) {
         let mut openers_bottom = [stack_bottom; 15];
+        let mut ext_openers_bottom = [[stack_bottom; 256]; 3];
         // Move back to the first relevant delimiter: the last one whose
         // position is at or after the stack bottom.
         let mut closer: Option<u32> = None;
@@ -840,6 +1033,7 @@ impl<'defs, 'a> Parser<'defs, 'a> {
                 closer_cell.length,
                 closer_cell.position,
             );
+            let closer_ext_kind = closer_cell.ext_kind.clone();
             let next_of = |parser: &Self, id: u32| parser.delims.cells[id as usize].next;
             if !closer_can_close {
                 closer = next_of(self, closer_id);
@@ -852,17 +1046,26 @@ impl<'defs, 'a> Parser<'defs, 'a> {
                 b'*' => 8 + (if closer_can_open { 3 } else { 0 }) + (closer_len % 3),
                 _ => 0,
             };
+            let ext_bottom_len = closer_len % 3;
+            let ext_bottom_char = closer_ch as usize;
+            let is_ext = closer_ext_kind.is_some();
             // Look backwards for the first matching opener.
             let mut opener = self.delims.cells[closer_id as usize].prev;
             let mut opener_found = false;
             let mut opener_id = None;
             while let Some(o) = opener {
                 let cell = &self.delims.cells[o as usize];
-                if cell.position < openers_bottom[openers_bottom_index] {
+                let bottom = if is_ext {
+                    ext_openers_bottom[ext_bottom_len][ext_bottom_char]
+                } else {
+                    openers_bottom[openers_bottom_index]
+                };
+                if cell.position < bottom {
                     break;
                 }
                 if cell.can_open
                     && cell.ch == closer_ch
+                    && cell.ext_kind == closer_ext_kind
                     && (!(closer_can_open || cell.can_close)
                         || closer_len % 3 == 0
                         || (cell.length + closer_len) % 3 != 0)
@@ -874,7 +1077,14 @@ impl<'defs, 'a> Parser<'defs, 'a> {
                 opener = cell.prev;
             }
             let old_closer = closer_id;
-            if closer_ch == b'*' || closer_ch == b'_' {
+            if let Some(kind) = closer_ext_kind {
+                if opener_found {
+                    let opener_id = opener_id.expect("checked above");
+                    closer = self.insert_extension(opener_id, closer_id, &kind);
+                } else {
+                    closer = next_of(self, closer_id);
+                }
+            } else if closer_ch == b'*' || closer_ch == b'_' {
                 if opener_found {
                     let opener_id = opener_id.unwrap();
                     closer = self.insert_emphasis(opener_id, closer_id);
@@ -885,7 +1095,11 @@ impl<'defs, 'a> Parser<'defs, 'a> {
                 closer = next_of(self, closer_id);
             }
             if !opener_found {
-                openers_bottom[openers_bottom_index] = closer_position;
+                if is_ext {
+                    ext_openers_bottom[ext_bottom_len][ext_bottom_char] = closer_position;
+                } else {
+                    openers_bottom[openers_bottom_index] = closer_position;
+                }
                 if !closer_can_open {
                     self.delims.remove(old_closer);
                 }
@@ -898,6 +1112,80 @@ impl<'defs, 'a> Parser<'defs, 'a> {
             }
             self.delims.remove(id);
         }
+    }
+
+    /// Wraps the content between an extension's opener and closer runs
+    /// in an extension node of `kind`, the way the reference
+    /// implementations pair extension delimiters: the opener's whole
+    /// text node becomes the node, the closer's whole text node
+    /// disappears, and every delimiter between the two is freed. A
+    /// mismatched pair — different run lengths — wraps nothing but
+    /// still clears the whole range, so a failed match cannot rescan.
+    /// Returns the delimiter to continue from.
+    fn insert_extension(&mut self, opener: u32, closer: u32, kind: &str) -> Option<u32> {
+        let opener_cell = &self.delims.cells[opener as usize];
+        let opener_node = opener_cell.node;
+        let closer_node = self.delims.cells[closer as usize].node;
+        let opener_len = self.text_len(opener_node);
+        let closer_len = self.text_len(closer_node);
+        let next_after_closer = self.delims.cells[closer as usize].next;
+        if opener_len == closer_len {
+            // Remove the delimiters between opener and closer.
+            let mut between = self.delims.cells[closer as usize].prev;
+            while let Some(id) = between {
+                if id == opener {
+                    break;
+                }
+                between = self.delims.cells[id as usize].prev;
+                self.delims.remove(id);
+            }
+            // The opener's text node becomes the extension container.
+            self.pool[opener_node as usize].kind = Kind::Ext {
+                kind: kind.to_owned(),
+            };
+            let first = self.pool[opener_node as usize].next;
+            let last = self.pool[closer_node as usize].prev;
+            if first.is_some() && first != Some(closer_node) {
+                self.pool[opener_node as usize].first_child = first;
+                self.pool[opener_node as usize].last_child = last;
+                let mut id = first;
+                while let Some(current) = id {
+                    if current == closer_node {
+                        break;
+                    }
+                    let next = self.pool[current as usize].next;
+                    self.pool[current as usize].prev = None;
+                    self.pool[current as usize].parent = Some(opener_node);
+                    self.pool[current as usize].next = if next == Some(closer_node) {
+                        None
+                    } else {
+                        next
+                    };
+                    id = next;
+                }
+            }
+            // Splice through the closer's node and let `kill` unlink it:
+            // its neighbors' pointers then come out right, exactly as in
+            // `insert_emphasis`.
+            self.pool[opener_node as usize].next = Some(closer_node);
+            self.pool[closer_node as usize].prev = Some(opener_node);
+            self.kill(closer_node);
+            self.delims.remove(opener);
+            self.delims.remove(closer);
+        } else {
+            // A failed match still clears the whole range, as in the
+            // reference implementations.
+            let mut delim = Some(closer);
+            while let Some(id) = delim {
+                if id == opener {
+                    break;
+                }
+                delim = self.delims.cells[id as usize].prev;
+                self.delims.remove(id);
+            }
+            self.delims.remove(opener);
+        }
+        next_after_closer
     }
 
     /// Splices one emphasis or strong node between an opener and a closer.

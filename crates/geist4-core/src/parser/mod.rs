@@ -113,7 +113,13 @@ pub fn parse_document(src: &str) -> Document<'_> {
 /// hooks to the parse, and their post-processing passes run once the
 /// tree is complete.
 pub fn parse_with<'a>(src: &'a str, options: &crate::extension::Options) -> Document<'a> {
-    let (mut arena, root, link_defs) = Parser::new(src).run();
+    let extensions: Option<&[std::sync::Arc<dyn crate::extension::Extension>]> =
+        if options.is_empty() {
+            None
+        } else {
+            Some(options.extensions())
+        };
+    let (mut arena, root, link_defs) = Parser::new(src).extensions(extensions).run();
     if !options.is_empty() {
         for ext in options.extensions() {
             ext.post_process(&mut crate::extension::TreeCtx {
@@ -131,7 +137,7 @@ pub fn parse_with<'a>(src: &'a str, options: &crate::extension::Options) -> Docu
 }
 
 /// Parses the block structure of `src`.
-struct Parser<'a> {
+struct Parser<'a, 'ext> {
     src: &'a str,
     arena: Arena<'a>,
     open: Vec<Frame>,
@@ -145,9 +151,12 @@ struct Parser<'a> {
     /// A line containing NUL bytes is rebuilt with U+FFFD replacements
     /// and is not, so its content must not be borrowed from the source.
     line_is_src: bool,
+    /// The registered extensions, or `None` on the plain path; passed
+    /// through to the inline phase's hook sites.
+    extensions: Option<&'ext [std::sync::Arc<dyn crate::extension::Extension>]>,
 }
 
-impl<'a> Parser<'a> {
+impl<'a, 'ext> Parser<'a, 'ext> {
     fn new(src: &'a str) -> Self {
         let mut arena = Arena::new();
         // Bulk-reserve nodes by input size so the arena vector does not
@@ -172,7 +181,18 @@ impl<'a> Parser<'a> {
             last_line_blank: vec![false],
             adding_lazy: false,
             line_is_src: true,
+            extensions: None,
         }
+    }
+
+    /// Sets the registered extensions for the parse; `None` (the
+    /// default from [`Parser::new`]) keeps the plain path.
+    fn extensions(
+        mut self,
+        extensions: Option<&'ext [std::sync::Arc<dyn crate::extension::Extension>]>,
+    ) -> Self {
+        self.extensions = extensions;
+        self
     }
 
     /// Runs the whole block parse and returns the arena, root and defs.
@@ -839,6 +859,7 @@ impl<'a> Parser<'a> {
                     &self.link_defs,
                     &mut self.arena,
                     id,
+                    self.extensions,
                 );
             } else {
                 stack.extend(self.arena.children(id).iter().copied());

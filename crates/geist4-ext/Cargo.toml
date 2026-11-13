@@ -12,3 +12,6 @@ workspace = true
 
 [dependencies]
 geist4-core = { path = "../geist4-core" }
+
+[dev-dependencies]
+geist4-spec-harness = { path = "../geist4-spec-harness" }

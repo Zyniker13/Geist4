@@ -67,6 +67,24 @@ pub trait Extension: Send + Sync {
         Vec::new()
     }
 
+    /// The bytes at which the inline parser hands control to this
+    /// extension's [`inline_trigger`](Extension::inline_trigger) hook.
+    /// Built-in trigger bytes (`\`, `` ` ``, `&`, `<`, `*`, `_`, `[`,
+    /// `!`, `]`, line breaks) never reach the hook.
+    fn inline_triggers(&self) -> &[u8] {
+        &[]
+    }
+
+    /// Runs when the inline parser reaches one of this extension's
+    /// trigger bytes. The hook may scan a delimiter run — which the
+    /// emphasis machinery then pairs with a matching run — or emit
+    /// nodes directly. The cursor must end past the bytes the hook
+    /// consumed; a hook that leaves it at the trigger byte makes that
+    /// byte literal text.
+    fn inline_trigger(&self, ctx: &mut InlineTriggerCtx<'_, '_, '_, '_>) {
+        let _ = ctx;
+    }
+
     /// Runs once after the document tree is complete, before the
     /// document is returned. Hooks may rewrite kinds, set attributes,
     /// or splice nodes; this is where heading identifiers, task list
@@ -83,6 +101,35 @@ pub trait Extension: Send + Sync {
     fn render(&self, node: &ExtNode, children: &str, out: &mut String) {
         let _ = (node, children, out);
     }
+}
+
+/// A delimiter run scanned by an inline trigger hook.
+///
+/// The run's characters were consumed from the subject and pushed as a
+/// text node; the emphasis machinery later pairs runs whose openers
+/// and closers it accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Run {
+    /// How many delimiter characters the run holds.
+    pub length: usize,
+    /// Whether the run may open (left-flanking, as for emphasis).
+    pub can_open: bool,
+    /// Whether the run may close (right-flanking, as for emphasis).
+    pub can_close: bool,
+}
+
+/// The context an extension's inline trigger hook runs with.
+///
+/// The parser hands the hook the cursor at the trigger byte. Scanning
+/// a run consumes its characters and creates their text node;
+/// [`push_delim`](InlineTriggerCtx::push_delim) then puts the run on
+/// the delimiter stack tagged with a node kind, so a later matching
+/// run wraps the content between them in a node of that kind.
+///
+/// The methods are implemented next to the inline parser, which owns
+/// the state they drive.
+pub struct InlineTriggerCtx<'p, 'defs, 'a, 'ext> {
+    pub(crate) inner: crate::inline::TriggerInner<'p, 'defs, 'a, 'ext>,
 }
 
 /// The context of a post-processing pass over the document tree.

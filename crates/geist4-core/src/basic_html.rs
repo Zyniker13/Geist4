@@ -67,6 +67,8 @@ enum Step {
     Item(NodeId, bool),
     /// Renders one node's inline children.
     Inline(NodeId),
+    /// Renders an extension node whose children are already rendered.
+    Extension(crate::extension::ExtNode, String),
 }
 
 struct Renderer<'a> {
@@ -116,9 +118,9 @@ impl Renderer<'_> {
     /// Hands an extension node to the registered extensions, giving
     /// each the already-rendered children. Extensions render in
     /// registration order; a kind no extension claims produces nothing.
-    fn render_extension(&mut self, ext: &crate::extension::ExtNode, children: String) {
+    fn render_extension(&mut self, ext: &crate::extension::ExtNode, children: &str) {
         for extension in self.extensions {
-            extension.render(ext, &children, &mut self.out);
+            extension.render(ext, children, &mut self.out);
         }
     }
     fn run(&mut self, step: Step, stack: &mut Vec<Step>) {
@@ -128,6 +130,7 @@ impl Renderer<'_> {
             Step::Block(id, tight) => self.block(id, tight, stack),
             Step::Item(id, tight) => self.item(id, tight, stack),
             Step::Inline(id) => self.inline(id, stack),
+            Step::Extension(ext, children) => self.render_extension(&ext, &children),
         }
     }
 
@@ -201,8 +204,8 @@ impl Renderer<'_> {
             Node::Extension(ext) => {
                 self.cr();
                 let children = self.block_children_html(id);
-                self.render_extension(ext, children);
-                self.cr();
+                stack.push(Step::Cr);
+                stack.push(Step::Extension(ext.clone(), children));
             }
             Node::CodeBlock(data) => {
                 self.cr();
@@ -323,7 +326,7 @@ impl Renderer<'_> {
                 }
                 Node::Extension(ext) => {
                     let children = self.inline_children_html(child);
-                    self.render_extension(ext, children);
+                    stack.push(Step::Extension(ext.clone(), children));
                 }
                 Node::Document
                 | Node::BlockQuote
