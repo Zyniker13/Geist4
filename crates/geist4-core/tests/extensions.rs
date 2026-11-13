@@ -92,7 +92,7 @@ fn post_process_and_render_run() {
     ));
     assert_eq!(
         render_with(&doc, &options),
-        "<p><marked label=\"seen\">hello</marked></p>"
+        "<p><marked label=\"seen\">hello</marked></p>\n"
     );
 }
 
@@ -105,11 +105,11 @@ fn plain_parsing_is_untouched() {
     // The same source parses as plain CommonMark without the extension.
     assert_eq!(
         render(&parse_with("hello\n", &Options::new())),
-        "<p>hello</p>"
+        "<p>hello</p>\n"
     );
     assert_eq!(
         render(&geist4_core::parse_document("hello\n")),
-        "<p>hello</p>"
+        "<p>hello</p>\n"
     );
 }
 
@@ -125,6 +125,7 @@ fn unregistered_kinds_render_nothing() {
     options.extension(Arc::new(Other));
     let doc = parse_with("hello\n", &options);
     // No post-processing ran, so no extension node exists to render;
-    // the output is the plain paragraph.
-    assert_eq!(render_with(&doc, &options), "<p>hello</p>");
+    // the output is the plain paragraph, ending with the newline the
+    // renderer puts after the last block.
+    assert_eq!(render_with(&doc, &options), "<p>hello</p>\n");
 }

@@ -272,7 +272,12 @@ where
     let mut failures = Vec::new();
     for example in examples {
         let actual = render(example);
-        if actual == example.html {
+        // The example format cannot express a trailing newline (the
+        // newline before the closing fence is the delimiter), so one
+        // trailing newline is normalized away on both sides. The
+        // engine's real output keeps it: the reference implementations
+        // end every document's HTML with a newline.
+        if normalize(&actual) == normalize(&example.html) {
             passed += 1;
         } else {
             failures.push(Failure {
@@ -289,6 +294,11 @@ where
         passed,
         failures,
     }
+}
+
+/// Strips one trailing newline, the most the example format can hide.
+fn normalize(output: &str) -> &str {
+    output.strip_suffix('\n').unwrap_or(output)
 }
 
 /// Formats example numbers compactly: consecutive numbers become ranges, as

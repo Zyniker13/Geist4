@@ -133,6 +133,16 @@ pub trait Extension: Send + Sync {
     /// The extension's name, unique among the registered extensions.
     fn name(&self) -> &str;
 
+    /// The front matter delimiter this extension claims, if any. When
+    /// an extension declares one, the core checks the document's very
+    /// beginning before any line is processed: a matching prologue
+    /// becomes a `front_matter` node holding the raw text, and the
+    /// rest of the document parses as if the prologue were not there.
+    /// The first registered extension whose delimiter matches wins.
+    fn front_matter_delimiter(&self) -> Option<&str> {
+        None
+    }
+
     /// The node kinds this extension adds, declared up front.
     fn kinds(&self) -> Vec<KindDecl> {
         Vec::new()

@@ -10,7 +10,12 @@ use geist4_core::debug;
 use geist4_core::parser::parse_document;
 
 fn html(src: &str) -> String {
-    render(&parse_document(src))
+    // One trailing newline is normalized away, as the spec harness
+    // does: the renderer ends every document with a newline, as the
+    // reference implementations emit, and the assertions here are
+    // written without it.
+    let html = render(&parse_document(src));
+    html.strip_suffix('\n').unwrap_or(&html).to_owned()
 }
 
 fn tree(src: &str) -> String {

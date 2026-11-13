@@ -12,10 +12,12 @@
 
 use std::path::PathBuf;
 
-/// Renders a corpus file to the spec-suite HTML convention (no final
-/// newline), as the `.html` expectations are written that way.
+/// Renders a corpus file for comparison against `.html` expectations,
+/// which are written without the final newline; the renderer emits
+/// one, as the reference implementations do, so it is stripped here.
 fn html(src: &str) -> String {
-    geist4_core::basic_html::render(&geist4_core::parser::parse_document(src))
+    let html = geist4_core::basic_html::render(&geist4_core::parser::parse_document(src));
+    html.strip_suffix('\n').unwrap_or(&html).to_owned()
 }
 
 /// Line endings are transport, not content: a checkout may carry CRLF

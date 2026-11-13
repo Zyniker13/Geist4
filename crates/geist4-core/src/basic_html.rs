@@ -18,8 +18,9 @@ use crate::node::{ListData, Node};
 
 /// Renders a parsed document to HTML the way milestone M1 does.
 ///
-/// The output carries no final newline, matching the specification suite's
-/// expected values.
+/// The output ends with a newline after the last block, exactly as the
+/// reference implementations emit it; an empty document renders as
+/// nothing.
 #[must_use]
 pub fn render(document: &crate::parser::Document<'_>) -> String {
     render_with(document, &crate::extension::Options::new())
@@ -60,9 +61,9 @@ pub fn render_with(
     for extension in options.extensions() {
         extension.document_suffix(&mut renderer.out);
     }
-    if renderer.out.ends_with('\n') {
-        renderer.out.pop();
-    }
+    // Every block's HTML ends with a newline, as the reference
+    // implementations emit it; a document's output therefore ends with
+    // one unless the document is empty.
     renderer.out
 }
 

@@ -142,6 +142,58 @@ pub fn parse_with<'a>(src: &'a str, options: &crate::extension::Options) -> Docu
     }
 }
 
+/// Splits a front matter prologue off the very beginning of `src`,
+/// returning the byte offset one past its last byte. Mirrors the
+/// reference algorithm exactly: one leading byte order mark may
+/// precede the opener; the opener is the delimiter followed by a line
+/// ending; the closer is the first later occurrence of a line ending,
+/// the delimiter, and then a line ending or the end of input —
+/// searched as three patterns in the reference's priority order, so a
+/// carriage-return closer anywhere in the body wins over an earlier
+/// line-feed closer; the closer's own line ending and one following
+/// blank line belong to the prologue. An empty body does not close
+/// (the closer search needs a preceding line ending inside the body).
+fn split_off_front_matter(src: &str, delimiter: &str) -> Option<usize> {
+    let mut at = 0usize;
+    if src.starts_with('\u{feff}') {
+        at = '\u{feff}'.len_utf8();
+    }
+    if !src[at..].starts_with(delimiter) {
+        return None;
+    }
+    at += delimiter.len();
+    if src[at..].starts_with('\n') {
+        at += 1;
+    } else if src[at..].starts_with("\r\n") {
+        at += 2;
+    } else {
+        return None;
+    }
+    let body = &src[at..];
+    let closer = format!("\n{delimiter}");
+    let hit = body
+        .find(&format!("{closer}\r\n"))
+        .or_else(|| body.find(&format!("{closer}\n")))
+        .or_else(|| body.find(&closer))?;
+    at += hit + 1 + delimiter.len();
+    if at == src.len() {
+        return Some(at);
+    }
+    if src[at..].starts_with('\n') {
+        at += 1;
+    } else if src[at..].starts_with("\r\n") {
+        at += 2;
+    } else {
+        return None;
+    }
+    if src[at..].starts_with('\n') {
+        at += 1;
+    } else if src[at..].starts_with("\r\n") {
+        at += 2;
+    }
+    Some(at)
+}
+
 /// Prepares a converted paragraph's prefix as paragraph text: `\|`
 /// unescapes to `|` and the whole prefix is trimmed, as the reference
 /// implementations prepare a table's pre-header text.
@@ -501,10 +553,47 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         self
     }
 
+    /// Checks the document's beginning for a front matter prologue and
+    /// records it as the root's first child when one claims it. The
+    /// return value is the byte offset the line loop starts at, zero
+    /// when nothing claimed a prologue.
+    fn claim_front_matter(&mut self) -> usize {
+        let Some(extensions) = self.extensions else {
+            return 0;
+        };
+        for extension in extensions {
+            let Some(delimiter) = extension.front_matter_delimiter() else {
+                continue;
+            };
+            if let Some(end) = split_off_front_matter(self.src, delimiter) {
+                let raw = &self.src[..end];
+                // The byte order mark, when one preceded the opener,
+                // is not part of the prologue's own text.
+                let raw = raw.strip_prefix('\u{feff}').unwrap_or(raw);
+                let node = self.arena.alloc(
+                    crate::node::Node::Extension(crate::extension::ExtNode {
+                        kind: "front_matter".to_owned(),
+                        attrs: vec![(
+                            "source".to_owned(),
+                            crate::extension::AttrValue::Str(raw.to_owned()),
+                        )],
+                    }),
+                    crate::span::Span::new(0, end),
+                );
+                self.arena.insert_child(self.open[0].id, 0, node);
+                return end;
+            }
+        }
+        0
+    }
+
     /// Runs the whole block parse and returns the arena, root and defs.
     fn run(mut self) -> (Arena<'a>, NodeId, HashMap<String, LinkDef<'a>>) {
         let bytes = self.src.as_bytes();
-        let mut line_start = 0usize;
+        // A registered front matter delimiter claims a prologue before
+        // any line is parsed; the rest parses as if the prologue were
+        // not part of the source, while spans keep their real offsets.
+        let mut line_start = self.claim_front_matter();
         while line_start < bytes.len() {
             // Lines end at `\n`, at `\r\n`, or at a bare `\r`, as in the
             // reference implementation; the carriage return itself is

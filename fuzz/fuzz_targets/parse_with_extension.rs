@@ -6,8 +6,9 @@
 //! the unwrite-and-splice link emission and the post-process email
 //! pass over consolidated text nodes; the tasklist, tagfilter and
 //! footnotes built-ins drive the bracket claim, the render-time
-//! rewrite and the post-process tree surgery. Arbitrary bytes must not
-//! panic and must drop cleanly.
+//! rewrite and the post-process tree surgery; the front matter
+//! built-in drives the pre-parse prologue claim that runs before the
+//! first line. Arbitrary bytes must not panic and must drop cleanly.
 
 #![no_main]
 
@@ -16,6 +17,7 @@ use libfuzzer_sys::fuzz_target;
 fuzz_target!(|data: &[u8]| {
     let src = String::from_utf8_lossy(data);
     let mut options = geist4_core::extension::Options::new();
+    options.extension(geist4_ext::front_matter());
     options.extension(geist4_ext::tables());
     options.extension(geist4_ext::strikethrough());
     options.extension(geist4_ext::autolink());

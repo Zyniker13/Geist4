@@ -192,13 +192,13 @@ fn fixed_pathological_cases() {
     // The hard link/emph case from the reference suite.
     assert_eq!(
         render(&parse_document("**x [a*b**c*](d)")),
-        "<p>**x <a href=\"d\">a<em>b**c</em></a></p>"
+        "<p>**x <a href=\"d\">a<em>b**c</em></a></p>\n"
     );
 
     // NUL bytes become replacement characters in the output, as the
     // reference implementation's does.
     let out = render(&parse_document("abc\u{0}de\u{0}"));
-    assert_eq!(out, "<p>abc\u{FFFD}de\u{FFFD}</p>");
+    assert_eq!(out, "<p>abc\u{FFFD}de\u{FFFD}</p>\n");
 
     // Increasing backtick runs: code span scanning must not rescan.
     // The deadline only catches gross superlinearity or a hang: the

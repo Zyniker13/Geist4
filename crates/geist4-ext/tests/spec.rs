@@ -16,6 +16,7 @@ const AUTOLINK_SPEC: &str = include_str!("../spec/autolink.md");
 const TASKLIST_SPEC: &str = include_str!("../spec/tasklist.md");
 const TAGFILTER_SPEC: &str = include_str!("../spec/tagfilter.md");
 const FOOTNOTES_SPEC: &str = include_str!("../spec/footnotes.md");
+const FRONT_MATTER_SPEC: &str = include_str!("../spec/front_matter.md");
 
 /// Runs a spec file with `options` and requires every example to pass.
 fn run_spec(name: &str, spec: &str, options: &Options) {
@@ -75,6 +76,27 @@ fn footnotes_spec() {
     let mut options = Options::new();
     options.extension(geist4_ext::footnotes());
     run_spec("footnotes", FOOTNOTES_SPEC, &options);
+}
+
+#[test]
+fn front_matter_spec() {
+    let mut options = Options::new();
+    options.extension(geist4_ext::front_matter());
+    run_spec("front_matter", FRONT_MATTER_SPEC, &options);
+}
+
+/// With no extensions, front matter syntax is plain Markdown: the
+/// delimiter is a thematic break (or a setext underline), and the
+/// body lines are ordinary content. The same sources that the
+/// extension consumes must parse plainly without it.
+#[test]
+fn front_matter_off_leaves_plain_commonmark() {
+    let plain = Options::new();
+    let doc = geist4_core::parser::parse_with("---\ntitle: hi\n---\n\ntext\n", &plain);
+    assert_eq!(
+        geist4_core::basic_html::render_with(&doc, &plain),
+        "<hr />\n<h2>title: hi</h2>\n<p>text</p>\n"
+    );
 }
 
 /// With no extensions, blacklisted raw HTML passes through untouched:

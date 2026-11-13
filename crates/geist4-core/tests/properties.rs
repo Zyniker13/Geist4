@@ -92,7 +92,7 @@ proptest! {
 #[test]
 fn autolink_anchor_tags_balance() {
     let out = parse_and_render("<AA:>");
-    assert_eq!(out, "<p><a href=\"AA:\">AA:</a></p>");
+    assert_eq!(out, "<p><a href=\"AA:\">AA:</a></p>\n");
 }
 
 /// Every node's span lies inside the input, and every non-empty child

@@ -164,12 +164,10 @@ fn ours_html(src: &str) -> String {
     geist4_core::basic_html::render(&geist4_core::parser::parse_document(src))
 }
 
-/// The reference CLI's output, with its one trailing newline removed,
-/// compared against our own output which never ends in a newline. For an
-/// empty render the reference emits nothing at all, so appending to ours
-/// would invent a newline that has no counterpart.
-fn theirs_without_newline(theirs: &str) -> &str {
-    theirs.strip_suffix('\n').unwrap_or(theirs)
+/// The reference CLI's output and our own now agree exactly, including
+/// the trailing newline every document ends with.
+fn theirs_html(theirs: &str) -> &str {
+    theirs
 }
 
 #[test]
@@ -196,9 +194,9 @@ fn differential_against_reference() {
         let input = generate(&mut rng, token_count);
         let theirs = reference_html(&input);
         let ours = ours_html(&input);
-        // The reference CLI ends its output with a newline; our renderer
-        // does not (the spec suite's convention). Compare modulo that.
-        if ours != theirs_without_newline(&theirs) {
+        // The outputs now agree byte for byte, trailing newline
+        // included.
+        if ours != theirs_html(&theirs) {
             failures += 1;
             if first_difference.is_none() {
                 first_difference = Some((input, ours, theirs));
@@ -259,7 +257,7 @@ fn differential_over_fuzz_corpus() {
         let theirs = reference_html(&input);
         let ours = ours_html(&input);
         checked += 1;
-        if ours != theirs_without_newline(&theirs) {
+        if ours != theirs_html(&theirs) {
             failures += 1;
             if std::env::var_os("GEIST4_DIFF_DUMP").is_some() {
                 let name = format!("{:04}", failures);

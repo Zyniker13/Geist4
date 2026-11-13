@@ -100,8 +100,23 @@ pub fn footnotes() -> std::sync::Arc<dyn Extension> {
     footnotes::footnotes()
 }
 
+/// The front matter extension as a shared extension value, with the
+/// default `---` delimiter.
+#[must_use]
+pub fn front_matter() -> std::sync::Arc<dyn Extension> {
+    front_matter::front_matter()
+}
+
+/// The front matter extension as a shared extension value, opening
+/// and closing the prologue with a caller-chosen delimiter.
+#[must_use]
+pub fn front_matter_with(delimiter: impl Into<String>) -> std::sync::Arc<dyn Extension> {
+    front_matter::front_matter_with(delimiter)
+}
+
 pub mod autolink;
 pub mod footnotes;
+pub mod front_matter;
 pub mod tables;
 pub mod tagfilter;
 pub mod tasklist;
