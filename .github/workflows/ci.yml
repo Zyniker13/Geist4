@@ -89,8 +89,17 @@ jobs:
         run: cargo install --locked iai-callgrind-runner@0.14.2
       - name: Run the instruction-count benchmarks
         run: |
+          set -o pipefail
           cargo bench -p geist4-bench --bench iai 2>&1 | tee iai.log
-          exit "${PIPESTATUS[0]}"
+          code=$?
+          {
+            echo "BENCH_EXIT=$code"
+            echo "--- target/iai files:"
+            find target/iai -type f 2>/dev/null | head -20
+            echo "--- target/criterion iai:"
+            ls target/release/deps/iai-* 2>/dev/null | head -5
+          } >> iai.log
+          exit "$code"
       - name: Check the counts against the baseline
         run: python3 tools/check_iai.py iai.log bench/iai-baseline.txt
       - name: TEMP diagnostic — post the iai log tail as commit statuses
@@ -99,13 +108,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          base64 -i iai.log | tr -d '\n' > iai-b64.txt || true
-          i=0
-          cut -c1-130 iai-b64.txt | while read -r chunk; do
-            i=$((i+1))
+          base64 -i iai.log | tr -d '\n' > iai-b64.txt
+          mapfile -t chunks < <(fold -w 130 iai-b64.txt)
+          for i in "${!chunks[@]}"; do
             gh api "repos/$GH_REPO/statuses/${{ github.sha }}" \
-              -f state=success -f context="iai-$i" -f description="$chunk" > /dev/null
+              -f state=success -f context="iai-$((i+1))" -f description="${chunks[$i]}" > /dev/null
           done
+          echo "posted ${#chunks[@]} statuses"
       - name: Upload the instruction-count log
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
