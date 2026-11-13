@@ -115,6 +115,29 @@ impl<'a> Arena<'a> {
         self.nodes[parent.0].children.pop()
     }
 
+    /// Inserts `child` into `parent`'s children at `index`, shifting the
+    /// rest right. Post-processing passes splice nodes this way: one
+    /// text node becomes text, link and text again.
+    pub fn insert_child(&mut self, parent: NodeId, index: usize, child: NodeId) {
+        let kids = &mut self.nodes[parent.0].children;
+        if kids.capacity() == 0 {
+            kids.reserve(4);
+        }
+        kids.insert(index.min(kids.len()), child);
+    }
+
+    /// Removes and returns the child of `parent` at `index`, if there
+    /// is one. Post-processing passes drop the swallowed halves of
+    /// merged text runs this way.
+    pub fn remove_child(&mut self, parent: NodeId, index: usize) -> Option<NodeId> {
+        let kids = &mut self.nodes[parent.0].children;
+        if index < kids.len() {
+            Some(kids.remove(index))
+        } else {
+            None
+        }
+    }
+
     /// Replaces the kind of node `id`, keeping span and children.
     pub fn set_kind(&mut self, id: NodeId, kind: Node<'a>) {
         self.nodes[id.0].kind = kind;

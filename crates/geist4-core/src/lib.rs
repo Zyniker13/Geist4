@@ -16,6 +16,14 @@ pub mod node;
 pub mod parser;
 pub mod span;
 
+/// Unicode classification for extension scanners, the same classes the
+/// inline phase uses: `is_space` covers Unicode Zs, Zl and Zp plus
+/// tab, newline, form feed and carriage return; `is_punct_or_symbol`
+/// covers Unicode P* and S*.
+pub mod unicode {
+    pub use crate::inline::unicode::{is_punct_or_symbol, is_space};
+}
+
 pub use parser::{Document, parse_document};
 
 /// The version of this crate, from its manifest.

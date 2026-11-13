@@ -23,13 +23,13 @@ fn in_ranges(ranges: &[(u32, u32)], cp: u32) -> bool {
 
 /// Whether the character counts as whitespace for emphasis flanking:
 /// Unicode Zs, Zl and Zp plus tab, newline, form feed and carriage return.
-pub(crate) fn is_space(c: char) -> bool {
+pub fn is_space(c: char) -> bool {
     in_ranges(&SPACE_RANGES, c as u32)
 }
 
 /// Whether the character is Unicode punctuation (P*) or a symbol (S*),
 /// the classes that count as punctuation for emphasis flanking.
-pub(crate) fn is_punct_or_symbol(c: char) -> bool {
+pub fn is_punct_or_symbol(c: char) -> bool {
     in_ranges(&PUNCT_OR_SYMBOL_RANGES, c as u32)
 }
 

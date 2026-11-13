@@ -10,7 +10,7 @@
 mod entities;
 mod entity_table;
 pub(crate) mod fold;
-mod unicode;
+pub(crate) mod unicode;
 
 use std::collections::HashMap;
 
@@ -421,6 +421,154 @@ impl<'p, 'defs, 'a, 'ext> crate::extension::InlineTriggerCtx<'p, 'defs, 'a, 'ext
             prev: None,
             next: None,
         });
+    }
+
+    /// The subject's bytes from the trigger position to the end of the
+    /// current line, as the reference scanners work on them: a match
+    /// extends past ordinary bytes to a line end, not to the next
+    /// special character.
+    #[must_use]
+    pub fn rest_of_line(&self) -> &'a [u8] {
+        self.inner.rest_of_line()
+    }
+
+    /// The subject's bytes from the start of the current line to the
+    /// cursor, as the reference's chunk view lets a matcher rewind
+    /// before the trigger byte: a newline or carriage return bounds
+    /// the view on the left, the cursor bounds it on the right.
+    #[must_use]
+    pub fn line_prefix(&self) -> &'a [u8] {
+        self.inner.line_prefix()
+    }
+
+    /// The byte before the cursor, when there is one.
+    #[must_use]
+    pub fn preceding(&self) -> Option<u8> {
+        self.inner.preceding()
+    }
+
+    /// Whether an open link or image bracket encloses the position.
+    /// Matches never fire inside brackets, so a bare URL in unresolved
+    /// or resolved link syntax stays literal.
+    #[must_use]
+    pub fn in_bracket(&self) -> bool {
+        self.inner.in_bracket()
+    }
+
+    /// Unwrites `n` bytes of trailing text: walks back over the text
+    /// cells before the cursor shortening them, as the reference's
+    /// node_unput does for an extended URL autolink's scheme. Stops at
+    /// a non-text cell or the list's start; a multi-byte character is
+    /// never split because the count crosses ASCII bytes only.
+    pub fn unput(&mut self, n: usize) {
+        self.inner.unput(n);
+    }
+
+    /// Emits a link whose text is the source bytes from `rewind` bytes
+    /// before the cursor through `take` bytes after it, consuming that
+    /// span. The `rewind` bytes must be trailing text, unwritten first
+    /// as by [`unput`](Self::unput); the link's destination is `url`.
+    /// A link's children are its text, so emphasis runs inside the span
+    /// never pair, exactly as the reference's inline autolinks swallow
+    /// the characters they match.
+    pub fn emit_link(&mut self, rewind: usize, take: usize, url: String) {
+        self.inner.emit_link(rewind, take, url);
+    }
+}
+
+impl<'p, 'defs, 'a, 'ext> TriggerInner<'p, 'defs, 'a, 'ext> {
+    /// The subject's bytes from the cursor to the end of the current
+    /// line: a newline or carriage return bounds the view, as the
+    /// reference's NUL-terminated per-line buffers do.
+    fn rest_of_line(&self) -> &'a [u8] {
+        let start = self.parser.pos;
+        let bytes = self.parser.bytes;
+        let end = bytes[start..]
+            .iter()
+            .position(|byte| matches!(byte, b'\n' | b'\r'))
+            .map_or(bytes.len(), |offset| start + offset);
+        &bytes[start..end]
+    }
+
+    /// The byte before the cursor, when there is one.
+    fn preceding(&self) -> Option<u8> {
+        self.parser
+            .bytes
+            .get(self.parser.pos.checked_sub(1)?)
+            .copied()
+    }
+
+    /// The subject's bytes from the start of the current line to the
+    /// cursor: the mirror of `rest_of_line` on the left, for matchers
+    /// that rewind before the trigger byte, as the scheme autolink's
+    /// `cmark_chunk_strchr` does over the reference's chunk.
+    fn line_prefix(&self) -> &'a [u8] {
+        let end = self.parser.pos;
+        let bytes = self.parser.bytes;
+        let start = bytes[..end]
+            .iter()
+            .rposition(|byte| matches!(byte, b'\n' | b'\r'))
+            .map_or(0, |offset| offset + 1);
+        &bytes[start..end]
+    }
+
+    /// Whether any link or image bracket is open: the reference's
+    /// in-bracket flags accumulate over the whole bracket stack, and
+    /// both match kinds decline when either is set.
+    fn in_bracket(&self) -> bool {
+        !self.parser.brackets.is_empty()
+    }
+
+    /// Unwrites `n` bytes of trailing text, walking back over text
+    /// cells exactly as the reference's node_unput does.
+    fn unput(&mut self, mut n: usize) {
+        let mut cursor = self.parser.tail;
+        while n > 0 {
+            let Some(id) = cursor else { break };
+            let cell = &mut self.parser.pool[id as usize];
+            if !matches!(cell.kind, Kind::Text(_)) {
+                break;
+            }
+            let Kind::Text(text) = &mut cell.kind else {
+                unreachable!("checked above");
+            };
+            if text.len() < n {
+                n -= text.len();
+                text.clear();
+                cursor = cell.prev;
+            } else {
+                text.truncate(text.len() - n);
+                n = 0;
+            }
+        }
+    }
+
+    /// Emits a link around the span `[pos - rewind, pos + take)`,
+    /// unwriting the rewind first and consuming the whole span.
+    fn emit_link(&mut self, rewind: usize, take: usize, url: String) {
+        if rewind > 0 {
+            self.unput(rewind);
+        }
+        let text = self.parser.input[self.parser.pos - rewind..self.parser.pos + take].to_string();
+        let link = self.parser.alloc(Kind::Link {
+            url,
+            title: None,
+            image: false,
+        });
+        let child = self.parser.alloc(Kind::Text(text));
+        self.parser.pool[link as usize].first_child = Some(child);
+        self.parser.pool[link as usize].last_child = Some(child);
+        self.parser.pool[child as usize].parent = Some(link);
+        // Append the link to the open list after whatever precedes it.
+        let id = link;
+        self.parser.pool[id as usize].prev = self.parser.tail;
+        if let Some(prev) = self.parser.tail {
+            self.parser.pool[prev as usize].next = Some(id);
+        } else {
+            self.parser.head = Some(id);
+        }
+        self.parser.tail = Some(id);
+        self.parser.pos += take;
     }
 }
 

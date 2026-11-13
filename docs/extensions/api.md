@@ -72,6 +72,27 @@ followed by a sibling item renders loose, matching the reference byte
 for byte. Hooks that only look at the line without consuming it do not
 affect the flags.
 
+## Post-processing passes
+
+A `post_process` hook sees the finished tree and may rewrite it:
+change a node's kind, splice children in or out
+(`Arena::insert_child`/`remove_child`), or split one node into
+several. The autolink built-in is the worked example: it first merges
+every run of adjacent text nodes (the reference's
+`cmark_consolidate_text_nodes`), then walks the tree skipping the
+subtrees of links, and replaces each email-bearing text node with
+text, link, text. A hook that walks children should collect the child
+list first — the walk visits the node's children as they were, while
+splices add new ones beside them.
+
+Inline trigger hooks and post-process hooks see the source at
+different stages: a trigger hook sees the raw subject bytes (escapes
+and entities not yet decoded), a post-process hook sees the decoded
+text node contents. The autolink matchers rely on the first — a match
+swallows bytes that would otherwise start emphasis or an entity —
+while the email pass works on the second, the same order the
+reference implementation uses.
+
 ## Where to look
 
 - `geist4-core/src/extension.rs` — the traits and context types.

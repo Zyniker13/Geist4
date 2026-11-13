@@ -70,10 +70,17 @@ pub fn strikethrough() -> std::sync::Arc<dyn Extension> {
     std::sync::Arc::new(Strikethrough)
 }
 
+/// The autolink extension as a shared extension value.
+#[must_use]
+pub fn autolink() -> std::sync::Arc<dyn Extension> {
+    std::sync::Arc::new(autolink::Autolink)
+}
+
 /// The tables extension as a shared extension value.
 #[must_use]
 pub fn tables() -> std::sync::Arc<dyn Extension> {
     std::sync::Arc::new(tables::Tables)
 }
 
+pub mod autolink;
 pub mod tables;

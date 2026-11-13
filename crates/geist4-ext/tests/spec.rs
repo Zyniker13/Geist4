@@ -12,6 +12,7 @@ use geist4_spec_harness::{parse, run};
 
 const STRIKETHROUGH_SPEC: &str = include_str!("../spec/strikethrough.md");
 const TABLES_SPEC: &str = include_str!("../spec/tables.md");
+const AUTOLINK_SPEC: &str = include_str!("../spec/autolink.md");
 
 /// Runs a spec file with `options` and requires every example to pass.
 fn run_spec(name: &str, spec: &str, options: &Options) {
@@ -43,6 +44,40 @@ fn tables_spec() {
     let mut options = Options::new();
     options.extension(geist4_ext::tables());
     run_spec("tables", TABLES_SPEC, &options);
+}
+
+#[test]
+fn autolink_spec() {
+    let mut options = Options::new();
+    options.extension(geist4_ext::autolink());
+    run_spec("autolink", AUTOLINK_SPEC, &options);
+}
+
+/// With no extensions, `www.` domains, scheme URLs and email addresses
+/// stay plain text: the same sources that link with the extension must
+/// not change plain CommonMark output.
+#[test]
+fn autolink_off_leaves_plain_commonmark() {
+    let cases = [
+        "www.example.com\n",
+        "http://example.com\n",
+        "a@b.com\n",
+        "mail a@example.com now\n",
+    ];
+    for source in cases {
+        let plain = render_with(&parse_with(source, &Options::new()), &Options::new());
+        let mut options = Options::new();
+        options.extension(geist4_ext::autolink());
+        let linked = render_with(&parse_with(source, &options), &options);
+        assert!(
+            !plain.contains("<a href"),
+            "without the extension the candidates stay literal: {source:?}"
+        );
+        assert_ne!(
+            plain, linked,
+            "the extension must change this output: {source:?}"
+        );
+    }
 }
 
 /// With no extensions, pipe rows stay plain paragraphs: the same sources
