@@ -36,3 +36,24 @@ suite required to stay at 652 of 652 after every change.
 Per-document numbers for this run are in the criterion output; the
 throughput gate for CI is the instruction-count benchmark
 (`benches/iai.rs`), not these wall-clock numbers.
+
+### 2026-11-13 — after the M4 optimization rounds
+
+- Machine: Apple M6, 12 cores, macOS 27.2
+- Toolchain: rustc 1.99.1, release profile, criterion 0.7
+- Repository state: `c010b013`
+
+| implementation   | geomean throughput |
+| ---------------- | ------------------ |
+| pulldown-cmark   | 540.8 MiB/s        |
+| geist4           | 210.4 MiB/s        |
+| comrak           | 192.7 MiB/s        |
+| cmark (CLI)      | 2.8 MiB/s          |
+
+The optimization rounds (arena pre-reserve, definition-scan guard,
+inline buffer reuse with a generation-tagged memo, batched HTML
+escaping, borrowed source slices, direct pool-to-arena attachment,
+reusable label and join buffers) took geist4 from 131.5 to 210.4
+MiB/s — a 1.60x improvement, now ahead of comrak and 2.6x behind
+pulldown-cmark. Decision 0013 records the approach and the reasons
+the remaining gap is not closed.
