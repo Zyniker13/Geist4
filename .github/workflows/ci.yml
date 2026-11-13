@@ -89,16 +89,15 @@ jobs:
         run: cargo install --locked iai-callgrind-runner@0.14.2
       - name: Run the instruction-count benchmarks
         run: |
-          set -o pipefail
-          cargo bench -p geist4-bench --bench iai 2>&1 | tee iai.log
+          set +e
+          cargo bench -p geist4-bench --bench iai > iai.log 2>&1
           code=$?
           {
             echo "BENCH_EXIT=$code"
             echo "--- target/iai files:"
             find target/iai -type f 2>/dev/null | head -20
-            echo "--- target/criterion iai:"
-            ls target/release/deps/iai-* 2>/dev/null | head -5
           } >> iai.log
+          tail -60 iai.log
           exit "$code"
       - name: Check the counts against the baseline
         run: python3 tools/check_iai.py iai.log bench/iai-baseline.txt
