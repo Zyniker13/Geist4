@@ -20,15 +20,6 @@ use unicode::{is_ascii_punct_byte, is_punct_or_symbol, is_space};
 /// The longest link label the inline phase will scan.
 const MAX_LINK_LABEL_LENGTH: usize = 1000;
 
-/// An inline node, ready to become an arena child.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct InlineNode {
-    /// The node itself; strings are owned.
-    pub node: Node<'static>,
-    /// The node's children, in order, for container inlines.
-    pub children: Vec<InlineNode>,
-}
-
 /// An inline node in the parser's working pool.
 struct Cell {
     alive: bool,
@@ -166,17 +157,6 @@ struct Parser<'defs, 'a> {
     link_defs: &'defs HashMap<String, LinkDef<'a>>,
 }
 
-/// Drops an inline tree without recursive drop glue: children move onto
-/// a work stack, so a 10,000-deep emphasis tree cannot overflow the call
-/// stack when it is discarded.
-pub(crate) fn drop_inline_tree(roots: Vec<crate::inline::InlineNode>) {
-    let mut stack: Vec<crate::inline::InlineNode> = roots;
-    while let Some(mut inline) = stack.pop() {
-        stack.append(&mut inline.children);
-        // `inline` drops here with its children already drained.
-    }
-}
-
 /// Backtick runs longer than this are never scanned for closers, as in
 /// the reference implementation's `MAXBACKTICKS`.
 const MAXBACKTICKS: usize = 1000;
@@ -213,11 +193,13 @@ impl InlineSession {
     }
 }
 
-pub(crate) fn parse_inlines_with(
+pub(crate) fn parse_inlines_into(
     session: &mut InlineSession,
     text: &str,
     link_defs: &HashMap<String, LinkDef<'_>>,
-) -> Vec<InlineNode> {
+    arena: &mut crate::arena::Arena<'_>,
+    parent: crate::arena::NodeId,
+) {
     let text = text.trim_end_matches([' ', '\t', '\u{b}', '\u{c}', '\r', '\n']);
     let mut parser = Parser {
         input: text,
@@ -240,7 +222,9 @@ pub(crate) fn parse_inlines_with(
     };
     session.memo_gen = parser.memo_gen;
     parser.run();
-    let out = to_nodes(&parser.pool, parser.head);
+    // Move the surviving cells straight into the arena: no intermediate
+    // node tree, no second copy of the text.
+    attach_pool(&mut parser.pool, parser.head, arena, parent);
     // Give the grown buffers back to the session so the next leaf block
     // reuses their capacity instead of allocating from scratch.
     parser.pool.clear();
@@ -251,29 +235,40 @@ pub(crate) fn parse_inlines_with(
     parser.brackets.clear();
     session.brackets = parser.brackets;
     session.backticks_memo = parser.backticks_memo;
-    out
 }
 
-/// Converts the surviving pool cells of one list into inline nodes.
-///
-/// The conversion is iterative — a pre-order walk collects the tree,
-/// then children are assembled before their parents — so a 10,000-deep
-/// emphasis tree cannot overflow the call stack.
-fn to_nodes(pool: &[Cell], head: Option<u32>) -> Vec<InlineNode> {
-    let mut visit: Vec<u32> = Vec::new();
+/// Moves the surviving pool cells into the arena as children of `parent`,
+/// in document order. The walk is iterative — children queue behind their
+/// siblings on one stack — so a 10,000-deep emphasis tree cannot overflow
+/// the call stack. Consumed cells become empty text cells; the pool is
+/// cleared right after, so the placeholder is never observed.
+fn attach_pool(
+    pool: &mut [Cell],
+    head: Option<u32>,
+    arena: &mut crate::arena::Arena<'_>,
+    parent: crate::arena::NodeId,
+) {
+    let mut work: Vec<(crate::arena::NodeId, u32)> = Vec::new();
+    let mut kids: Vec<u32> = Vec::new();
+    // Roots in reverse, so the LIFO stack emits document order.
     let mut id = head;
     while let Some(current) = id {
         if pool[current as usize].alive {
-            visit.push(current);
+            kids.push(current);
         }
         id = pool[current as usize].next;
     }
-    visit.reverse();
-    let mut order: Vec<u32> = Vec::new();
-    while let Some(current) = visit.pop() {
-        order.push(current);
-        let mut kids: Vec<u32> = Vec::new();
-        let mut kid = pool[current as usize].first_child;
+    kids.reverse();
+    work.extend(kids.drain(..).map(|cell| (parent, cell)));
+    while let Some((arena_parent, cell_id)) = work.pop() {
+        let cell = &mut pool[cell_id as usize];
+        let kind = std::mem::replace(&mut cell.kind, Kind::Text(String::new()));
+        let first_child = cell.first_child;
+        let node = node_from_kind(kind);
+        let id = arena.alloc(node, crate::span::Span::empty(0));
+        arena.push_child(arena_parent, id);
+        // Children in reverse, for the same reason as the roots.
+        let mut kid = first_child;
         while let Some(child) = kid {
             if pool[child as usize].alive {
                 kids.push(child);
@@ -281,53 +276,24 @@ fn to_nodes(pool: &[Cell], head: Option<u32>) -> Vec<InlineNode> {
             kid = pool[child as usize].next;
         }
         kids.reverse();
-        visit.extend(kids);
+        work.extend(kids.drain(..).map(|child| (id, child)));
     }
-    // Children are assembled before their parents, so a parent can move
-    // its children out of the map wholesale.
-    let mut built: HashMap<u32, InlineNode> = HashMap::new();
-    for &current in order.iter().rev() {
-        let mut children = Vec::new();
-        let mut kid = pool[current as usize].first_child;
-        while let Some(child) = kid {
-            if pool[child as usize].alive {
-                children.push(built.remove(&child).expect("child built before parent"));
-            }
-            kid = pool[child as usize].next;
-        }
-        built.insert(
-            current,
-            InlineNode {
-                node: node_kind(pool, current),
-                children,
-            },
-        );
-    }
-    let mut out = Vec::new();
-    let mut id = head;
-    while let Some(current) = id {
-        if pool[current as usize].alive {
-            out.push(built.remove(&current).expect("top-level cell built"));
-        }
-        id = pool[current as usize].next;
-    }
-    out
 }
 
-/// The node kind of one pool cell.
-fn node_kind(pool: &[Cell], id: u32) -> Node<'static> {
-    match &pool[id as usize].kind {
-        Kind::Text(text) => Node::Text(text.clone().into()),
-        Kind::Code(text) => Node::CodeSpan(text.clone().into()),
-        Kind::Html(text) => Node::InlineHtml(text.clone().into()),
+/// The node of one pool cell, moving the cell's strings into it.
+fn node_from_kind(kind: Kind) -> Node<'static> {
+    match kind {
+        Kind::Text(text) => Node::Text(text.into()),
+        Kind::Code(text) => Node::CodeSpan(text.into()),
+        Kind::Html(text) => Node::InlineHtml(text.into()),
         Kind::SoftBreak => Node::SoftBreak,
         Kind::HardBreak => Node::HardBreak,
         Kind::Emph => Node::Emphasis,
         Kind::Strong => Node::Strong,
         Kind::Link { url, title, image } => Node::Link(crate::node::LinkData {
-            url: url.clone().into(),
-            title: title.clone().map(std::borrow::Cow::Owned),
-            image: *image,
+            url: url.into(),
+            title: title.map(std::borrow::Cow::Owned),
+            image,
         }),
     }
 }

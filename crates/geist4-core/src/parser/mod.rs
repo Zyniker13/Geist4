@@ -814,31 +814,16 @@ impl<'a> Parser<'a> {
                         text.push_str(part);
                     }
                 }
-                let inlines =
-                    crate::inline::parse_inlines_with(&mut session, &text, &self.link_defs);
                 self.arena.entry_mut(id).children.clear();
-                self.attach_inline_nodes(id, &inlines);
-                crate::inline::drop_inline_tree(inlines);
+                crate::inline::parse_inlines_into(
+                    &mut session,
+                    &text,
+                    &self.link_defs,
+                    &mut self.arena,
+                    id,
+                );
             } else {
                 stack.extend(self.arena.children(id).iter().copied());
-            }
-        }
-    }
-
-    /// Attaches parsed inline nodes and their children to the arena. The
-    /// walk is iterative so deeply nested emphasis cannot overflow the
-    /// call stack.
-    fn attach_inline_nodes(&mut self, parent: NodeId, inlines: &[crate::inline::InlineNode]) {
-        let mut work: Vec<(NodeId, &crate::inline::InlineNode)> = inlines
-            .iter()
-            .rev()
-            .map(|inline| (parent, inline))
-            .collect();
-        while let Some((arena_parent, inline)) = work.pop() {
-            let id = self.arena.alloc(inline.node.clone(), Span::empty(0));
-            self.arena.push_child(arena_parent, id);
-            for child in inline.children.iter().rev() {
-                work.push((id, child));
             }
         }
     }
