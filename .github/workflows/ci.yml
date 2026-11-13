@@ -29,6 +29,11 @@ jobs:
       - name: Install the cmark reference binary (macOS)
         if: runner.os == 'macOS'
         run: brew install cmark
+      - name: Cache the cargo-deny advisory database
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/advisory-dbs
+          key: advisory-db-${{ runner.os }}-2026-11
       - name: Install cargo-deny
         run: cargo install --locked cargo-deny@0.20.2
       - name: Run check.sh

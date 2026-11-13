@@ -10,6 +10,10 @@ members = [
     "crates/geist4-wasm",
     "crates/geist4-spec-harness",
 ]
+# The fuzz crate builds with nightly instrumentation flags and must not
+# join the workspace (it would drag libfuzzer into deny checks and
+# release builds).
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0-dev"
