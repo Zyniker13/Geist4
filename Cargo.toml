@@ -9,6 +9,7 @@ members = [
     "crates/geist4-ffi",
     "crates/geist4-wasm",
     "crates/geist4-spec-harness",
+    "crates/geist4-bench",
 ]
 # The fuzz crate builds with nightly instrumentation flags and must not
 # join the workspace (it would drag libfuzzer into deny checks and

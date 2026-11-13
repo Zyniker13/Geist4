@@ -1,0 +1,24 @@
+[package]
+name = "geist4-bench"
+description = "Throughput comparisons between geist4 and the other CommonMark implementations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+geist4-core = { path = "../geist4-core" }
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+comrak = { version = "0.39", default-features = false }
+
+[dev-dependencies]
+criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "compare"
+harness = false
