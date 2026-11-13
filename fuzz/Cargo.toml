@@ -13,6 +13,9 @@ libfuzzer-sys = "0.4"
 [dependencies.geist4-core]
 path = "../crates/geist4-core"
 
+[dependencies.geist4-ext]
+path = "../crates/geist4-ext"
+
 [[bin]]
 name = "to_html"
 path = "fuzz_targets/to_html.rs"
@@ -23,6 +26,13 @@ bench = false
 [[bin]]
 name = "parse_document"
 path = "fuzz_targets/parse_document.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_with_extension"
+path = "fuzz_targets/parse_with_extension.rs"
 test = false
 doc = false
 bench = false

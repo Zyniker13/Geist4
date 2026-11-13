@@ -17,7 +17,7 @@ Each suite below says where it lives and how it runs. Paths and commands are the
 | Suite | Proves | Where | Runs |
 | --- | --- | --- | --- |
 | CommonMark spec | Exact conformance: all 652 examples | `spec/`, harness in `crates/spec-harness` | every CI run |
-| Extension specs | Each extension's own examples, plus examples showing plain Markdown is unchanged | `crates/ext/*/spec.md`, `examples/extensions/*/spec.md` | every CI run |
+| Extension specs | Each extension's own examples, plus examples showing plain Markdown is unchanged | `crates/geist4-ext/spec/*.md`, run by `crates/geist4-ext/tests/spec.rs` | every CI run |
 | GFM spec | GFM extensions conform to the GFM spec's examples | `spec/gfm/` | every CI run |
 | Unit tests | Each scanner, rule and edge case on its own | next to the code | every CI run |
 | Property tests | No panic on any input; well-formed HTML; deterministic output; valid spans | `tests/properties/` (`proptest`) | every CI run, more cases locally |
@@ -47,14 +47,18 @@ from inside `fuzz/`:
 
 ```sh
 cd fuzz
-cargo fuzz run to_html        -- -max_total_time=3600  # the full pipeline
-cargo fuzz run parse_document -- -max_total_time=3600  # parser only
-cargo fuzz cmin to_html                                 # minimize the corpus
+cargo fuzz run to_html                 -- -max_total_time=3600  # the full pipeline
+cargo fuzz run parse_document          -- -max_total_time=3600  # parser only
+cargo fuzz run parse_with_extension    -- -max_total_time=3600  # extension hooks active
+cargo fuzz cmin to_html                                         # minimize the corpus
 ```
 
 A three-minute run per target is what CI (`.github/workflows/fuzz.yml`)
 executes on every push; the hour-long runs are for after each milestone,
-with results recorded under Results below.
+with results recorded under Results below. The extension target
+(`parse_with_extension`) parses and renders with the strikethrough
+built-in registered, so the inline trigger dispatch, the extension
+delimiter machinery and the extension renderer get mutated input.
 
 The minimized corpus is not committed in full (it is tens of megabytes
 of near-duplicate files); instead a deterministic subset is checked in

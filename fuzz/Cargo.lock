@@ -41,7 +41,15 @@ name = "geist4-core-fuzz"
 version = "0.0.0"
 dependencies = [
  "geist4-core",
+ "geist4-ext",
  "libfuzzer-sys",
+]
+
+[[package]]
+name = "geist4-ext"
+version = "0.1.0-dev"
+dependencies = [
+ "geist4-core",
 ]
 
 [[package]]
