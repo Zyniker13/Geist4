@@ -77,5 +77,6 @@ fn kind_text(kind: &Node<'_>) -> String {
             &*data.url,
             data.title.as_deref().unwrap_or("")
         ),
+        Node::Extension(ext) => format!("Extension({})", ext.kind),
     }
 }

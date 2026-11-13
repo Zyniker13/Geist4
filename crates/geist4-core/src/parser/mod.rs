@@ -106,7 +106,23 @@ pub struct Document<'a> {
 /// parser.
 #[must_use]
 pub fn parse_document(src: &str) -> Document<'_> {
-    let (arena, root, link_defs) = Parser::new(src).run();
+    parse_with(src, &crate::extension::Options::new())
+}
+
+/// Parses `src` with the given options: the registered extensions add
+/// hooks to the parse, and their post-processing passes run once the
+/// tree is complete.
+pub fn parse_with<'a>(src: &'a str, options: &crate::extension::Options) -> Document<'a> {
+    let (mut arena, root, link_defs) = Parser::new(src).run();
+    if !options.is_empty() {
+        for ext in options.extensions() {
+            ext.post_process(&mut crate::extension::TreeCtx {
+                arena: &mut arena,
+                root,
+                options,
+            });
+        }
+    }
     Document {
         arena,
         root,

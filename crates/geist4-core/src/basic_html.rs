@@ -22,8 +22,20 @@ use crate::node::{ListData, Node};
 /// expected values.
 #[must_use]
 pub fn render(document: &crate::parser::Document<'_>) -> String {
+    render_with(document, &crate::extension::Options::new())
+}
+
+/// Renders the document's HTML with the given options: extensions
+/// registered in `options` render the node kinds they declared.
+/// Extension kinds with no registered renderer produce no output.
+#[must_use]
+pub fn render_with(
+    document: &crate::parser::Document<'_>,
+    options: &crate::extension::Options,
+) -> String {
     let mut renderer = Renderer {
         arena: &document.arena,
+        extensions: options.extensions(),
         out: String::new(),
     };
     let mut stack: Vec<Step> = document
@@ -43,6 +55,7 @@ pub fn render(document: &crate::parser::Document<'_>) -> String {
 }
 
 /// One pending piece of rendering work.
+#[derive(Debug)]
 enum Step {
     /// Writes a newline unless the output already ends with one.
     Cr,
@@ -58,10 +71,56 @@ enum Step {
 
 struct Renderer<'a> {
     arena: &'a Arena<'a>,
+    extensions: &'a [std::sync::Arc<dyn crate::extension::Extension>],
     out: String,
 }
 
 impl Renderer<'_> {
+    /// Renders `id`'s children as blocks into a fresh string.
+    fn block_children_html(&self, id: NodeId) -> String {
+        let mut sub = Renderer {
+            arena: self.arena,
+            extensions: self.extensions,
+            out: String::new(),
+        };
+        let mut stack: Vec<Step> = self
+            .arena
+            .children(id)
+            .iter()
+            .rev()
+            .map(|child| Step::Block(*child, false))
+            .collect();
+        while let Some(step) = stack.pop() {
+            sub.run(step, &mut stack);
+        }
+        sub.out
+    }
+
+    /// Renders `id`'s children as inline content into a fresh string.
+    fn inline_children_html(&self, id: NodeId) -> String {
+        let mut sub = Renderer {
+            arena: self.arena,
+            extensions: self.extensions,
+            out: String::new(),
+        };
+        let mut stack: Vec<Step> = Vec::new();
+        for child in self.arena.children(id).iter().rev() {
+            sub.inline_child(*child, &mut stack);
+        }
+        while let Some(step) = stack.pop() {
+            sub.run(step, &mut stack);
+        }
+        sub.out
+    }
+
+    /// Hands an extension node to the registered extensions, giving
+    /// each the already-rendered children. Extensions render in
+    /// registration order; a kind no extension claims produces nothing.
+    fn render_extension(&mut self, ext: &crate::extension::ExtNode, children: String) {
+        for extension in self.extensions {
+            extension.render(ext, &children, &mut self.out);
+        }
+    }
     fn run(&mut self, step: Step, stack: &mut Vec<Step>) {
         match step {
             Step::Cr => self.cr(),
@@ -139,6 +198,12 @@ impl Renderer<'_> {
                     stack.push(Step::Inline(id));
                 }
             }
+            Node::Extension(ext) => {
+                self.cr();
+                let children = self.block_children_html(id);
+                self.render_extension(ext, children);
+                self.cr();
+            }
             Node::CodeBlock(data) => {
                 self.cr();
                 self.out.push_str("<pre><code");
@@ -203,7 +268,13 @@ impl Renderer<'_> {
     /// Expands a leaf block's inline content into work-stack steps.
     fn inline(&mut self, id: NodeId, stack: &mut Vec<Step>) {
         for child in self.arena.children(id).iter().rev() {
-            let child = *child;
+            self.inline_child(*child, stack);
+        }
+    }
+
+    /// Expands one inline node into work-stack steps.
+    fn inline_child(&mut self, child: NodeId, stack: &mut Vec<Step>) {
+        {
             match self.arena.kind(child) {
                 Node::Text(text) => stack.push(Step::Text(escape_html(text))),
                 Node::CodeSpan(text) => {
@@ -250,7 +321,19 @@ impl Renderer<'_> {
                     stack.push(Step::Inline(child));
                     stack.push(Step::Text(tag));
                 }
-                _ => {}
+                Node::Extension(ext) => {
+                    let children = self.inline_children_html(child);
+                    self.render_extension(ext, children);
+                }
+                Node::Document
+                | Node::BlockQuote
+                | Node::List(_)
+                | Node::Item(_)
+                | Node::Heading(_)
+                | Node::ThematicBreak
+                | Node::Paragraph
+                | Node::CodeBlock(_)
+                | Node::HtmlBlock(_) => {}
             }
         }
     }

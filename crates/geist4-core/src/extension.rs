@@ -1,0 +1,159 @@
+//! The extension API.
+//!
+//! An extension adds parsing or rendering behavior through hooks that
+//! the parser and renderer call at fixed points. The built-in
+//! extensions in the `geist4-ext` crate use exactly this public API,
+//! and the loadable extension format (see `docs/extensions/format.md`)
+//! compiles down to it, so the surface stays honest and small.
+//!
+//! With no extensions registered, every hook site sees an empty
+//! registry and behaves exactly like plain CommonMark; nothing here
+//! can change how the specification's examples parse.
+//!
+//! Hooks are pure: no I/O, no clock, no randomness, no global state.
+//! The same source and options always produce the same tree, which is
+//! what makes a declarative definition and a sandboxed WebAssembly
+//! extension interchangeable.
+
+use std::sync::Arc;
+
+/// A value of an extension node's attribute.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AttrValue {
+    /// A string value (URLs, identifiers, raw text).
+    Str(String),
+    /// An integer value (levels, counts, flags as numbers).
+    Int(i64),
+    /// A boolean value.
+    Bool(bool),
+}
+
+/// An extension node: the kind name, its attributes, and children.
+///
+/// Kinds are data rather than Rust variants so that any binding — and
+/// the declarative tier of the loadable format — can construct and
+/// inspect them uniformly. An extension declares the kinds it adds
+/// when it is registered.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExtNode {
+    /// The kind name, as the extension declared it.
+    pub kind: String,
+    /// The attributes in declaration order.
+    pub attrs: Vec<(String, AttrValue)>,
+}
+
+/// The declaration of one node kind an extension adds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KindDecl {
+    /// The kind name, unique among the registered extensions.
+    pub kind: String,
+    /// Whether nodes of this kind have children.
+    pub container: bool,
+    /// The attribute names the kind accepts, in order.
+    pub attrs: Vec<String>,
+}
+
+/// An extension: hooks for block starts and continuation, inline
+/// triggers, post-processing passes, and renderers for its node kinds.
+///
+/// Every hook has a default implementation, so an extension enables
+/// only what it needs. Extensions run in registration order.
+pub trait Extension: Send + Sync {
+    /// The extension's name, unique among the registered extensions.
+    fn name(&self) -> &str;
+
+    /// The node kinds this extension adds, declared up front.
+    fn kinds(&self) -> Vec<KindDecl> {
+        Vec::new()
+    }
+
+    /// Runs once after the document tree is complete, before the
+    /// document is returned. Hooks may rewrite kinds, set attributes,
+    /// or splice nodes; this is where heading identifiers, task list
+    /// items, footnote collection and the disallowed raw HTML filter
+    /// work.
+    fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_>) {
+        let _ = ctx;
+    }
+
+    /// Renders one of this extension's nodes. `children` is the
+    /// already-rendered HTML of the node's children; the hook appends
+    /// its output to `out`. Unrendered kinds produce no output and are
+    /// reported by `check`.
+    fn render(&self, node: &ExtNode, children: &str, out: &mut String) {
+        let _ = (node, children, out);
+    }
+}
+
+/// The context of a post-processing pass over the document tree.
+pub struct TreeCtx<'ctx, 'doc, 'opts> {
+    /// The document's arena; hooks rewrite nodes through it.
+    pub arena: &'ctx mut crate::arena::Arena<'doc>,
+    /// The tree root.
+    pub root: crate::arena::NodeId,
+    /// The options the parse runs with; hooks may read other
+    /// extensions' declarations, but never their private state.
+    pub options: &'opts Options,
+}
+
+/// The parse and render options: the registered extensions, in order.
+///
+/// Registration order is run order; extensions that must see another's
+/// output register after it.
+#[derive(Default)]
+pub struct Options {
+    extensions: Vec<Arc<dyn Extension>>,
+}
+
+impl Options {
+    /// Empty options: plain CommonMark, no extensions.
+    pub fn new() -> Self {
+        Options::default()
+    }
+
+    /// Registers an extension, keeping the existing registration
+    /// order.
+    pub fn extension(&mut self, ext: Arc<dyn Extension>) -> &mut Self {
+        self.extensions.push(ext);
+        self
+    }
+
+    /// The registered extensions, in run order.
+    pub fn extensions(&self) -> &[Arc<dyn Extension>] {
+        &self.extensions
+    }
+
+    /// Whether no extension is registered; hook sites short-circuit on
+    /// this.
+    pub fn is_empty(&self) -> bool {
+        self.extensions.is_empty()
+    }
+
+    /// Looks up a registered extension by name.
+    pub fn by_name(&self, name: &str) -> Option<&Arc<dyn Extension>> {
+        self.extensions.iter().find(|e| e.name() == name)
+    }
+}
+
+impl Clone for Options {
+    fn clone(&self) -> Self {
+        Options {
+            extensions: self.extensions.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for Options {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Options")
+            .field(
+                "extensions",
+                &self
+                    .extensions
+                    .iter()
+                    .map(|e| e.name().to_string())
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}

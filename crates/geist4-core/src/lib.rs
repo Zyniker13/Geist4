@@ -10,6 +10,7 @@
 pub mod arena;
 pub mod basic_html;
 pub mod debug;
+pub mod extension;
 mod inline;
 pub mod node;
 pub mod parser;

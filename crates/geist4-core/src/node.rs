@@ -54,6 +54,10 @@ pub enum Node<'a> {
     Strong,
     /// A link or image; children are the link text.
     Link(LinkData<'a>),
+    /// An extension node: a kind an extension declared, with its
+    /// attributes and children. Unrendered kinds produce no output and
+    /// are reported by `check`.
+    Extension(crate::extension::ExtNode),
 }
 
 /// The data of a [`Node::List`].
