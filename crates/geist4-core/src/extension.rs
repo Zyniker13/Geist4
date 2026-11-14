@@ -98,10 +98,16 @@ pub struct CoreNode<'a> {
 /// which renders each child the way the built-in renderer would,
 /// including its conditional newlines, against the output as it
 /// stands. Children the hook never pulls produce no output.
+///
+/// Whether the children pull through as blocks or as inline content
+/// is decided by the renderer when it dispatches the claimed node: a
+/// kind whose built-in rendering holds inline content — a heading —
+/// pulls its claimed children through inline.
 pub struct OverrideChildren<'c, 'doc> {
     pub(crate) renderer: &'c mut crate::basic_html::Renderer<'doc>,
     pub(crate) children: &'c [crate::arena::NodeId],
     pub(crate) tight: bool,
+    pub(crate) inline: bool,
     pub(crate) next: usize,
 }
 
@@ -119,7 +125,11 @@ impl OverrideChildren<'_, '_> {
             return false;
         };
         self.next += 1;
-        self.renderer.render_block_into(child, self.tight, out);
+        if self.inline {
+            self.renderer.render_inline_into(child, out);
+        } else {
+            self.renderer.render_block_into(child, self.tight, out);
+        }
         true
     }
 }

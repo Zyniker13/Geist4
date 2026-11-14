@@ -251,6 +251,15 @@ impl Renderer<'_> {
             Node::Heading(data) => {
                 let level = data.level;
                 let level_char = char::from(b'0' + level);
+                if let Some(ext_index) = self.arena.extension_of(id) {
+                    if let Some(ext) = self.extensions.get(ext_index) {
+                        self.render_marked_heading(ext, id);
+                        return;
+                    }
+                    // The claiming extension is not registered for
+                    // this render; the heading falls back to its
+                    // built-in rendering.
+                }
                 self.cr();
                 self.out.push_str("<h");
                 self.out.push(level_char);
@@ -356,6 +365,38 @@ impl Renderer<'_> {
             renderer: self,
             children: &children_ids,
             tight,
+            inline: false,
+            next: 0,
+        };
+        let core = crate::extension::CoreNode {
+            kind,
+            attrs: &attrs,
+        };
+        ext.render_override(&core, &mut children, &mut saved);
+        self.out = saved;
+    }
+
+    /// Renders a claimed heading through its extension's render
+    /// override: like a claimed item, except the children pull through
+    /// as inline content, the way a heading's own rendering does.
+    fn render_marked_heading(
+        &mut self,
+        ext: &std::sync::Arc<dyn crate::extension::Extension>,
+        id: NodeId,
+    ) {
+        self.cr();
+        let kind = match self.arena.kind(id) {
+            Node::Heading(_) => "heading",
+            _ => return,
+        };
+        let attrs = self.arena.attrs(id).to_vec();
+        let children_ids = self.arena.children(id).to_vec();
+        let mut saved = std::mem::take(&mut self.out);
+        let mut children = crate::extension::OverrideChildren {
+            renderer: self,
+            children: &children_ids,
+            tight: false,
+            inline: true,
             next: 0,
         };
         let core = crate::extension::CoreNode {
@@ -374,6 +415,19 @@ impl Renderer<'_> {
         std::mem::swap(self.out_mut(), out);
         let mut stack = Vec::new();
         stack.push(Step::Block(id, tight));
+        while let Some(step) = stack.pop() {
+            self.run(step, &mut stack);
+        }
+        std::mem::swap(self.out_mut(), out);
+    }
+
+    /// Renders one inline node into a given output string with the same
+    /// walk and conventions as the main rendering pass, for override
+    /// children that render inline.
+    pub(crate) fn render_inline_into(&mut self, id: NodeId, out: &mut String) {
+        std::mem::swap(self.out_mut(), out);
+        let mut stack = Vec::new();
+        self.inline_child(id, &mut stack);
         while let Some(step) = stack.pop() {
             self.run(step, &mut stack);
         }
