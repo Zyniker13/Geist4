@@ -17,6 +17,7 @@ const TASKLIST_SPEC: &str = include_str!("../spec/tasklist.md");
 const TAGFILTER_SPEC: &str = include_str!("../spec/tagfilter.md");
 const FOOTNOTES_SPEC: &str = include_str!("../spec/footnotes.md");
 const FRONT_MATTER_SPEC: &str = include_str!("../spec/front_matter.md");
+const HEADING_IDENTIFIERS_SPEC: &str = include_str!("../spec/heading_identifiers.md");
 
 /// Runs a spec file with `options` and requires every example to pass.
 fn run_spec(name: &str, spec: &str, options: &Options) {
@@ -83,6 +84,13 @@ fn front_matter_spec() {
     let mut options = Options::new();
     options.extension(geist4_ext::front_matter());
     run_spec("front_matter", FRONT_MATTER_SPEC, &options);
+}
+
+#[test]
+fn heading_identifiers_spec() {
+    let mut options = Options::new();
+    options.extension(geist4_ext::heading_identifiers());
+    run_spec("heading_identifiers", HEADING_IDENTIFIERS_SPEC, &options);
 }
 
 /// With no extensions, front matter syntax is plain Markdown: the

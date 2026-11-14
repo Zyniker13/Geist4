@@ -114,9 +114,16 @@ pub fn front_matter_with(delimiter: impl Into<String>) -> std::sync::Arc<dyn Ext
     front_matter::front_matter_with(delimiter)
 }
 
+/// The heading identifiers extension as a shared extension value.
+#[must_use]
+pub fn heading_identifiers() -> std::sync::Arc<dyn Extension> {
+    heading_identifiers::heading_identifiers()
+}
+
 pub mod autolink;
 pub mod footnotes;
 pub mod front_matter;
+pub mod heading_identifiers;
 pub mod slug_table;
 pub mod slugger;
 pub mod tables;
