@@ -753,27 +753,30 @@ pub(crate) fn slug_removed(c: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::slug_removed;
+    use super::{SLUG_REMOVE_RANGES, slug_removed};
 
-    assert_eq!(slug_removed('\u{2E}'), true, "U+002E");
-    assert_eq!(slug_removed('\u{5F}'), false, "U+005F");
-    assert_eq!(slug_removed('\u{2D}'), false, "U+002D");
-    assert_eq!(slug_removed('\u{20}'), false, "U+0020");
-    assert_eq!(slug_removed('\u{9}'), true, "U+0009");
-    assert_eq!(slug_removed('\u{A}'), true, "U+000A");
-    assert_eq!(slug_removed('\u{A9}'), true, "U+00A9");
-    assert_eq!(slug_removed('\u{A0}'), true, "U+00A0");
-    assert_eq!(slug_removed('\u{AD}'), true, "U+00AD");
-    assert_eq!(slug_removed('\u{200B}'), true, "U+200B");
-    assert_eq!(slug_removed('\u{E9}'), false, "U+00E9");
-    assert_eq!(slug_removed('\u{4E2D}'), false, "U+4E2D");
-    assert_eq!(slug_removed('\u{1F600}'), true, "U+1F600");
-    assert_eq!(slug_removed('\u{FB01}'), false, "U+FB01");
-    assert_eq!(slug_removed('\u{3A3}'), false, "U+03A3");
-    assert_eq!(slug_removed('\u{30}'), false, "U+0030");
-    assert_eq!(slug_removed('\u{61}'), false, "U+0061");
-    assert_eq!(slug_removed('\u{21}'), true, "U+0021");
-    assert_eq!(slug_removed('\u{7E}'), true, "U+007E");
+    #[test]
+    fn spot_checks() {
+        assert!(slug_removed('\u{2E}'), "U+002E");
+        assert!(!slug_removed('\u{5F}'), "U+005F");
+        assert!(!slug_removed('\u{2D}'), "U+002D");
+        assert!(!slug_removed('\u{20}'), "U+0020");
+        assert!(slug_removed('\u{9}'), "U+0009");
+        assert!(slug_removed('\u{A}'), "U+000A");
+        assert!(slug_removed('\u{A9}'), "U+00A9");
+        assert!(slug_removed('\u{A0}'), "U+00A0");
+        assert!(slug_removed('\u{AD}'), "U+00AD");
+        assert!(slug_removed('\u{200B}'), "U+200B");
+        assert!(!slug_removed('\u{E9}'), "U+00E9");
+        assert!(!slug_removed('\u{4E2D}'), "U+4E2D");
+        assert!(slug_removed('\u{1F600}'), "U+1F600");
+        assert!(!slug_removed('\u{FB01}'), "U+FB01");
+        assert!(!slug_removed('\u{3A3}'), "U+03A3");
+        assert!(!slug_removed('\u{30}'), "U+0030");
+        assert!(!slug_removed('\u{61}'), "U+0061");
+        assert!(slug_removed('\u{21}'), "U+0021");
+        assert!(slug_removed('\u{7E}'), "U+007E");
+    }
 
     #[test]
     fn slug_table_boundaries() {
@@ -781,7 +784,7 @@ mod tests {
         for w in SLUG_REMOVE_RANGES.windows(2) {
             assert!(w[0].1 < w[1].0, "overlapping or unsorted ranges");
         }
-        for &(lo, hi) in SLUG_REMOVE_RANGES {
+        for (lo, _) in SLUG_REMOVE_RANGES {
             if (0xD800..=0xDFFF).contains(&lo) {
                 panic!("lone-surrogate range in table");
             }

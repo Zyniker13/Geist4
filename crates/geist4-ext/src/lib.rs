@@ -117,6 +117,8 @@ pub fn front_matter_with(delimiter: impl Into<String>) -> std::sync::Arc<dyn Ext
 pub mod autolink;
 pub mod footnotes;
 pub mod front_matter;
+pub mod slug_table;
+pub mod slugger;
 pub mod tables;
 pub mod tagfilter;
 pub mod tasklist;

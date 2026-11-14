@@ -294,17 +294,25 @@ def main():
     lines.append("")
     lines.append("#[cfg(test)]")
     lines.append("mod tests {")
-    lines.append("    use super::slug_removed;")
+    lines.append("    use super::{SLUG_REMOVE_RANGES, slug_removed};")
     lines.append("")
     tests = []
     for ch in SPOT_CHARS:
         cp = ord(ch)
         removed = any(lo <= cp <= hi for lo, hi in table)
         name = f"U+{cp:04X}"
-        tests.append(
-            f'    assert_eq!(slug_removed(\'\\u{{{cp:X}}}\'), {str(removed).lower()}, "{name}");'
-        )
+        if removed:
+            tests.append(
+                f'        assert!(slug_removed(\'\\u{{{cp:X}}}\'), "{name}");'
+            )
+        else:
+            tests.append(
+                f'        assert!(!slug_removed(\'\\u{{{cp:X}}}\'), "{name}");'
+            )
+    lines.append("    #[test]")
+    lines.append("    fn spot_checks() {")
     lines.extend(tests)
+    lines.append("    }")
     lines.append("")
     lines.append("    #[test]")
     lines.append("    fn slug_table_boundaries() {")
@@ -312,7 +320,7 @@ def main():
     lines.append("        for w in SLUG_REMOVE_RANGES.windows(2) {")
     lines.append('            assert!(w[0].1 < w[1].0, "overlapping or unsorted ranges");')
     lines.append("        }")
-    lines.append("        for &(lo, hi) in SLUG_REMOVE_RANGES {")
+    lines.append("        for (lo, _) in SLUG_REMOVE_RANGES {")
     lines.append("            if (0xD800..=0xDFFF).contains(&lo) {")
     lines.append('                panic!("lone-surrogate range in table");')
     lines.append("            }")
