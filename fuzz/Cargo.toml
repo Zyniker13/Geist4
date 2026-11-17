@@ -16,6 +16,10 @@ path = "../crates/geist4-core"
 [dependencies.geist4-ext]
 path = "../crates/geist4-ext"
 
+[dependencies.geist4-ext-loader]
+path = "../crates/geist4-ext-loader"
+features = ["sandbox"]
+
 [[bin]]
 name = "to_html"
 path = "fuzz_targets/to_html.rs"
@@ -33,6 +37,20 @@ bench = false
 [[bin]]
 name = "parse_with_extension"
 path = "fuzz_targets/parse_with_extension.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_manifest"
+path = "fuzz_targets/parse_manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "load_component"
+path = "fuzz_targets/load_component.rs"
 test = false
 doc = false
 bench = false

@@ -1,0 +1,16 @@
+[extension]
+name = "sample"
+version = "1.0.0"
+format = "1.0"
+description = "A sample span"
+license = "MIT"
+hooks = ["inline_span"]
+
+[[kinds]]
+kind = "sample"
+inline_text = true
+
+[[block_container]]
+kind = "sample"
+marker = "::: sample"
+template = "<sample>\n{children}</sample>\n"

@@ -1,0 +1,5 @@
+# The guest builds for the wasm target on the stable toolchain; the
+# rust-toolchain.toml one directory up pins nightly for the fuzz
+# runner and would leave this crate without a wasm core.
+[toolchain]
+channel = "stable"

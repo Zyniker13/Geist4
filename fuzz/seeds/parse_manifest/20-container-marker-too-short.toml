@@ -1,0 +1,20 @@
+[extension]
+name = "sample"
+version = "1.0.0"
+format = "1.0"
+description = "A sample span"
+license = "MIT"
+hooks = ["inline_span"]
+
+[[kinds]]
+kind = "sample"
+inline_text = true
+
+[[kinds]]
+kind = "boxed"
+container = true
+
+[[block_container]]
+kind = "boxed"
+marker = "::"
+template = "<boxed>\n{children}</boxed>\n"

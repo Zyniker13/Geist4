@@ -160,12 +160,29 @@ impl WasmExtension {
         match run(instance) {
             Ok(value) => Some(value),
             Err(error) => {
-                eprintln!("PROBE call ERROR: {error}");
                 runtime.error.get_or_insert(error.to_string());
                 runtime.instance = None;
                 None
             }
         }
+    }
+
+    /// Whether the manifest declares this kind. A component may only
+    /// answer hooks with kinds it declared, so a foreign name cannot
+    /// route another extension's renderer — or an undeclared shape —
+    /// against content the component chose.
+    fn owns_kind(&self, kind: &str) -> bool {
+        self.manifest.kinds.iter().any(|entry| entry.kind == kind)
+    }
+
+    /// Latches a protocol violation: the component answered, but with
+    /// data the manifest does not allow. The consequence matches a
+    /// failed call — the message is recorded, the instance drops, and
+    /// the later hooks decline.
+    fn latch(&self, message: String) {
+        let mut runtime = self.lock();
+        runtime.error.get_or_insert(message);
+        runtime.instance = None;
     }
 
     /// Begins a parse when no error is latched: builds a fresh
@@ -301,6 +318,13 @@ impl geist4_core::extension::Extension for WasmExtension {
         }) else {
             return;
         };
+        if !self.owns_kind(&start.kind) {
+            self.latch(format!(
+                "extension `{}` answered block-start with the undeclared kind `{}`",
+                self.manifest.extension.name, start.kind
+            ));
+            return;
+        }
         let state: Box<dyn std::any::Any + Send> = Box::new(BlockState);
         let node = match start.consume {
             Consume::WholeLine => ctx.open_extension(start.kind, state),
@@ -412,6 +436,13 @@ impl geist4_core::extension::Extension for WasmExtension {
             // trigger byte stays literal text.
             return;
         };
+        if !self.owns_kind(&kind) {
+            self.latch(format!(
+                "extension `{}` answered inline-trigger with the undeclared kind `{kind}`",
+                self.manifest.extension.name
+            ));
+            return;
+        }
         let run: Run = ctx.scan_run();
         ctx.push_delim(&run, &kind);
     }
@@ -433,6 +464,13 @@ impl geist4_core::extension::Extension for WasmExtension {
         let Some(Some(InlineAction::Node { kind, attrs, end })) = action else {
             return;
         };
+        if !self.owns_kind(&kind) {
+            self.latch(format!(
+                "extension `{}` answered inline-bracket with the undeclared kind `{kind}`",
+                self.manifest.extension.name
+            ));
+            return;
+        }
         let attrs = attrs
             .into_iter()
             .map(|(name, value)| (name, AttrValue::Str(value)))

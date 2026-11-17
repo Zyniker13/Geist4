@@ -1,0 +1,21 @@
+[extension]
+name = "sample"
+version = "1.0.0"
+format = "1.0"
+description = "A sample span"
+license = "MIT"
+hooks = ["inline_span"]
+
+[[kinds]]
+kind = "sample"
+inline_text = true
+
+[wasm]
+path = "component.wasm"
+inline_triggers = ["\t"]
+
+
+kind = "sample"
+open = "=="
+close = "=="
+html = "<sample>{children}</sample>"

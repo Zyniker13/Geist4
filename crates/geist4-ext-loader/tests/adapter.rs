@@ -289,6 +289,24 @@ fn package_load_builds_a_working_tier2_extension() {
          \n\
          [wasm]\n\
          path = \"component.wasm\"\n\
+         \n\
+         [[kinds]]\n\
+         kind = \"note\"\n\
+         container = true\n\
+         inline_text = false\n\
+         attrs = [\"class\"]\n\
+         \n\
+         [[kinds]]\n\
+         kind = \"badge\"\n\
+         container = false\n\
+         inline_text = true\n\
+         attrs = []\n\
+         \n\
+         [[kinds]]\n\
+         kind = \"em\"\n\
+         container = false\n\
+         inline_text = true\n\
+         attrs = []\n\
          \n",
     )
     .expect("write manifest");
@@ -312,9 +330,10 @@ fn package_load_builds_a_working_tier2_extension() {
 
 #[test]
 fn package_load_rejects_a_failing_component() {
-    // The fixture rejects an `init` that declares kinds it does not
-    // implement; a tier-2 manifest cannot declare kinds, so instead
-    // this exercises the missing-component path of the load-time check.
+    // The fixture rejects an `init` whose manifest declares kinds it
+    // does not implement; building that failing variant would need
+    // another component, so this exercises the missing-component path
+    // of the load-time check.
     let root = std::env::temp_dir().join(format!("geist4-adp-pkg-miss-{}", std::process::id()));
     std::fs::create_dir_all(&root).expect("create package dir");
     std::fs::write(
