@@ -25,6 +25,7 @@ Each suite below says where it lives and how it runs. Paths and commands are the
 | Differential tests | Same output as the reference C implementation on generated input, except documented differences | `tests/differential/` | every CI run |
 | Fuzzing | No crash, hang or limit breach on mutated input | `fuzz/` (`cargo-fuzz`) | a few minutes per target in CI; an hour per target locally per milestone |
 | Cross-binding | JavaScript, Swift, Python and C give byte-identical output to the core on every spec | `tests/bindings/` | every CI run |
+| C ABI | The generated header matches the Rust ABI, and a C program linking the shared library gets the same contract (nulls, UTF-8, ownership, byte-exact HTML) as `tests/ffi.rs` | `crates/geist4-ffi/c-tests/` | every CI run |
 | Extension tiers | An extension's `spec.md` passes whichever tier implements it | `tests/ext-conformance/` | every CI run |
 | Round trip | `format` is idempotent and keeps the rendered HTML the same | `tests/roundtrip/` | every CI run |
 | JSON schema | Every JSON tree validates against the published schema | `tests/json/` | every CI run |
@@ -72,6 +73,28 @@ fuzzer-found inputs become a permanent differential fixture.
 
 Document each other command here as it exists (benchmarks, mutation
 testing), with the time it takes.
+
+### The C ABI header and tests
+
+`crates/geist4-ffi` is the one place Rust meets C. Its header
+`crates/geist4-ffi/include/geist4.h` is generated from the Rust source
+by `cbindgen` and checked in, and CI verifies it is current: regenerate
+and `diff` after any change to `geist4-ffi`'s public ABI.
+
+```sh
+cargo install --locked cbindgen@0.29.0
+cbindgen --config crates/geist4-ffi/cbindgen.toml --crate geist4-ffi \
+    --output crates/geist4-ffi/include/geist4.h
+sh crates/geist4-ffi/c-tests/run.sh   # builds the lib, compiles and runs the C test
+```
+
+The C test compiles `c-tests/test_ffi.c` against the generated header,
+links the shared library the way a native binding would, and runs the
+same contract `crates/geist4-ffi/tests/ffi.rs` pins from Rust: null
+rejection, UTF-8 rejection with byte offsets, ownership and free
+discipline, and byte-exact HTML. It needs a C compiler; on platforms
+without one the script skips the C program and the Rust tests still
+pin the contract.
 
 ## Known Differences
 

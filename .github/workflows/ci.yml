@@ -40,6 +40,10 @@ jobs:
           key: advisory-db-2026-11
       - name: Install cargo-deny
         run: cargo install --locked cargo-deny@0.20.2
+      - name: Install cbindgen
+        # The version the checked-in header was generated with; bump both
+        # together and regenerate crates/geist4-ffi/include/geist4.h.
+        run: cargo install --locked cbindgen@0.29.0
       - name: Run check.sh
         shell: bash
         run: |
