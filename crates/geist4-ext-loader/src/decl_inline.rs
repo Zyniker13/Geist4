@@ -294,7 +294,7 @@ impl Extension for InlineTier {
         }
     }
 
-    fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_>) {
+    fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_, '_>) {
         // Only entries with `multiline = false` need the pass.
         if self.spans.iter().all(|span| span.multiline) {
             return;

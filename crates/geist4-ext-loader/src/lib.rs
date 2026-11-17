@@ -17,3 +17,6 @@ pub mod types;
 
 #[cfg(feature = "sandbox")]
 pub mod sandbox;
+
+#[cfg(feature = "sandbox")]
+pub mod adapter;

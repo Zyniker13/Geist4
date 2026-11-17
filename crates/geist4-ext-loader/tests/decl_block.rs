@@ -123,7 +123,7 @@ impl Extension for Compiled {
         }
     }
 
-    fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_>) {
+    fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_, '_>) {
         self.inline.post_process(ctx);
         self.post.post_process(ctx);
     }

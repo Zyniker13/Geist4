@@ -43,6 +43,57 @@ impl Package {
     }
 }
 
+/// Builds the package's extension object: a tier-2 manifest loads its
+/// component into the sandbox (with the `sandbox` feature) or refuses
+/// clearly (without it); a tier-1 or tier-3 manifest compiles as
+/// before. The tier-2 path also runs the component's load-time check,
+/// so a package that cannot initialize fails to load, not at first
+/// parse.
+fn build_extension(
+    manifest: &crate::types::Manifest,
+    dir: &Path,
+) -> Result<Arc<dyn Extension>, LoadError> {
+    match &manifest.wasm {
+        Some(wasm) => {
+            #[cfg(feature = "sandbox")]
+            {
+                load_wasm_extension(manifest, wasm, dir)
+            }
+            #[cfg(not(feature = "sandbox"))]
+            {
+                let _ = (wasm, dir);
+                Err(LoadError::new(format!(
+                    "wasm.path: the package declares a tier-2 WebAssembly component, but \
+                     this build was compiled without the `sandbox` feature; rebuild the \
+                     loader with --features sandbox to run tier-2 packages"
+                )))
+            }
+        }
+        None => Ok(crate::compile::compile(manifest.clone())),
+    }
+}
+
+/// Loads a tier-2 package's component from its file, checks it, and
+/// wraps it in the adapter. Only compiled with the `sandbox` feature.
+#[cfg(feature = "sandbox")]
+fn load_wasm_extension(
+    manifest: &crate::types::Manifest,
+    wasm: &crate::types::Wasm,
+    dir: &Path,
+) -> Result<Arc<dyn Extension>, LoadError> {
+    let component_path = dir.join(&wasm.path);
+    let extension =
+        crate::sandbox::SandboxExtension::load(&component_path, wasm.fuel, wasm.memory_pages)
+            .map_err(|error| LoadError::new(error.to_string()))?;
+    extension
+        .check()
+        .map_err(|error| LoadError::new(format!("component fails its load-time check: {error}")))?;
+    Ok(Arc::new(crate::adapter::WasmExtension::new(
+        manifest.clone(),
+        extension,
+    )))
+}
+
 /// Loads a package from a directory. The directory must contain
 /// `extension.toml` (the manifest) and `spec.md` (the conformance
 /// examples); a tier-2 package additionally carries the component named
@@ -51,9 +102,9 @@ impl Package {
 ///
 /// # Errors
 /// A missing or unreadable manifest, a manifest that fails validation,
-/// a missing `spec.md`, or (with the sandbox feature) a missing or
-/// unloadable component all return a [`LoadError`] describing the first
-/// problem in validation order.
+/// a missing `spec.md`, or (with the sandbox feature) a missing,
+/// unloadable or failed-check component all return a [`LoadError`]
+/// describing the first problem in validation order.
 pub fn load(dir: &Path) -> Result<Package, LoadError> {
     let manifest_path = dir.join("extension.toml");
     let source = std::fs::read_to_string(&manifest_path).map_err(|error| {
@@ -70,7 +121,7 @@ pub fn load(dir: &Path) -> Result<Package, LoadError> {
         )));
     }
 
-    let extension = crate::compile::compile(manifest.clone());
+    let extension = build_extension(&manifest, dir)?;
     Ok(Package {
         manifest,
         extension,

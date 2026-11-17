@@ -394,7 +394,7 @@ impl PostTier {
     /// pass touches `Node::Text` nodes only, and no such node exists
     /// inside a code span, a code block or raw HTML. Attribute lists
     /// attach block by block and then span by span.
-    pub fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_>) {
+    pub fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_, '_>) {
         if !self.replaces.is_empty() {
             apply_replaces(ctx.arena, ctx.root, &self.replaces);
         }
