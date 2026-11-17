@@ -189,6 +189,13 @@ struct Parser<'defs, 'a, 'ext> {
     /// Reusable buffer for normalized link-label lookups; taken from the
     /// session so one document's lookups share its capacity.
     label_scratch: String,
+    /// The span of the leaf block whose inline text this is; the span
+    /// recorded for problems found at inline level, since inline nodes
+    /// keep no spans of their own.
+    block_span: crate::span::Span,
+    /// Problems noticed while parsing this block's inline content,
+    /// drained by the caller after `run`.
+    problems: Vec<crate::problems::Problem>,
 }
 
 /// Backtick runs longer than this are never scanned for closers, as in
@@ -230,12 +237,17 @@ impl InlineSession {
     }
 }
 
+// The parse-scoped arguments are all needed and read in one place;
+// bundling them would trade a clear call for an args struct.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn parse_inlines_into(
     session: &mut InlineSession,
     text: &str,
     link_defs: &HashMap<String, LinkDef<'_>>,
     arena: &mut crate::arena::Arena<'_>,
     parent: crate::arena::NodeId,
+    block_span: crate::span::Span,
+    problems: &mut Vec<crate::problems::Problem>,
     extensions: Option<&[std::sync::Arc<dyn crate::extension::Extension>]>,
 ) {
     // The paragraph's text loses trailing whitespace, as the reference's
@@ -284,9 +296,12 @@ pub(crate) fn parse_inlines_into(
         scanned_for_backticks: false,
         link_defs,
         label_scratch: std::mem::take(&mut session.label_scratch),
+        block_span,
+        problems: Vec::new(),
     };
     session.memo_gen = parser.memo_gen;
     parser.run();
+    problems.append(&mut parser.problems);
     // Move the surviving cells straight into the arena: no intermediate
     // node tree, no second copy of the text.
     attach_pool(&mut parser.pool, parser.head, arena, parent);
@@ -397,8 +412,17 @@ pub(crate) struct BracketInner<'p, 'defs, 'a, 'ext> {
     content: Option<Option<String>>,
     /// Set by a claim: the kind and attributes of the node that
     /// replaces the group.
-    claimed: Option<(String, Vec<(String, crate::extension::AttrValue)>)>,
+    claimed: Option<BracketClaim>,
 }
+
+/// A bracket claim: the node's kind, its attributes, and the content
+/// bytes a decision keeps as the node's inline children — `None`
+/// discards the content, the footnote marker's shape.
+type BracketClaim = (
+    String,
+    Vec<(String, crate::extension::AttrValue)>,
+    Option<usize>,
+);
 
 impl<'p, 'defs, 'a, 'ext> BracketInner<'p, 'defs, 'a, 'ext> {
     /// The group's first content node's text, if any.
@@ -464,11 +488,29 @@ impl<'p, 'defs, 'a, 'ext> crate::extension::InlineBracketCtx<'p, 'defs, 'a, 'ext
 
     /// Claims the whole `[`…`]` group — the opening bracket, its
     /// content nodes and the closing bracket — as one inline node of
-    /// `kind` carrying `attrs`. The node has no children. Several
-    /// hooks may run; the first claim wins.
+    /// `kind` with `attrs`, discarding the content: the marker-node
+    /// shape the footnote reference uses, where the label lives in the
+    /// extension's own state, not in the tree.
     pub fn claim(&mut self, kind: String, attrs: Vec<(String, crate::extension::AttrValue)>) {
         if self.inner.claimed.is_none() {
-            self.inner.claimed = Some((kind, attrs));
+            self.inner.claimed = Some((kind, attrs, None));
+        }
+    }
+
+    /// Claims the `[`…`]` group as one inline node of `kind` with
+    /// `attrs`, keeping the group's content: the content's bytes up to
+    /// `end` become the node's inline children (the whole content when
+    /// `end` reaches past it); bytes from `end` on stay literal text
+    /// after the node. The world's `inline-bracket` node decision
+    /// carries this `end`.
+    pub fn claim_with_content(
+        &mut self,
+        kind: String,
+        attrs: Vec<(String, crate::extension::AttrValue)>,
+        end: usize,
+    ) {
+        if self.inner.claimed.is_none() {
+            self.inner.claimed = Some((kind, attrs, Some(end)));
         }
     }
 }
@@ -1229,6 +1271,10 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
             }
         }
 
+        // The reference-style label, when the inline form failed and a
+        // lookup was attempted; kept for the problem message when
+        // nothing matched.
+        let mut broken_label: Option<String> = None;
         if matched.is_none() {
             // A reference link: a following label or the link text itself.
             self.pos = after_link_text_pos;
@@ -1246,9 +1292,9 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                 let text_start = self.brackets[opener_index].position;
                 raw_label = Some(self.input[text_start..initial_pos - 1].to_string());
             }
-            if let Some(label) = raw_label {
+            if let Some(label) = &raw_label {
                 self.label_scratch.clear();
-                crate::parser::normalize_label_into(&label, &mut self.label_scratch);
+                crate::parser::normalize_label_into(label, &mut self.label_scratch);
                 if let Some(def) = self.link_defs.get(self.label_scratch.as_str()) {
                     matched = Some((
                         def.destination.to_string(),
@@ -1256,6 +1302,7 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                     ));
                 }
             }
+            broken_label = raw_label;
         }
 
         match matched {
@@ -1305,8 +1352,7 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                 // path and bracket-heavy input stay linear.
                 let opener_node = self.brackets[opener_index].node;
                 let opener_position = self.brackets[opener_index].position;
-                let mut claimed: Option<(String, Vec<(String, crate::extension::AttrValue)>)> =
-                    None;
+                let mut claimed: Option<BracketClaim> = None;
                 if let Some(extensions) = self.extensions {
                     let inner = BracketInner {
                         parser: &mut *self,
@@ -1321,15 +1367,108 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                     }
                     claimed = ctx.inner.claimed;
                 }
-                if let Some((kind, attrs)) = claimed {
+                if let Some((kind, attrs, end)) = claimed {
                     self.pos = initial_pos;
                     let ext_id = self.alloc(Kind::Ext { kind, attrs });
                     self.insert_before(ext_id, opener_node);
-                    let mut id = self.pool[opener_node as usize].next;
-                    while let Some(cur) = id {
-                        let next = self.pool[cur as usize].next;
-                        self.kill(cur);
-                        id = next;
+                    match end {
+                        // The marker-node claim: the group's content is
+                        // consumed, the node stays empty.
+                        None => {
+                            let mut id = self.pool[opener_node as usize].next;
+                            while let Some(cur) = id {
+                                let next = self.pool[cur as usize].next;
+                                self.kill(cur);
+                                id = next;
+                            }
+                            self.tail = Some(ext_id);
+                        }
+                        // The world's inline-bracket decision: the
+                        // content's bytes up to `end` become the node's
+                        // inline children; the rest stays literal text
+                        // after the node. The content cells are the
+                        // plain text the hook saw, so byte offsets
+                        // accumulate over their text.
+                        Some(end) => {
+                            let mut kept: Vec<u32> = Vec::new();
+                            let mut literal_first: Option<u32> = None;
+                            let mut consumed = 0usize;
+                            let mut id = self.pool[opener_node as usize].next;
+                            while let Some(cur) = id {
+                                id = self.pool[cur as usize].next;
+                                if literal_first.is_some() {
+                                    continue;
+                                }
+                                let text = match &self.pool[cur as usize].kind {
+                                    Kind::Text(t) | Kind::Html(t) => t,
+                                    // Unreachable through the world — a
+                                    // decision needs `content`, which is
+                                    // `None` then — but stay safe: the
+                                    // cell and the rest stay literal.
+                                    _ => {
+                                        literal_first = Some(cur);
+                                        continue;
+                                    }
+                                };
+                                if consumed >= end {
+                                    literal_first = Some(cur);
+                                    continue;
+                                }
+                                let len = text.len();
+                                if consumed + len <= end {
+                                    kept.push(cur);
+                                    consumed += len;
+                                    continue;
+                                }
+                                // The cell straddles `end`: split it.
+                                // A cut inside a character rounds down,
+                                // so both halves stay valid UTF-8 no
+                                // matter what `end` named.
+                                let (head, rest) = {
+                                    let text = match &self.pool[cur as usize].kind {
+                                        Kind::Text(t) | Kind::Html(t) => t,
+                                        _ => unreachable!("handled above"),
+                                    };
+                                    let mut cut = end - consumed;
+                                    if cut > text.len() {
+                                        cut = text.len();
+                                    }
+                                    while cut > 0 && !text.is_char_boundary(cut) {
+                                        cut -= 1;
+                                    }
+                                    (text[..cut].to_owned(), text[cut..].to_owned())
+                                };
+                                self.pool[cur as usize].kind = Kind::Text(head);
+                                kept.push(cur);
+                                consumed = end;
+                                if !rest.is_empty() {
+                                    let rest_id = self.alloc(Kind::Text(rest));
+                                    let cur_next = self.pool[cur as usize].next;
+                                    self.pool[cur as usize].next = Some(rest_id);
+                                    self.pool[rest_id as usize].prev = Some(cur);
+                                    self.pool[rest_id as usize].next = cur_next;
+                                    match cur_next {
+                                        Some(n) => self.pool[n as usize].prev = Some(rest_id),
+                                        None => self.tail = Some(rest_id),
+                                    }
+                                    literal_first = Some(rest_id);
+                                }
+                            }
+                            if let Some(&first_kept) = kept.first() {
+                                let last_kept = kept[kept.len() - 1];
+                                self.pool[ext_id as usize].first_child = Some(first_kept);
+                                self.pool[ext_id as usize].last_child = Some(last_kept);
+                                self.pool[first_kept as usize].prev = None;
+                                for &cell in &kept {
+                                    self.pool[cell as usize].parent = Some(ext_id);
+                                }
+                                self.pool[last_kept as usize].next = literal_first;
+                                match literal_first {
+                                    Some(l) => self.pool[l as usize].prev = Some(ext_id),
+                                    None => self.tail = Some(ext_id),
+                                }
+                            }
+                        }
                     }
                     self.kill(opener_node);
                     self.remove_delimiters_since(opener_position);
@@ -1338,6 +1477,19 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                     self.brackets.pop();
                     self.pos = initial_pos;
                     self.push(Kind::Text("]".to_string()));
+                    // The group matched nothing: no inline link, no
+                    // reference definition, no extension claim. The
+                    // output stays exactly the literal text CommonMark
+                    // asks for, and the broken reference is recorded as
+                    // a problem for checkers to surface.
+                    let message = match broken_label.filter(|label| !label.is_empty()) {
+                        Some(label) => {
+                            format!("no link reference definition for '{label}'")
+                        }
+                        None => String::from("no link reference definition for the bracket group"),
+                    };
+                    self.problems
+                        .push(crate::problems::Problem::new(message, self.block_span));
                 }
             }
         }

@@ -102,6 +102,11 @@ pub struct Document<'a> {
     /// The document's link reference definitions, keyed by their normalized
     /// label (lowercased, whitespace runs collapsed to one space).
     pub link_defs: HashMap<String, LinkDef<'a>>,
+    /// The problems the parse noticed in its source: broken references
+    /// and similar issues the tree absorbed without changing the
+    /// output. Empty unless something was found; see
+    /// [`crate::problems::Problem`].
+    pub problems: Vec<crate::problems::Problem>,
 }
 
 /// Parses the block structure of `src` into a [`Document`].
@@ -125,13 +130,22 @@ pub fn parse_with<'a>(src: &'a str, options: &crate::extension::Options) -> Docu
         } else {
             Some(options.extensions())
         };
-    let (mut arena, root, link_defs) = Parser::new(src).extensions(extensions).run();
+    // A parse begins: every extension gets the signal before the first
+    // line, so per-parse state — a sandboxed component's instance, say —
+    // is set up exactly once, in registration order.
+    if let Some(extensions) = extensions {
+        for ext in extensions {
+            ext.begin_parse();
+        }
+    }
+    let (mut arena, root, link_defs, mut problems) = Parser::new(src).extensions(extensions).run();
     if !options.is_empty() {
         for ext in options.extensions() {
             ext.post_process(&mut crate::extension::TreeCtx {
                 arena: &mut arena,
                 root,
                 options,
+                problems: &mut problems,
             });
         }
     }
@@ -139,6 +153,7 @@ pub fn parse_with<'a>(src: &'a str, options: &crate::extension::Options) -> Docu
         arena,
         root,
         link_defs,
+        problems,
     }
 }
 
@@ -235,10 +250,23 @@ struct Parser<'a, 'ext> {
     /// Paragraphs that declined an extension block start; the hook is
     /// not called with them again.
     visited_paragraphs: Vec<NodeId>,
+    /// The problems the parse noticed, drained from the inline phase
+    /// and handed to the document.
+    problems: Vec<crate::problems::Problem>,
     /// Whether a block-start hook consumed the current line, which
     /// makes it not blank however empty the rest looks.
     line_consumed: bool,
+    /// Extension blocks opened so far on the current line. A hook that
+    /// opens a block without advancing the cursor would be offered the
+    /// same text again and again; the cap ends that loop and keeps any
+    /// hostile extension from spinning the parse.
+    extension_opens: usize,
 }
+
+/// How many extension blocks one line may open. Legitimate chains are
+/// short (`: - item` opens two); anything past the cap cannot advance
+/// the line and is an extension fighting itself.
+const EXTENSION_OPENS_PER_LINE: usize = 16;
 
 /// The state behind a block-start hook. Its fields stay private to
 /// the parser; hooks reach the state through the context's methods.
@@ -546,7 +574,9 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             line_is_src: true,
             extensions: None,
             visited_paragraphs: Vec::new(),
+            problems: Vec::new(),
             line_consumed: false,
+            extension_opens: 0,
         }
     }
 
@@ -594,8 +624,16 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         0
     }
 
-    /// Runs the whole block parse and returns the arena, root and defs.
-    fn run(mut self) -> (Arena<'a>, NodeId, HashMap<String, LinkDef<'a>>) {
+    /// Runs the whole block parse and returns the arena, root, defs and
+    /// the problems the parse noticed.
+    fn run(
+        mut self,
+    ) -> (
+        Arena<'a>,
+        NodeId,
+        HashMap<String, LinkDef<'a>>,
+        Vec<crate::problems::Problem>,
+    ) {
         let bytes = self.src.as_bytes();
         // A registered front matter delimiter claims a prologue before
         // any line is parsed; the rest parses as if the prologue were
@@ -652,12 +690,13 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         }
         let root = self.open[0].id;
         self.parse_all_inlines(root);
-        (self.arena, root, self.link_defs)
+        (self.arena, root, self.link_defs, self.problems)
     }
 
     /// Processes one line against the open block stack.
     fn process_line(&mut self, line: &[u8], line_offset: usize, line_stop: usize) {
         let mut cursor = Cursor::new(line);
+        self.extension_opens = 0;
 
         // Phase A: match the open containers. Nothing closes yet.
         match self.walk(&mut cursor, line_stop) {
@@ -853,6 +892,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         let ctx = crate::extension::LookCtx {
             line,
             indented: nonspace_col - cursor.col() >= 4,
+            column: nonspace_col,
             arena: &self.arena,
             container,
         };
@@ -1062,6 +1102,12 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         line_stop: usize,
         indent: usize,
     ) -> Option<NodeId> {
+        // The per-line cap: past it, this line opens no further
+        // extension blocks, so a hook that re-matches text it did not
+        // consume cannot spin the parse.
+        if self.extension_opens >= EXTENSION_OPENS_PER_LINE {
+            return None;
+        }
         let (pos, _) = cursor.find_nonspace();
         if pos >= cursor.line().len() {
             return None;
@@ -1098,6 +1144,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 fired, fired_node, ..
             } = ctx.inner;
             if fired {
+                self.extension_opens += 1;
                 return fired_node;
             }
         }
@@ -1421,12 +1468,15 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                     }
                 }
                 self.arena.entry_mut(id).children.clear();
+                let block_span = self.arena.span(id);
                 crate::inline::parse_inlines_into(
                     &mut session,
                     &text,
                     &self.link_defs,
                     &mut self.arena,
                     id,
+                    block_span,
+                    &mut self.problems,
                     self.extensions,
                 );
             } else {

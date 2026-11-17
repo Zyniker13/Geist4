@@ -435,7 +435,7 @@ impl Autolink {
     /// Merges every run of adjacent text children into the first node,
     /// the reference's `cmark_consolidate_text_nodes` before the email
     /// pass, so a split text run scans as one.
-    fn consolidate(&self, ctx: &mut TreeCtx<'_, '_, '_>, id: NodeId) {
+    fn consolidate(&self, ctx: &mut TreeCtx<'_, '_, '_, '_>, id: NodeId) {
         let mut children: Vec<NodeId> = ctx.arena.children(id).to_vec();
         let mut index = 0usize;
         while index + 1 < children.len() {
@@ -469,7 +469,7 @@ impl Autolink {
     /// everything inside a link: an address already in a link stays as
     /// it is. Images are descended into; their alt text renders as
     /// text, so an address there links too.
-    fn scan_tree(&self, ctx: &mut TreeCtx<'_, '_, '_>, id: NodeId, inside_link: bool) {
+    fn scan_tree(&self, ctx: &mut TreeCtx<'_, '_, '_, '_>, id: NodeId, inside_link: bool) {
         let in_link = inside_link || matches!(ctx.arena.kind(id), Node::Link(_));
         let children: Vec<NodeId> = ctx.arena.children(id).to_vec();
         for child in children {
@@ -487,7 +487,7 @@ impl Autolink {
     /// text up to the next one is spliced in after it, the reference's
     /// node splitting in `postprocess_text`. An empty first fragment
     /// stays, as the reference's zero-length chunk does.
-    fn split_text_at_emails(&self, ctx: &mut TreeCtx<'_, '_, '_>, id: NodeId, parent: NodeId) {
+    fn split_text_at_emails(&self, ctx: &mut TreeCtx<'_, '_, '_, '_>, id: NodeId, parent: NodeId) {
         let content = match ctx.arena.kind(id) {
             Node::Text(Cow::Borrowed(text)) => (*text).to_owned(),
             Node::Text(Cow::Owned(text)) => text.clone(),
@@ -564,7 +564,7 @@ impl Extension for Autolink {
         }
     }
 
-    fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_>) {
+    fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_, '_>) {
         self.consolidate(ctx, ctx.root);
         self.scan_tree(ctx, ctx.root, false);
     }

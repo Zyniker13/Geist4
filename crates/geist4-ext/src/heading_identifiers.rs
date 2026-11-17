@@ -75,7 +75,7 @@ impl Extension for HeadingIdentifiers {
         "heading_identifiers"
     }
 
-    fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_>) {
+    fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_, '_>) {
         // The hook has no index of its own; the registration order in
         // the options is the index the arena's claim slot stores.
         let Some(index) = ctx

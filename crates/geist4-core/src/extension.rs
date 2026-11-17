@@ -148,6 +148,9 @@ pub struct LookCtx<'a, 'doc> {
     /// Whether the line is indented four or more columns past the
     /// matched prefixes.
     pub indented: bool,
+    /// The column `line` starts at: the position the matched container
+    /// prefixes left, where the line's leading spaces were skipped.
+    pub column: usize,
     /// The parse arena, for inspecting `container` and its children.
     pub arena: &'a Arena<'doc>,
     /// The deepest container that still matches the line: the parent
@@ -212,6 +215,23 @@ pub trait Extension: Send + Sync {
         let _ = ctx;
     }
 
+    /// Runs when a parse of a document with this extension registered
+    /// begins, before the first line is processed, once per parse in
+    /// registration order. The place to set up per-parse state — a
+    /// sandboxed component's instance, say — so hooks never see state
+    /// left over from a previous document.
+    fn begin_parse(&self) {}
+
+    /// The extension's latched error, if one has occurred: a hook that
+    /// cannot continue — a sandboxed component out of fuel, say —
+    /// records it here; the parse then continues with this extension
+    /// declining every later decision, and the host reads the error
+    /// back after the parse. Reading takes the error: the next call
+    /// returns `None` until a new one is latched.
+    fn take_error(&self) -> Option<String> {
+        None
+    }
+
     /// Whether this extension's blocks hold other blocks: while one of
     /// them is open, the parser opens paragraphs, lists, quotes, code
     /// and other blocks inside it, the way it opens blocks inside a
@@ -257,7 +277,7 @@ pub trait Extension: Send + Sync {
     /// or splice nodes; this is where heading identifiers, task list
     /// items, footnote collection and the disallowed raw HTML filter
     /// work.
-    fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_>) {
+    fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_, '_>) {
         let _ = ctx;
     }
 
@@ -365,7 +385,7 @@ pub struct InlineTriggerCtx<'p, 'defs, 'a, 'ext> {
 }
 
 /// The context of a post-processing pass over the document tree.
-pub struct TreeCtx<'ctx, 'doc, 'opts> {
+pub struct TreeCtx<'ctx, 'doc, 'opts, 'problems> {
     /// The document's arena; hooks rewrite nodes through it.
     pub arena: &'ctx mut crate::arena::Arena<'doc>,
     /// The tree root.
@@ -373,6 +393,9 @@ pub struct TreeCtx<'ctx, 'doc, 'opts> {
     /// The options the parse runs with; hooks may read other
     /// extensions' declarations, but never their private state.
     pub options: &'opts Options,
+    /// The parse's problems; a hook that finds a broken reference or
+    /// similar records it here with its source span.
+    pub problems: &'problems mut Vec<crate::problems::Problem>,
 }
 
 /// What the place a new block would open in is.
@@ -484,6 +507,13 @@ impl<'p, 'a, 'l, 'ext> BlockStartCtx<'p, 'a, 'l, 'ext> {
     /// block.
     pub fn open_node(&self) -> Option<crate::arena::NodeId> {
         self.inner.open_node()
+    }
+
+    /// The column the line's content starts at: the position the open
+    /// containers' prefixes left, where `line` begins. The column a
+    /// block-start decision's `consume` counts from.
+    pub fn column(&self) -> usize {
+        self.inner.cursor.col()
     }
 
     /// The open extension block's state, when the deepest open block
@@ -617,6 +647,14 @@ impl<'c, 's, 'l> BlockContinueCtx<'c, 's, 'l> {
         let (pos, col) = self.cursor.find_nonspace();
         let _ = pos;
         col - self.cursor.col()
+    }
+
+    /// The column the line's content starts at: the position the open
+    /// containers' prefixes left, where `line` begins. The column a
+    /// continue decision's `consume` counts from.
+    #[must_use]
+    pub fn column(&self) -> usize {
+        self.cursor.col()
     }
 
     /// The open block's state, downcast to the extension's own type.

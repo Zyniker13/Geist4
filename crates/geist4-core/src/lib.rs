@@ -14,6 +14,7 @@ pub mod extension;
 mod inline;
 pub mod node;
 pub mod parser;
+pub mod problems;
 pub mod span;
 
 /// Unicode classification for extension scanners, the same classes the

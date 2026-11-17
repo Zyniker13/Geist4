@@ -29,7 +29,7 @@ impl Extension for Marker {
         }]
     }
 
-    fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_>) {
+    fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_, '_>) {
         let mut stack: Vec<NodeId> = ctx.arena.children(ctx.root).to_vec();
         while let Some(id) = stack.pop() {
             let text = match ctx.arena.kind(id) {
@@ -128,4 +128,53 @@ fn unregistered_kinds_render_nothing() {
     // the output is the plain paragraph, ending with the newline the
     // renderer puts after the last block.
     assert_eq!(render_with(&doc, &options), "<p>hello</p>\n");
+}
+
+/// A hostile block start: every non-indented line matches, and it
+/// never consumes anything — the same text is offered back to it, so
+/// the parse only ends because the parser caps extension opens per
+/// line.
+struct Greedy;
+
+impl Extension for Greedy {
+    fn name(&self) -> &str {
+        "greedy"
+    }
+
+    fn kinds(&self) -> Vec<KindDecl> {
+        vec![KindDecl {
+            kind: "greedy".to_owned(),
+            container: true,
+            inline_text: true,
+            attrs: vec![],
+        }]
+    }
+
+    fn try_start(&self, ctx: &mut geist4_core::extension::BlockStartCtx<'_, '_, '_, '_>) {
+        if ctx.indented() {
+            return;
+        }
+        ctx.seek_content(0);
+        ctx.open_extension_keep_rest("greedy".to_owned(), Box::new(()));
+    }
+}
+
+#[test]
+fn a_block_start_that_never_advances_is_capped() {
+    let mut options = Options::new();
+    options.extension(Arc::new(Greedy));
+    // The parse terminates even though every line re-matches: the
+    // per-line cap bounds the extension's opens.
+    let doc = parse_with("text\n", &options);
+    let mut extensions = 0usize;
+    let mut stack = vec![doc.root];
+    while let Some(id) = stack.pop() {
+        if matches!(doc.arena.kind(id), Node::Extension(_)) {
+            extensions += 1;
+        }
+        stack.extend(doc.arena.children(id).iter().copied());
+    }
+    assert_eq!(extensions, 16);
+    // The document still renders without panicking.
+    let _ = render_with(&doc, &options);
 }

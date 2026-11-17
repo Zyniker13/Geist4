@@ -167,9 +167,10 @@ impl Extension for Footnotes {
         );
     }
 
-    fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_>) {
+    fn post_process(&self, ctx: &mut TreeCtx<'_, '_, '_, '_>) {
         let arena = &mut *ctx.arena;
         let root = ctx.root;
+        let problems = &mut *ctx.problems;
 
         // The definitions, in document order. The walk does not
         // descend into definitions, matching the reference's
@@ -241,15 +242,23 @@ impl Extension for Footnotes {
             }
         }
         // A reference whose label matches nothing goes back to being
-        // the literal text it was written as.
+        // the literal text it was written as. Each restoration is also
+        // a broken reference, recorded as a problem with its span for
+        // checkers to surface.
         for (id, parent, label) in restorations {
             let Some(index) = arena.children(parent).iter().position(|c| *c == id) else {
                 continue;
             };
-            let span = arena.entry(id).span;
+            // The span of the block holding the reference: inline nodes
+            // keep no spans, so problems about them carry the block's.
+            let span = arena.span(parent);
             let text = arena.alloc(Node::Text(format!("[^{label}]").into()), span);
             arena.remove_child(parent, index);
             arena.insert_child(parent, index, text);
+            problems.push(geist4_core::problems::Problem::new(
+                format!("no footnote definition for footnote reference '[^{label}]'"),
+                span,
+            ));
         }
 
         // Referenced definitions move to the end of the document in
