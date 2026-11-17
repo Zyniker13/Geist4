@@ -1,0 +1,3 @@
+error
+reason: bad-name
+extension.name: must match [a-z][a-z0-9-]* and be 1-64 bytes

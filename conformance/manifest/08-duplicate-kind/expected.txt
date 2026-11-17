@@ -1,0 +1,3 @@
+error
+reason: duplicate-kind
+kinds[1].kind: duplicate kind "sample"; kinds must be unique within the manifest

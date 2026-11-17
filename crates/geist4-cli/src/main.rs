@@ -7,6 +7,7 @@
 
 mod check;
 mod ext_check;
+mod manifest_check;
 mod packages;
 
 use clap::{Parser, Subcommand};
@@ -52,6 +53,12 @@ enum ExtCommand {
         #[arg(long = "ext")]
         ext: Vec<PathBuf>,
     },
+    /// Validate a package's manifest and behavior without running
+    /// its spec.
+    Manifest {
+        /// The extension package directory to validate.
+        path: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -60,6 +67,9 @@ fn main() -> ExitCode {
         Command::Ext {
             command: ExtCommand::Check { path, ext },
         } => ext_check::run(&path, &ext),
+        Command::Ext {
+            command: ExtCommand::Manifest { path },
+        } => manifest_check::run(&path),
         Command::Check { file, ext } => check::run(&file, &ext),
     }
 }

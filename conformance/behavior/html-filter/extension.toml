@@ -1,0 +1,19 @@
+# Tier-1 conformance package: the `[[html_filter]]` declarative
+# definition. The examples pin the denied-tag substitution in raw
+# inline HTML and HTML blocks, the case-insensitive match, the
+# lookalike-name boundary, the allowed-tag pass-through, and the code
+# span's immunity, exactly as docs/extensions/format.md specifies
+# them.
+
+[extension]
+name = "html-filter"
+version = "1.0.0"
+format = "1.0"
+description = "Conformance: tier-1 HTML filters"
+license = "MIT"
+homepage = "https://example.com/conformance/html-filter"
+
+hooks = ["html_filter"]
+
+[[html_filter]]
+deny = ["script", "iframe", "style"]

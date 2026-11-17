@@ -1,0 +1,41 @@
+# Tier-1 conformance package: the `[[block_container]]` declarative
+# definition. The examples pin fence lengths, nesting, the consumed
+# close fence, the end-of-document close, indentation, the info string
+# and lazy continuation, exactly as docs/extensions/format.md
+# specifies them.
+
+[extension]
+name = "block-containers"
+version = "1.0.0"
+format = "1.0"
+description = "Conformance: tier-1 declarative block containers"
+license = "MIT"
+homepage = "https://example.com/conformance/block-containers"
+
+hooks = ["block_container", "render"]
+
+[[kinds]]
+kind = "frame"
+container = true
+inline_text = false
+attrs = []
+
+[[kinds]]
+kind = "callout"
+container = true
+inline_text = false
+attrs = []
+
+[[block_container]]
+kind = "frame"
+marker = ":::"
+name = "frame"
+info_html = ""
+html = "<div class=\"frame\">\n{children}</div>\n"
+
+[[block_container]]
+kind = "callout"
+marker = "+++"
+name = "callout"
+info_html = ""
+html = "<aside class=\"callout\">\n{children}</aside>\n"

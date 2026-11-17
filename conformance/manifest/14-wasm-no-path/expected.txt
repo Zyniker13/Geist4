@@ -1,0 +1,3 @@
+error
+reason: wasm-path-missing
+wasm.path: missing; the component file path is required

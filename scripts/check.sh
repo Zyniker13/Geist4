@@ -13,6 +13,9 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 echo '== cargo test =='
 cargo test --workspace --all-features
 
+echo '== conformance kit =='
+sh conformance/run.sh
+
 echo '== cargo doc =='
 RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps
 

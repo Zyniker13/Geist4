@@ -366,6 +366,21 @@ fn minimal_manifest_uses_defaults() {
     assert!(!m.host);
 }
 
+#[test]
+fn format_version_rules() {
+    // The loader implements format 1.0: same major, minor not
+    // greater, the patch level ignored.
+    for good in ["1.0", "1.0.0", "1.0.2"] {
+        ok_of(&MINIMAL.replace("format = \"1.0\"", &format!("format = \"{good}\"")));
+    }
+    for bad in ["0.9", "1.1", "1.1.0", "2.0", "10.0"] {
+        assert_rejected(
+            &MINIMAL.replace("format = \"1.0\"", &format!("format = \"{bad}\"")),
+            "extension.format",
+        );
+    }
+}
+
 /// A manifest whose `[extension]` name is `name`.
 fn src_with_name(name: &str) -> String {
     format!(
@@ -441,9 +456,13 @@ fn format_shape_and_major_decoupling() {
     for f in ["", "1", "1.x", "1.0.0.0"] {
         assert_rejected(&src_with_format(f), "extension.format");
     }
-    // Any major is accepted at parse; the loader decides on its own.
-    let m = ok_of(&src_with_format("9.9"));
-    assert_eq!(m.extension.format, "9.9");
+    // A well-shaped version with the wrong major or a newer minor is
+    // rejected too: the loader implements format 1.0 (see
+    // `format_version_rules`).
+    for f in ["9.9", "2.0", "1.2"] {
+        assert_rejected(&src_with_format(f), "extension.format");
+    }
+    assert_eq!(ok_of(&src_with_format("1.0.9")).extension.format, "1.0.9");
 }
 
 /// A manifest whose `hooks` list is `hooks`.

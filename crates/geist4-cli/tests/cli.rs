@@ -180,6 +180,38 @@ fn ext_check_reports_a_broken_manifest() {
 }
 
 #[test]
+fn ext_manifest_validates_without_running_the_spec() {
+    let temp = TempDir::new("manifestcheck");
+    // A valid package passes even when its spec examples are wrong:
+    // this command is the validation half of `ext check`.
+    let alpha = package(
+        temp.path(),
+        "alpha",
+        &highlight_manifest("alpha", ""),
+        &spec(&example("a ==mark== b", "<p>wrong</p>")),
+    );
+    let output = run_cli(["ext", "manifest", alpha.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr_of(&output));
+    assert_eq!(stdout_of(&output), "", "success stays quiet");
+
+    // An unsupported format version is rejected with the loader's
+    // one-line message.
+    let old_manifest =
+        highlight_manifest("old", "").replace("format = \"1.0\"", "format = \"2.0\"");
+    let old = package(
+        temp.path(),
+        "old",
+        &old_manifest,
+        &spec(&example("x", "<p>x</p>")),
+    );
+    let output = run_cli(["ext", "manifest", old.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = stderr_of(&output);
+    assert!(stderr.contains("extension.format"), "{stderr}");
+    assert!(stderr.contains("not supported"), "{stderr}");
+}
+
+#[test]
 fn ext_check_rejects_conflicting_packages() {
     let temp = TempDir::new("conflict");
     let alpha = package(

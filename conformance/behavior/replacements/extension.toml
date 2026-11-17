@@ -1,0 +1,46 @@
+# Tier-1 conformance package: the `[[replace]]` declarative
+# definition. The examples pin the per-node plain text substitution,
+# declaration-order chaining, the `once` default, code span, code
+# block and raw HTML immunity, the node boundary, and the single pass
+# that makes a self-referential replacement terminate, exactly as
+# docs/extensions/format.md specifies them.
+
+[extension]
+name = "replacements"
+version = "1.0.0"
+format = "1.0"
+description = "Conformance: tier-1 declarative replacements"
+license = "MIT"
+homepage = "https://example.com/conformance/replacements"
+
+hooks = ["post_process"]
+
+[[replace]]
+from = "(c)"
+to = "©"
+once = false
+
+[[replace]]
+from = "--"
+to = "–"
+once = true
+
+[[replace]]
+from = "qq"
+to = "Z"
+once = false
+
+[[replace]]
+from = "Z"
+to = "W"
+once = false
+
+[[replace]]
+from = "xb"
+to = "y"
+once = false
+
+[[replace]]
+from = "@"
+to = "@@"
+once = false

@@ -1,0 +1,3 @@
+error
+reason: bad-inline-trigger
+wasm.inline_triggers: each trigger must be one printable ASCII byte

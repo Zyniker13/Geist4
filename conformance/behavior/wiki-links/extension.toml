@@ -1,0 +1,27 @@
+# Tier-1 conformance package: the `[[wiki_link]]` declarative
+# definition. The examples pin the real-link resolution, the label,
+# the percent-encoding of spaces and the reserved characters, and the
+# literal-text fallbacks, exactly as docs/extensions/format.md
+# specifies them.
+
+[extension]
+name = "wiki-links"
+version = "1.0.0"
+format = "1.0"
+description = "Conformance: tier-1 wiki links"
+license = "MIT"
+homepage = "https://example.com/conformance/wiki-links"
+
+hooks = ["inline_bracket", "render"]
+
+[[kinds]]
+kind = "wiki"
+container = false
+inline_text = true
+attrs = []
+
+[[wiki_link]]
+kind = "wiki"
+prefix = "[["
+suffix = "]]"
+html = "<a href=\"{target}\" class=\"wikilink\">{children}</a>"

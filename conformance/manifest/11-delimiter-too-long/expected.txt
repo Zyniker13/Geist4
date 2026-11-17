@@ -1,0 +1,3 @@
+error
+reason: bad-delimiter
+inline_span[0].open: must be 1-16 bytes

@@ -82,9 +82,9 @@ const HOOKS: [&str; 7] = [
 ///
 /// Enforces every format-v1 rule in `docs/extensions/format.md`. The
 /// 64 KiB size limit is checked before any parsing, so an oversized
-/// manifest is rejected cheaply. The loader's own format version is not
-/// consulted here: `parse` accepts any well-shaped `format` and the
-/// loader decides whether it matches its own.
+/// manifest is rejected cheaply. A `format` whose major version is
+/// not this loader's, or whose minor is greater, is rejected: the
+/// loader implements format 1.0.
 pub fn parse(src: &str) -> Result<Manifest, LoadError> {
     if src.len() > MAX_MANIFEST_BYTES {
         return Err(LoadError::new(format!(
@@ -395,6 +395,39 @@ fn is_semver_number(part: &str) -> bool {
         && (part == "0" || !part.starts_with('0'))
 }
 
+/// The format version this loader implements: major 1, minor 0. A
+/// manifest's `format` must have the same major version and a minor
+/// not greater; the patch level is ignored (a patch is a compatible
+/// clarification by convention).
+const SUPPORTED_FORMAT: (u64, u64) = (1, 0);
+
+/// Rejects a `format` value the loader cannot interpret, per the
+/// rule under `SUPPORTED_FORMAT`. The value's shape has already been
+/// checked; this compares the components.
+fn check_format_version(format: &str, span: Range<usize>) -> Result<(), LoadError> {
+    let mut parts = format.split('.');
+    let major = parts.next().and_then(|p| p.parse::<u64>().ok());
+    let minor = parts.next().and_then(|p| p.parse::<u64>().ok());
+    let (Some(major), Some(minor)) = (major, minor) else {
+        // The shape check rejects anything unparseable; this cannot
+        // be reached with a well-shaped value.
+        return Err(err(
+            Some(span),
+            "extension.format: must be a semver version like 1.0",
+        ));
+    };
+    if major != SUPPORTED_FORMAT.0 || minor > SUPPORTED_FORMAT.1 {
+        return Err(err(
+            Some(span),
+            format!(
+                "extension.format: format {format} is not supported; this loader implements format {}.{}",
+                SUPPORTED_FORMAT.0, SUPPORTED_FORMAT.1
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// A well-formed SPDX expression: license identifiers joined by `AND`
 /// and `OR`, with `WITH` exceptions and parentheses for grouping.
 ///
@@ -607,7 +640,7 @@ fn parse_extension(ext: &Spanned<RawExtension>) -> Result<Extension, LoadError> 
             "extension.format: must be a semver version like 1.0",
         ));
     }
-
+    check_format_version(format, format_v.span())?;
     let description_v = leaf(
         &raw.description,
         table_span.clone(),

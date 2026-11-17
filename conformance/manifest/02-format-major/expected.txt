@@ -1,0 +1,3 @@
+error
+reason: format-unsupported
+extension.format: format 2.0 is not supported; this loader implements format 1.0

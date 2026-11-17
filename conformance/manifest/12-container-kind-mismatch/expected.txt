@@ -1,0 +1,3 @@
+error
+reason: kind-not-container
+block_container[0].kind: kind "sample" must be a container kind (container = true)

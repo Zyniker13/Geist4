@@ -434,6 +434,21 @@ Messages are one line each: what failed, which key or example, and
 what would satisfy the rule. Exit codes: 0 pass, 1 fail, 2 usage
 error.
 
+`ext manifest PATH` runs steps 1–3 only — the manifest and behavior
+are validated and a tier-2 component is loaded, but the spec is not
+read. It is the validation half of `ext check`, and the command the
+conformance kit's manifest cases are checked with.
+
+## The conformance kit
+
+The corpus under `conformance/` in the engine's repository is the
+format's conformance suite. Manifest cases state the outcome a
+conforming loader must produce (`ok` or `error`, with a stable reason
+token); declarative behavior packages pin each tier-1 feature's
+semantics with `spec.md` examples that any implementation must render
+byte for byte. Any implementation can run the corpus against its own
+loader and engine; see `conformance/README.md`.
+
 ## Determinism and purity
 
 Everything in the format is deterministic: no clock, no randomness,

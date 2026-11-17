@@ -1,0 +1,3 @@
+error
+reason: option-default-type
+options.lang.default: must be a number

@@ -1,0 +1,52 @@
+# Tier-1 conformance package: the `[[inline_span]]` declarative
+# definition. The examples pin the flanking rules, the two-byte and
+# one-byte run rules, backslash escapes, code-span immunity, nesting
+# with emphasis, and the inline math guards, exactly as
+# docs/extensions/format.md specifies them.
+
+[extension]
+name = "inline-spans"
+version = "1.0.0"
+format = "1.0"
+description = "Conformance: tier-1 declarative inline spans"
+license = "MIT"
+homepage = "https://example.com/conformance/inline-spans"
+
+hooks = ["inline_span", "render"]
+
+[[kinds]]
+kind = "mark"
+container = false
+inline_text = true
+attrs = []
+
+[[kinds]]
+kind = "del"
+container = false
+inline_text = true
+attrs = []
+
+[[kinds]]
+kind = "math"
+container = false
+inline_text = true
+attrs = []
+
+[[inline_span]]
+kind = "mark"
+open = "=="
+close = "=="
+html = "<mark>{children}</mark>"
+
+[[inline_span]]
+kind = "del"
+open = "%"
+close = "%"
+html = "<del>{children}</del>"
+
+[[inline_span]]
+kind = "math"
+open = "$"
+close = "$"
+html = "<span>{children}</span>"
+math = true

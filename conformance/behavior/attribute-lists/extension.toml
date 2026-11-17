@@ -1,0 +1,40 @@
+# Tier-1 conformance package: the `[[attribute_list]]` declarative
+# definition. The examples pin the block and inline attach rules,
+# id, class and key=value items with entity decoding, the no-target
+# and malformed cases, and the 32-entry cap, exactly as
+# docs/extensions/format.md specifies them. The package carries an
+# inline span whose template exposes the three attribute slots, so
+# the values an inline list attaches are observable in the output.
+
+[extension]
+name = "attribute-lists"
+version = "1.0.0"
+format = "1.0"
+description = "Conformance: tier-1 attribute blocks"
+license = "MIT"
+homepage = "https://example.com/conformance/attribute-lists"
+
+hooks = ["inline_span", "post_process", "render"]
+
+[[kinds]]
+kind = "hl"
+container = false
+inline_text = true
+attrs = ["id", "class", "title"]
+
+[[kinds]]
+kind = "attr-target"
+container = false
+inline_text = false
+attrs = []
+
+[[inline_span]]
+kind = "hl"
+open = "=="
+close = "=="
+html = "<mark id=\"{id}\" class=\"{class}\" title=\"{title}\">{children}</mark>"
+
+[[attribute_list]]
+kind = "attr-target"
+prefix = "{:"
+suffix = "}"

@@ -1,0 +1,3 @@
+error
+reason: unknown-hook
+extension.hooks[0]: unknown hook "frobnicate"; one of front_matter, inline_span, inline_bracket, block_container, post_process, render, html_filter
