@@ -10,5 +10,18 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+# The WebAssembly sandbox (tier 2). Off by default so the core and the
+# bindings stay small; the CLI enables it.
+sandbox = ["dep:wasmtime"]
+
 [dependencies]
 geist4-core = { path = "../geist4-core" }
+toml = "1.2.1"
+serde = { version = "1", features = ["derive"] }
+wasmtime = { version = "50.0.2", optional = true, default-features = false, features = [
+    "runtime",
+    "component-model",
+    "cranelift",
+] }

@@ -1,0 +1,238 @@
+// The Geist4 extension world, format version 1.
+//
+// This file is normative (see `docs/extensions/format.md`, "Tier 2: the
+// WebAssembly component"). A tier-2 extension is a WebAssembly component
+// built against the `geist4:extension@1.0.0/geist4-extension` world below:
+// it exports the `hooks` interface and imports nothing. The loader
+// rejects a component that lacks an export or that imports anything.
+//
+// The boundary is decision-shaped, not tree-shaped. Every hook receives
+// the bytes and the state it decides from and returns what to do; the
+// engine — which owns the document tree — performs the decision. The
+// component never touches the tree, and its state is its own instance
+// memory: the engine holds one instance per parse and drops it after.
+//
+// There are no imports beyond this interface: no file system, no
+// network, no clock, no randomness. Extensions see only the bytes and
+// state the hooks hand them, which keeps every parse deterministic.
+//
+// Every call runs under a fuel limit and a memory limit, both set from
+// the manifest's `[wasm]` table (`fuel`, `memory_pages`) with loader
+// caps of 1e9 fuel and 256 pages. Exhausting either is a defined error
+// carrying the hook's name, surfaced as a parse problem with a source
+// span — never a hang or an abort the host cannot report.
+package geist4:extension@1.0.0;
+
+/// The hooks a tier-2 component exports.
+///
+/// The world requires every function below: a component that uses only
+/// some hooks exports the rest as stubs that decline (`false`,
+/// `none`, or the identity for `post-process`). The manifest's
+/// `hooks` list says which ones the behavior actually uses.
+interface hooks {
+    /// One node kind the extension adds, restated from the manifest's
+    /// `[[kinds]]` for the engine's cross-check at load: a mismatch is
+    /// a load error, so a component cannot render kinds the manifest
+    /// does not declare.
+    record kind-decl {
+        /// The kind name, `[a-z][a-z0-9-]*`.
+        kind: string,
+        /// Whether nodes of the kind hold block children.
+        container: bool,
+        /// Whether the kind's children render as inline content.
+        inline-text: bool,
+        /// The attribute names the kind accepts, in order.
+        attrs: list<string>,
+    }
+
+    /// One user-set option value, of the type the manifest declares.
+    variant option-value {
+        /// A string value.
+        %string(string),
+        /// A boolean value.
+        %bool(bool),
+        /// A number value.
+        %f64(f64),
+    }
+
+    /// How much of the current line a block takes when it opens or
+    /// continues, counted from the engine's cursor: the position the
+    /// container prefixes left, where `line` starts.
+    variant consume {
+        /// The whole line is the block's own — a fence line, say.
+        /// Nothing on it becomes the block's content.
+        whole-line,
+        /// `n` columns are the block's own (its marker, its prefix);
+        /// the rest of the line is processed inside the block as
+        /// usual, typically as its first paragraph.
+        columns(u32),
+        /// Everything from the cursor on is kept as the block's
+        /// content — the block takes no prefix of its own.
+        rest,
+    }
+
+    /// A decision to open one of the extension's blocks on the current
+    /// line. Presence is the decision; `none` declines.
+    record start {
+        /// The kind of the block to open: one of the kinds `init`
+        /// received, and a container kind when the block holds blocks.
+        kind: string,
+        /// The attributes to set on the new node, in order. Names must
+        /// be declared in the kind's `attrs`.
+        attrs: list<tuple<string, string>>,
+        /// How much of the opening line the block takes.
+        consume: consume,
+    }
+
+    /// A decision to continue the open block with the current line.
+    /// `none` from `block-continue` closes the block instead, and the
+    /// line is then free to start other blocks.
+    record continue-decision {
+        /// How much of the line the block takes.
+        consume: consume,
+    }
+
+    /// The HTML of a closed block, when the component renders the
+    /// block's whole output itself.
+    record rendered-block {
+        /// The block's HTML, emitted as the node's whole rendering.
+        html: string,
+    }
+
+    /// A node an inline hook claims whole.
+    record inline-node {
+        /// The kind of the node to build: one of the kinds `init`
+        /// received.
+        kind: string,
+        /// The attributes to set on the node, in order. Names must be
+        /// declared in the kind's `attrs`.
+        attrs: list<tuple<string, string>>,
+        /// One past the node's last byte: on the line for
+        /// `inline-trigger`, within `content` for `inline-bracket`.
+        end: u32,
+    }
+
+    /// A delimiter run an inline hook claims for the engine's pairing
+    /// machinery, the way a tier-1 span's delimiter works.
+    record inline-delimiter {
+        /// The kind of the nodes the engine builds between a matching
+        /// pair of these runs.
+        kind: string,
+        /// One past the run's last byte on the line.
+        end: u32,
+    }
+
+    /// What an inline hook decides at a candidate span.
+    variant inline-action {
+        /// The candidate is plain text: for `inline-trigger` the
+        /// trigger byte itself is taken as literal text and scanning
+        /// continues after it; for `inline-bracket` the whole group
+        /// stays literal text.
+        literal,
+        /// The run from the trigger through `end` is one delimiter run
+        /// of `kind`. The engine records it the way it records a
+        /// tier-1 span's delimiter run — the standard flanking rules
+        /// decide whether it may open or close — and pairs matching
+        /// runs itself, wrapping the content between the two runs as
+        /// the node's inline children. A hook that scans a delimiter
+        /// returns this once per run, at each run's first byte.
+        delimiter(inline-delimiter),
+        /// The span from the trigger through `end` is claimed whole as
+        /// one node of `kind` with `attrs`. The engine parses the
+        /// claimed bytes as the node's inline children and continues
+        /// scanning after `end`; the delimiters, if any, belong to the
+        /// claim, so a hook that must keep them out of its children
+        /// uses `delimiter` instead.
+        node(inline-node),
+    }
+
+    /// Hands the component the manifest's kinds and the user-set
+    /// options, once per parse, before any other hook. The component
+    /// checks the kinds against what it implements — the engine
+    /// cross-checks the same lists against the manifest, and a
+    /// mismatch anywhere is a load error. Returning an error string
+    /// rejects the parse with that reason.
+    init: func(kinds: list<kind-decl>, options: list<tuple<string, option-value>>) -> result<_, string>;
+
+    /// A pure look at a line, answering whether this extension would
+    /// start a block on it. The engine consults it when a lazy
+    /// paragraph continuation is considered; the line only lazily
+    /// continues when no built-in block start matches and no extension
+    /// would claim it. The hook must not change state, and the engine
+    /// may call it several times for the same line.
+    block-start-look: func(line: string, indented: bool, column: u32) -> bool;
+
+    /// Decides whether to open one of the extension's blocks on the
+    /// current line, after the built-in block starts have all declined.
+    /// `line` is the line's bytes from the current content position —
+    /// after the container prefixes that matched — and the engine
+    /// opens or converts what the decision names. The component keeps
+    /// what it needs from the opening line in its own state.
+    ///
+    /// `container-kind` is the kind of the deepest open block when
+    /// that block is a paragraph or another extension block, so a hook
+    /// can see what it would open in or interrupt; it is `none` for
+    /// the document and for plain core containers (block quotes,
+    /// lists). The engine decides open-versus-convert from its own
+    /// tree, not from the decision.
+    block-start: func(line: string, indented: bool, column: u32, container-kind: option<string>) -> option<start>;
+
+    /// Decides whether the current line continues the open block.
+    /// `line`, `indented` and `column` are as in `block-start`; `blank`
+    /// says whether nothing but spaces remains after the container
+    /// prefixes. Returning a decision continues the block, consuming
+    /// the line as `consume` names; returning `none` closes it.
+    block-continue: func(line: string, indented: bool, column: u32, blank: bool) -> option<continue-decision>;
+
+    /// Runs once when the open block closes, before the tree is
+    /// returned. Returning HTML makes the engine use it as the node's
+    /// whole rendering — the component owns the block's output, and
+    /// the engine's children render nowhere. Returning `none` lets the
+    /// engine render the node's children through the usual renderer,
+    /// the way a plain container does.
+    block-close: func() -> option<rendered-block>;
+
+    /// Runs when the inline parser reaches one of the extension's
+    /// trigger bytes. `line` is the line's bytes and `pos` the trigger
+    /// byte's offset within it. The hook scans a shape from `pos` and
+    /// decides: `literal` declines actively, `delimiter` hands a
+    /// delimiter run to the engine's pairing machinery (the way a
+    /// tier-1 span's run works), and `node` claims a span whole.
+    ///
+    /// The engine registers the extension's trigger bytes at load,
+    /// from what the component scans in `init`; core trigger bytes
+    /// (`\`, `` ` ``, `&`, `<`, `*`, `_`, `[`, `!`, `]`, line breaks)
+    /// never reach this hook.
+    inline-trigger: func(line: string, pos: u32) -> option<inline-action>;
+
+    /// Runs when a `[`…`]` group matched no link: neither an inline
+    /// `(` destination, nor a reference definition, nor an opener
+    /// match. `content` is the group's plain-text content between the
+    /// brackets, with the brackets stripped. A `node` decision claims
+    /// the whole group as one node of `kind` with `attrs`, with the
+    /// content's bytes up to `end` parsed as the node's inline
+    /// children (the whole content when `end` is `content`'s length);
+    /// bytes from `end` on stay literal text after the node. `none`
+    /// leaves the group literal text, exactly as without the hook.
+    inline-bracket: func(content: string) -> option<inline-action>;
+
+    /// Rewrites one text node's decoded contents, the way a tier-1
+    /// replacement does: the engine replaces the node's text with what
+    /// the hook returns. The engine calls it for text nodes outside
+    /// code spans, code blocks and raw HTML, once per node, in
+    /// registration order after the other extensions' passes.
+    post-process: func(text: string) -> string;
+
+    /// Renders one of the component's node kinds, given the
+    /// attributes the node carries and the children's rendered HTML —
+    /// inline HTML for an `inline-text` kind, block HTML otherwise —
+    /// the way a declarative template does. An error string rejects
+    /// the render with that reason.
+    render: func(kind: string, attrs: list<tuple<string, string>>, children: string) -> result<string, string>;
+}
+
+/// The world a tier-2 extension component is built against: it exports
+/// the `hooks` interface and imports nothing.
+world geist4-extension {
+    export hooks;
+}
