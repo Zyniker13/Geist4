@@ -734,6 +734,10 @@ dependencies = [
 [[package]]
 name = "geist4-ffi"
 version = "0.1.0-dev"
+dependencies = [
+ "geist4-core",
+ "geist4-ext",
+]
 
 [[package]]
 name = "geist4-html"

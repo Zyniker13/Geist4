@@ -7,7 +7,21 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
-[lints]
-workspace = true
+[lib]
+crate-type = ["rlib", "staticlib", "cdylib"]
+
+# This crate is the one place in the workspace where `unsafe` is allowed:
+# every extern "C" entry point must hand out pointers, and the document
+# handle must keep its input alive. The unsafe is confined to the handle
+# plumbing and the panic boundary; see decision 0028.
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
 
 [dependencies]
+geist4-core = { path = "../geist4-core" }
+geist4-ext = { path = "../geist4-ext" }

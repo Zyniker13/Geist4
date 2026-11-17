@@ -1,0 +1,33 @@
+# The cbindgen configuration for the C header. The header is generated,
+# checked in, and checked by CI: run
+# `cbindgen --config crates/geist4-ffi/cbindgen.toml --crate geist4-ffi --output crates/geist4-ffi/include/geist4.h`
+# after any ABI change and commit the result.
+language = "C"
+include_version = true
+
+# Byte lengths are `size_t` in C, not `uintptr_t`; every length and
+# offset in this ABI counts bytes or offsets.
+usize_is_size_t = true
+
+[defines]
+# Nothing platform-specific yet; keep the map here so a future cfg stays
+# explicit.
+
+[export.rename]
+# The handle and value types get the geist4_ names they carry in the
+# public contract; the Rust names are the same idea in Rust casing.
+"OptionsHandle" = "geist4_options"
+"DocumentHandle" = "geist4_document"
+"Geist4String" = "geist4_string"
+"Geist4Problem" = "geist4_problem"
+"Geist4ProblemList" = "geist4_problem_list"
+"Status" = "geist4_status"
+
+[export]
+# Entry points and structs are already prefixed geist4_; cbindgen must
+# not add another prefix on top.
+prefix = ""
+
+[parse]
+# The crate is self-contained: its ABI types are all defined here.
+parse_deps = false
