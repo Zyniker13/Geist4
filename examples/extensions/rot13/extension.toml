@@ -1,0 +1,21 @@
+# A tier-2 inline span with logic: %text% renders ROT13-encoded.
+
+[extension]
+name = "rot13"
+version = "1.0.0"
+format = "1.0"
+description = "A WebAssembly inline span that ROT13-encodes its content"
+license = "MIT"
+homepage = "https://example.com/rot13"
+
+hooks = ["inline_span", "render"]
+
+[[kinds]]
+kind = "rot13"
+container = false
+inline_text = true
+attrs = []
+
+[wasm]
+path = "rot13.wasm"
+inline_triggers = ["%"]

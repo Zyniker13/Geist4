@@ -1,0 +1,23 @@
+# A declarative inline span: ==highlighted text== renders as <mark>.
+
+[extension]
+name = "highlight"
+version = "1.0.0"
+format = "1.0"
+description = "Declarative ==highlight== spans"
+license = "MIT"
+homepage = "https://example.com/highlight"
+
+hooks = ["inline_span", "render"]
+
+[[kinds]]
+kind = "highlight"
+container = false
+inline_text = true
+attrs = []
+
+[[inline_span]]
+kind = "highlight"
+open = "=="
+close = "=="
+html = "<mark>{children}</mark>"

@@ -159,13 +159,18 @@ pub struct BlockStart {
     pub consume: Consume,
 }
 
-/// A decision to continue the open block with the current line:
+/// A decision about the open block and the current line:
 /// [`SandboxInstance::block_continue`] returns it when the hook
-/// continues, `None` when it closes the block.
+/// decides, `None` when it closes the block and leaves the line free
+/// to start other blocks.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContinueDecision {
-    /// How much of the line the block takes.
-    pub consume: Consume,
+pub enum ContinueDecision {
+    /// The block continues, taking as much of the line as `consume`
+    /// names.
+    Keep(Consume),
+    /// The block closes and the line is consumed whole — a closing
+    /// fence.
+    CloseLine,
 }
 
 /// The HTML of a closed block, when the component renders the block's
@@ -653,10 +658,10 @@ impl SandboxInstance {
             .transpose()
     }
 
-    /// Decides whether the current line continues the open block:
-    /// `Some` continues it, consuming the line as the decision names;
-    /// `None` closes the block, leaving the line free to start other
-    /// blocks.
+    /// Decides what the current line does to the open block:
+    /// `Some(Keep)` continues it, consuming the line as the decision
+    /// names; `Some(CloseLine)` closes it and consumes the line whole;
+    /// `None` closes it, leaving the line free to start other blocks.
     pub fn block_continue(
         &mut self,
         line: &str,
@@ -680,10 +685,18 @@ impl SandboxInstance {
         let option = result_option(result, "block-continue")?;
         option
             .map(|decision| {
-                let fields = result_record(decision, "block-continue")?;
-                Ok(ContinueDecision {
-                    consume: record_consume(&fields, "block-continue")?,
-                })
+                let (case, payload) = match decision {
+                    Val::Variant(case, payload) => (case, payload),
+                    _ => return Err(unexpected("block-continue", "a continue-decision")),
+                };
+                match (case.as_str(), payload) {
+                    ("keep", Some(payload)) => Ok(ContinueDecision::Keep(consume_val(
+                        *payload,
+                        "block-continue",
+                    )?)),
+                    ("close-line", _) => Ok(ContinueDecision::CloseLine),
+                    _ => Err(unexpected("block-continue", "a continue-decision case")),
+                }
             })
             .transpose()
     }
@@ -902,10 +915,8 @@ fn result_inline_action(value: Val, hook: &str) -> Result<Option<InlineAction>, 
         .transpose()
 }
 
-/// Reads a record's `consume` field: the one place a decision carries
-/// how much of a line a block takes.
-fn record_consume(fields: &[(String, Val)], hook: &str) -> Result<Consume, SandboxError> {
-    let value = record_field(fields, "consume", hook)?;
+/// Reads a `consume` variant value: how much of a line a block takes.
+fn consume_val(value: Val, hook: &str) -> Result<Consume, SandboxError> {
     let (case, payload) = match value {
         Val::Variant(case, payload) => (case, payload),
         _ => return Err(unexpected(hook, "a consume")),
@@ -919,6 +930,12 @@ fn record_consume(fields: &[(String, Val)], hook: &str) -> Result<Consume, Sandb
         },
         _ => Err(unexpected(hook, "a consume case")),
     }
+}
+
+/// Reads a record's `consume` field: the one place a decision carries
+/// how much of a line a block takes.
+fn record_consume(fields: &[(String, Val)], hook: &str) -> Result<Consume, SandboxError> {
+    consume_val(record_field(fields, "consume", hook)?, hook)
 }
 
 /// Reads a record's string field.

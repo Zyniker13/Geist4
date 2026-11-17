@@ -1,0 +1,18 @@
+[package]
+name = "geist4-rot13-guest"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "The rot13 example extension's Wasm guest"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.46.0"
+
+[profile.release]
+opt-level = "s"
+
+[workspace]

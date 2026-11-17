@@ -84,12 +84,15 @@ interface hooks {
         consume: consume,
     }
 
-    /// A decision to continue the open block with the current line.
-    /// `none` from `block-continue` closes the block instead, and the
-    /// line is then free to start other blocks.
-    record continue-decision {
-        /// How much of the line the block takes.
-        consume: consume,
+    /// A decision about the open block and the current line.
+    variant continue-decision {
+        /// The block continues, taking as much of the line as
+        /// `consume` names.
+        keep(consume),
+        /// The block closes and the line is consumed whole — a
+        /// closing fence. Nothing on the line becomes content, and
+        /// the line does not start other blocks.
+        close-line,
     }
 
     /// The HTML of a closed block, when the component renders the
@@ -177,11 +180,13 @@ interface hooks {
     /// tree, not from the decision.
     block-start: func(line: string, indented: bool, column: u32, container-kind: option<string>) -> option<start>;
 
-    /// Decides whether the current line continues the open block.
+    /// Decides what the current line does to the open block.
     /// `line`, `indented` and `column` are as in `block-start`; `blank`
     /// says whether nothing but spaces remains after the container
-    /// prefixes. Returning a decision continues the block, consuming
-    /// the line as `consume` names; returning `none` closes it.
+    /// prefixes. `keep` continues the block, consuming the line as
+    /// `consume` names; `close-line` closes it and consumes the line
+    /// whole (a closing fence); `none` closes it and leaves the line
+    /// free to start other blocks.
     block-continue: func(line: string, indented: bool, column: u32, blank: bool) -> option<continue-decision>;
 
     /// Runs once when the open block closes, before the tree is
@@ -200,9 +205,10 @@ interface hooks {
     /// tier-1 span's run works), and `node` claims a span whole.
     ///
     /// The engine registers the extension's trigger bytes at load,
-    /// from what the component scans in `init`; core trigger bytes
-    /// (`\`, `` ` ``, `&`, `<`, `*`, `_`, `[`, `!`, `]`, line breaks)
-    /// never reach this hook.
+    /// from the manifest's `[wasm] inline_triggers` (the loader
+    /// rejects the core trigger bytes, so they never reach this
+    /// hook): `\`, `` ` ``, `&`, `<`, `*`, `_`, `[`, `!`, `]`, line
+    /// breaks.
     inline-trigger: func(line: string, pos: u32) -> option<inline-action>;
 
     /// Runs when a `[`…`]` group matched no link: neither an inline

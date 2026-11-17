@@ -19,8 +19,8 @@
 use geist4_core::arena::{Arena, NodeId};
 use geist4_core::basic_html::escape_href;
 use geist4_core::extension::{
-    AttrValue, BlockContinueCtx, BlockStartCtx, CloseCtx, ExtNode, Extension, InlineBracketCtx,
-    KindDecl, RenderedChild, TreeCtx,
+    AttrValue, BlockContinueCtx, BlockStartCtx, CloseCtx, ContinueOutcome, ExtNode, Extension,
+    InlineBracketCtx, KindDecl, RenderedChild, TreeCtx,
 };
 use geist4_core::node::Node;
 use std::any::Any;
@@ -117,21 +117,21 @@ impl Extension for Footnotes {
         ctx.seek_content(marker_len);
     }
 
-    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> bool {
+    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> ContinueOutcome {
         if ctx.state::<DefState>().is_none() {
-            return false;
+            return ContinueOutcome::Close;
         }
         // A pure blank line continues the definition; a line indented
         // four columns continues it with those columns consumed.
         // Anything else closes it and frees the line for other blocks.
         if ctx.pure_blank() {
-            return true;
+            return ContinueOutcome::Continue;
         }
         if ctx.indent() >= 4 {
             ctx.consume_cols(4);
-            return true;
+            return ContinueOutcome::Continue;
         }
-        false
+        ContinueOutcome::Close
     }
 
     fn close(&self, state: &mut dyn Any, ctx: &mut CloseCtx<'_, '_>) {

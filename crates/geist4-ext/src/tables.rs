@@ -13,8 +13,8 @@
 //! in their default configuration emit.
 
 use geist4_core::extension::{
-    AttrValue, BlockContinueCtx, BlockStartCtx, CloseCtx, ExtNode, Extension, KindDecl,
-    RenderedChild, StartContainer,
+    AttrValue, BlockContinueCtx, BlockStartCtx, CloseCtx, ContinueOutcome, ExtNode, Extension,
+    KindDecl, RenderedChild, StartContainer,
 };
 use geist4_core::node::Node;
 use geist4_core::span::Span;
@@ -117,10 +117,14 @@ impl Extension for Tables {
         }
     }
 
-    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> bool {
+    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> ContinueOutcome {
         // The table continues on any line that parses as a row with at
         // least one cell; a blank line or anything else closes it.
-        scan_row(ctx.line()).is_some()
+        if scan_row(ctx.line()).is_some() {
+            ContinueOutcome::Continue
+        } else {
+            ContinueOutcome::Close
+        }
     }
 
     fn close(&self, state: &mut dyn std::any::Any, ctx: &mut CloseCtx<'_, '_>) {

@@ -63,6 +63,12 @@ fn fixture_manifest() -> Manifest {
                 inline_text: true,
                 attrs: vec![],
             },
+            geist4_ext_loader::types::KindEntry {
+                kind: "em".to_owned(),
+                container: false,
+                inline_text: true,
+                attrs: vec![],
+            },
         ],
         options: BTreeMap::new(),
         behavior: vec![],
@@ -70,6 +76,7 @@ fn fixture_manifest() -> Manifest {
             path: "component.wasm".to_owned(),
             fuel: None,
             memory_pages: None,
+            inline_triggers: vec![b'%'],
         }),
         host: false,
     }
@@ -149,6 +156,16 @@ fn post_process_rewrites_text_nodes() {
         html.matches("bar foo").count() == 0 && html.contains("<p>bar bar</p>"),
         "post-process rewrites every text node: {html}"
     );
+}
+
+#[test]
+fn inline_trigger_delimiter_pairs_through_the_adapter() {
+    // The manifest registers `%` as the component's trigger byte; the
+    // fixture's inline-trigger hands back a delimiter run for it, the
+    // engine pairs the two runs the way it pairs tier-1 spans, and the
+    // render hook wraps the content in `<em>`.
+    let html = render_with_fixture("a %b% c\n", None, None);
+    assert_eq!(html, "<p>a <em>b</em> c</p>\n");
 }
 
 #[test]

@@ -7,8 +7,8 @@
 use std::sync::Arc;
 
 use geist4_core::extension::{
-    BlockContinueCtx, BlockStartCtx, CloseCtx, ExtNode, Extension, InlineBracketCtx,
-    InlineTriggerCtx, KindDecl, LookCtx, RenderedChild, TreeCtx,
+    BlockContinueCtx, BlockStartCtx, CloseCtx, ContinueOutcome, ExtNode, Extension,
+    InlineBracketCtx, InlineTriggerCtx, KindDecl, LookCtx, RenderedChild, TreeCtx,
 };
 
 use crate::types::{Behavior, Manifest};
@@ -118,7 +118,7 @@ impl Extension for Compiled {
         self.block.try_start(ctx);
     }
 
-    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> bool {
+    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> ContinueOutcome {
         self.block.try_continue(ctx)
     }
 

@@ -1,0 +1,24 @@
+# A declarative fenced container: ::: notice ... ::: wraps blocks in a div.
+
+[extension]
+name = "notice"
+version = "1.0.0"
+format = "1.0"
+description = "Declarative ::: notice fenced containers"
+license = "MIT"
+homepage = "https://example.com/notice"
+
+hooks = ["block_container", "render"]
+
+[[kinds]]
+kind = "notice"
+container = true
+inline_text = false
+attrs = []
+
+[[block_container]]
+kind = "notice"
+marker = ":::"
+name = "notice"
+info_html = ""
+html = "<div class=\"notice\">\n{children}</div>\n"

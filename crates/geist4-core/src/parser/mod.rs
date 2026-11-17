@@ -79,6 +79,10 @@ enum WalkResult {
     /// A closing code fence consumed the line and closed its block; the rest
     /// of the line's processing is skipped.
     FenceClosed,
+    /// An extension block closed with the line consumed whole — a closing
+    /// fence; frames at `depth..` must close and the line's processing is
+    /// skipped.
+    ClosedAt(usize),
 }
 
 /// What the setext-underline check decided to do with an open paragraph.
@@ -701,6 +705,12 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         // Phase A: match the open containers. Nothing closes yet.
         match self.walk(&mut cursor, line_stop) {
             WalkResult::FenceClosed => return,
+            WalkResult::ClosedAt(depth) => {
+                // A closing fence consumed the line; the block closes and
+                // nothing else happens to the line.
+                self.close_from(depth, line_stop);
+                return;
+            }
             WalkResult::FailedAt(depth) => {
                 // A lazy continuation: the deepest open block is a paragraph,
                 // the line is not blank, and no block start interrupts it.
@@ -766,15 +776,25 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                     state: state_ref,
                     cursor,
                 };
-                let matched = self.extensions.unwrap()[*index].try_continue(&mut ctx);
+                let outcome = self.extensions.unwrap()[*index].try_continue(&mut ctx);
                 *state = inner;
-                if matched {
-                    // The hook consumed its prefix, and any extra columns
-                    // it declared, through the context's cursor. Blank
-                    // lines reach the hook here too: unlike the built-in
-                    // containers, a hook decides on the whole line.
-                } else {
-                    return WalkResult::FailedAt(depth);
+                match outcome {
+                    crate::extension::ContinueOutcome::Continue => {
+                        // The hook consumed its prefix, and any extra
+                        // columns it declared, through the context's
+                        // cursor. Blank lines reach the hook here too:
+                        // unlike the built-in containers, a hook decides
+                        // on the whole line.
+                    }
+                    crate::extension::ContinueOutcome::Close => {
+                        return WalkResult::FailedAt(depth);
+                    }
+                    crate::extension::ContinueOutcome::CloseAndConsume => {
+                        // A closing fence: the line is the block's own,
+                        // so it is consumed whole and starts nothing.
+                        cursor.bump_all();
+                        return WalkResult::ClosedAt(depth);
+                    }
                 }
                 continue;
             }

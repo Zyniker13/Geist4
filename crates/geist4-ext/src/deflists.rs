@@ -20,8 +20,8 @@
 //! `dl` when the item starts a list.
 
 use geist4_core::extension::{
-    BlockContinueCtx, BlockStartCtx, CloseCtx, ExtNode, Extension, KindDecl, LookCtx,
-    RenderedChild, StartContainer,
+    BlockContinueCtx, BlockStartCtx, CloseCtx, ContinueOutcome, ExtNode, Extension, KindDecl,
+    LookCtx, RenderedChild, StartContainer,
 };
 use geist4_core::node::Node;
 use geist4_core::span::Span;
@@ -252,24 +252,24 @@ impl Extension for DescriptionLists {
         }
     }
 
-    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> bool {
+    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> ContinueOutcome {
         let Some(state) = ctx.state::<ItemState>() else {
-            return false;
+            return ContinueOutcome::Close;
         };
         let marker_offset = state.marker_offset;
         let padding = state.padding;
         // A blank line keeps the item open; its definition blocks end.
         if ctx.pure_blank() {
-            return true;
+            return ContinueOutcome::Continue;
         }
         // A line indented as far as the marker continues the item, the
         // marker's padding consumed; anything else closes it and frees
         // the line for other blocks.
         if ctx.indent() >= marker_offset + padding {
             ctx.consume_cols(padding);
-            return true;
+            return ContinueOutcome::Continue;
         }
-        false
+        ContinueOutcome::Close
     }
 
     fn close(&self, state: &mut dyn Any, ctx: &mut CloseCtx) {

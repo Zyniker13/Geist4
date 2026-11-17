@@ -8,8 +8,8 @@ use std::sync::Arc;
 use geist4_core::arena::NodeId;
 use geist4_core::basic_html::render_with;
 use geist4_core::extension::{
-    AttrValue, BlockContinueCtx, BlockStartCtx, CloseCtx, ExtNode, Extension, InlineBracketCtx,
-    InlineTriggerCtx, KindDecl, LookCtx, Options, RenderedChild, TreeCtx,
+    AttrValue, BlockContinueCtx, BlockStartCtx, CloseCtx, ContinueOutcome, ExtNode, Extension,
+    InlineBracketCtx, InlineTriggerCtx, KindDecl, LookCtx, Options, RenderedChild, TreeCtx,
 };
 use geist4_core::parser::{Document, parse_with};
 use geist4_ext_loader::decl_block::{BlockTier, PostTier};
@@ -107,7 +107,7 @@ impl Extension for Compiled {
         self.block.try_start(ctx);
     }
 
-    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> bool {
+    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> ContinueOutcome {
         self.block.try_continue(ctx)
     }
 

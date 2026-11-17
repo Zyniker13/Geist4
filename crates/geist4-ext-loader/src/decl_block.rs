@@ -21,7 +21,8 @@ use std::borrow::Cow;
 
 use geist4_core::arena::{Arena, NodeId};
 use geist4_core::extension::{
-    AttrValue, BlockContinueCtx, BlockStartCtx, CloseCtx, ExtNode, LookCtx, RenderedChild, TreeCtx,
+    AttrValue, BlockContinueCtx, BlockStartCtx, CloseCtx, ContinueOutcome, ExtNode, LookCtx,
+    RenderedChild, TreeCtx,
 };
 use geist4_core::node::Node;
 use geist4_core::parse_document;
@@ -168,20 +169,20 @@ impl BlockTier {
     /// counted so the matching close fence passes through to it. Every
     /// other line, including blank lines, continues the container and
     /// is left for the parser to open blocks with inside it.
-    pub fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> bool {
+    pub fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> ContinueOutcome {
         let index = match ctx.state::<ContainerState>() {
             Some(state) => state.rule,
-            None => return false,
+            None => return ContinueOutcome::Close,
         };
         let rule = &self.containers[index];
         // A blank line continues the container; the parser's blank-line
         // handling takes the line from here.
         if ctx.line().is_empty() || ctx.pure_blank() {
-            return true;
+            return ContinueOutcome::Continue;
         }
         // Four or more columns of indent is content, never a fence.
         if ctx.indent() > 3 {
-            return true;
+            return ContinueOutcome::Continue;
         }
         let line = ctx.line();
         if is_close_fence(rule.marker.as_bytes(), line) {
@@ -191,15 +192,13 @@ impl BlockTier {
                     // this one: it passes through and this one stays
                     // open.
                     state.inner -= 1;
-                    return true;
+                    return ContinueOutcome::Continue;
                 }
                 state.closed_by_fence = true;
             }
-            // Consume the whole line: the close fence is consumed, and
-            // the consumed cursor also keeps the line out of the lazy
-            // continuation of a paragraph open inside the container.
-            ctx.consume_cols(usize::MAX);
-            return false;
+            // The close fence consumes the line whole: the engine takes
+            // the line from here and closes the block with it.
+            return ContinueOutcome::CloseAndConsume;
         }
         // A nested opening fence passes through as an ordinary line
         // here and is counted, so its own close fence closes the inner
@@ -217,7 +216,7 @@ impl BlockTier {
         {
             state.inner += 1;
         }
-        true
+        ContinueOutcome::Continue
     }
 
     /// The block-close hook: renders the info string and records an

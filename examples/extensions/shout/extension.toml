@@ -1,0 +1,21 @@
+# A tier-2 block container with logic: ::: shout renders its content
+# uppercased.
+
+[extension]
+name = "shout"
+version = "1.0.0"
+format = "1.0"
+description = "A WebAssembly block container that uppercases its content"
+license = "MIT"
+homepage = "https://example.com/shout"
+
+hooks = ["block_container", "render"]
+
+[[kinds]]
+kind = "shout"
+container = true
+inline_text = false
+attrs = []
+
+[wasm]
+path = "shout.wasm"

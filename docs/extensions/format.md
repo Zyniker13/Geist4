@@ -65,7 +65,9 @@ html = "<mark>{children}</mark>"
 # [[block_container]]         # tier 1: declarative fenced containers
 # [[replace]]                 # tier 1: declarative replacements
 # [[attribute_list]]          # tier 1: declarative attribute blocks
-# [wasm]                      # tier 2: path = "component.wasm"
+# [wasm]                      # tier 2: path = "component.wasm",
+#                             #   fuel = 10_000_000, memory_pages = 16,
+#                             #   inline_triggers = ["%"]
 # [host]                      # tier 3: the host supplies callbacks
 ```
 
@@ -362,6 +364,12 @@ this section describes its shape and the rules around it.
 - The sandbox gets no imports beyond the interface: no file system,
   no network, no clock, no randomness. Extensions see only the bytes
   and state the hooks hand them.
+- The engine learns the component's inline trigger bytes from the
+  manifest's `[wasm] inline_triggers` — a list of one-byte strings,
+  at most 32 of them, none of them a core trigger byte (`\`, `` ` ``,
+  `&`, `<`, `*`, `_`, `[`, `!`, `]`), which the loader rejects. At
+  each registered byte the engine calls `inline-trigger` in
+  registration order; several extensions may share a byte.
 - Hooks' state is the component's own memory, per parse; the engine
   holds an opaque store handle across a document's calls and drops it
   after.

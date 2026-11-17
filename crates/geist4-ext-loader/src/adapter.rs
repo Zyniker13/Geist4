@@ -67,12 +67,15 @@ use std::sync::Mutex;
 
 use geist4_core::arena::{Arena, NodeId};
 use geist4_core::extension::{
-    AttrValue, BlockContinueCtx, BlockStartCtx, CloseCtx, ExtNode, InlineBracketCtx,
-    InlineTriggerCtx, KindDecl, LookCtx, RenderedChild, Run, StartContainer, TreeCtx,
+    AttrValue, BlockContinueCtx, BlockStartCtx, CloseCtx, ContinueOutcome, ExtNode,
+    InlineBracketCtx, InlineTriggerCtx, KindDecl, LookCtx, RenderedChild, Run, StartContainer,
+    TreeCtx,
 };
 use geist4_core::node::Node;
 
-use crate::sandbox::{Consume, InlineAction, SandboxError, SandboxExtension, SandboxInstance};
+use crate::sandbox::{
+    Consume, ContinueDecision, InlineAction, SandboxError, SandboxExtension, SandboxInstance,
+};
 
 /// The per-block state a `WasmExtension` frame carries.
 ///
@@ -95,13 +98,16 @@ struct Runtime {
 /// Built from a validated tier-2 manifest and the component binary it
 /// names; `crate::package::load` is the normal constructor path.
 pub struct WasmExtension {
-    /// The validated manifest: the name, the declared kinds (none, for
-    /// a valid tier-2 manifest — every declared kind must be used by a
-    /// tier-1 behavior entry, and a tier-2 manifest declares no
-    /// entries), and the options with their defaults.
+    /// The validated manifest: the name, the declared kinds and their
+    /// shapes, the options with their defaults, and the `[wasm]`
+    /// section (limits, trigger bytes).
     manifest: crate::types::Manifest,
     /// The loaded component and its limits.
     extension: SandboxExtension,
+    /// The trigger bytes the engine registers for the component's
+    /// `inline-trigger` hook, taken from the manifest's
+    /// `[wasm] inline_triggers` at construction.
+    triggers: Vec<u8>,
     /// The per-parse runtime, behind a mutex for the `&self` hooks.
     runtime: Mutex<Runtime>,
 }
@@ -114,9 +120,15 @@ impl WasmExtension {
     /// [`SandboxExtension::check`]; the checks are not repeated here.
     #[must_use]
     pub fn new(manifest: crate::types::Manifest, extension: SandboxExtension) -> Self {
+        let triggers = manifest
+            .wasm
+            .as_ref()
+            .map(|wasm| wasm.inline_triggers.clone())
+            .unwrap_or_default();
         Self {
             manifest,
             extension,
+            triggers,
             runtime: Mutex::new(Runtime {
                 instance: None,
                 error: None,
@@ -148,6 +160,7 @@ impl WasmExtension {
         match run(instance) {
             Ok(value) => Some(value),
             Err(error) => {
+                eprintln!("PROBE call ERROR: {error}");
                 runtime.error.get_or_insert(error.to_string());
                 runtime.instance = None;
                 None
@@ -180,6 +193,10 @@ impl WasmExtension {
 impl geist4_core::extension::Extension for WasmExtension {
     fn name(&self) -> &str {
         &self.manifest.extension.name
+    }
+
+    fn inline_triggers(&self) -> &[u8] {
+        &self.triggers
     }
 
     fn kinds(&self) -> Vec<KindDecl> {
@@ -300,11 +317,14 @@ impl geist4_core::extension::Extension for WasmExtension {
     }
 
     /// The `block-continue` call, with the decision mapped onto the
-    /// cursor: `whole-line` consumes every remaining column (the way a
-    /// closing fence consumes its line), `columns(n)` consumes `n`
-    /// columns from the position the container prefixes left — the
-    /// same position the world counts from — and `rest` consumes
-    /// nothing, so the whole line becomes the block's content.
+    /// cursor: `keep` consumes the line as its `consume` names —
+    /// `whole-line` consumes every remaining column, `columns(n)`
+    /// consumes `n` columns from the position the container prefixes
+    /// left — the same position the world counts from — and `rest`
+    /// consumes nothing, so the whole line becomes the block's content;
+    /// `close-line` closes the block and consumes the line whole;
+    /// `none` closes the block and leaves the line free to start other
+    /// blocks.
     ///
     /// `blank` is the world's "nothing but spaces remains after the
     /// container prefixes": the context's `line` already starts at the
@@ -313,7 +333,7 @@ impl geist4_core::extension::Extension for WasmExtension {
     ///
     /// The state box only marks the frame — the component keeps the
     /// block's state in its own instance memory — so it is not read.
-    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> bool {
+    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> ContinueOutcome {
         let blank = ctx.line().is_empty();
         let indented = ctx.indent() >= 4;
         let line = lossy(ctx.line());
@@ -321,14 +341,21 @@ impl geist4_core::extension::Extension for WasmExtension {
         let Some(Some(decision)) =
             self.call(|instance| instance.block_continue(&line, indented, column, blank))
         else {
-            return false;
+            return ContinueOutcome::Close;
         };
-        match decision.consume {
-            Consume::WholeLine => ctx.consume_cols(usize::MAX),
-            Consume::Columns(n) => ctx.consume_cols(usize::try_from(n).unwrap_or(usize::MAX)),
-            Consume::Rest => {}
+        match decision {
+            ContinueDecision::Keep(consume) => {
+                match consume {
+                    Consume::WholeLine => ctx.consume_cols(usize::MAX),
+                    Consume::Columns(n) => {
+                        ctx.consume_cols(usize::try_from(n).unwrap_or(usize::MAX))
+                    }
+                    Consume::Rest => {}
+                }
+                ContinueOutcome::Continue
+            }
+            ContinueDecision::CloseLine => ContinueOutcome::CloseAndConsume,
         }
-        true
     }
 
     /// The `block-close` call. When the component returns HTML, the
@@ -364,16 +391,15 @@ impl geist4_core::extension::Extension for WasmExtension {
     }
 
     /// The `inline-trigger` call. The engine only reaches it for the
-    /// bytes `inline_triggers` registers, and this adapter registers
-    /// none — the world has the engine learn trigger bytes from what
-    /// the component scans in `init`, which carries no such data — so
-    /// in practice the hook is dormant. The mapping is implemented
-    /// regardless, because the world exposes the hook: the line is the
-    /// prefix before the cursor joined with the rest of the line, and
-    /// `pos` is the prefix's length. A `delimiter` decision scans the
-    /// run at the cursor and tags it with the decision's kind, the way
-    /// a tier-1 span's delimiter works; `literal` leaves the byte as
-    /// text; `node` declines, as the trait has no claim API here.
+    /// bytes the manifest's `[wasm] inline_triggers` registers, which
+    /// the adapter hands the engine at load. The line is the prefix
+    /// before the cursor joined with the rest of the line, and `pos`
+    /// is the prefix's length. A `delimiter` decision scans the run
+    /// at the cursor and tags it with the decision's kind, the way a
+    /// tier-1 span's delimiter works; `literal` leaves the byte as
+    /// text; `node` declines, as the trait has no claim API here — a
+    /// component that wants to claim a span whole uses the
+    /// `inline-bracket` hook instead, whose claims carry `end`.
     fn inline_trigger(&self, ctx: &mut InlineTriggerCtx<'_, '_, '_, '_>) {
         let pos = u32::try_from(ctx.line_prefix().len()).unwrap_or(u32::MAX);
         let prefix = String::from_utf8_lossy(ctx.line_prefix());

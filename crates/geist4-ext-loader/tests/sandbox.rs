@@ -214,12 +214,7 @@ fn block_hooks_round_trip() {
     let decision = instance
         .block_continue("more text", false, 0, false)
         .expect("block-continue call");
-    assert_eq!(
-        decision,
-        Some(ContinueDecision {
-            consume: Consume::Rest,
-        })
-    );
+    assert_eq!(decision, Some(ContinueDecision::Keep(Consume::Rest)));
     assert_eq!(
         instance.block_continue("", false, 0, true).expect("call"),
         None

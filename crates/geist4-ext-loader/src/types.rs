@@ -198,4 +198,8 @@ pub struct Wasm {
     pub fuel: Option<u64>,
     /// The memory the extension may use, in pages.
     pub memory_pages: Option<u32>,
+    /// The inline trigger bytes the engine registers for the
+    /// component's `inline-trigger` hook, empty when the manifest
+    /// declares none. Validated against the core's own trigger bytes.
+    pub inline_triggers: Vec<u8>,
 }

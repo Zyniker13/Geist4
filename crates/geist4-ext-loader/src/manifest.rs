@@ -115,7 +115,7 @@ pub fn parse(src: &str) -> Result<Manifest, LoadError> {
     let entries = collect_entries(&raw);
     check_tier(entries.len(), raw.wasm.is_some(), host)?;
     let wasm = parse_wasm(raw.wasm.as_ref())?;
-    let behavior = validate_behavior(entries, &kinds, &kind_spans)?;
+    let behavior = validate_behavior(entries, &kinds, &kind_spans, wasm.is_some(), host)?;
 
     Ok(Manifest {
         extension,
@@ -237,6 +237,7 @@ struct RawWasm {
     path: Option<Spanned<toml::Value>>,
     fuel: Option<Spanned<toml::Value>>,
     memory_pages: Option<Spanned<toml::Value>>,
+    inline_triggers: Option<Vec<Spanned<toml::Value>>>,
 }
 
 /// A behavior entry as written, before validation.
@@ -927,11 +928,61 @@ fn parse_wasm(wasm: Option<&Spanned<RawWasm>>) -> Result<Option<Wasm>, LoadError
             Some(pages as u32)
         }
     };
+    let inline_triggers = parse_inline_triggers(raw.inline_triggers.as_deref())?;
     Ok(Some(Wasm {
         path: path.to_owned(),
         fuel,
         memory_pages,
+        inline_triggers,
     }))
+}
+
+/// The `[wasm] inline_triggers` list: the bytes the engine registers
+/// for the component's `inline-trigger` hook.
+fn parse_inline_triggers(list: Option<&[Spanned<toml::Value>]>) -> Result<Vec<u8>, LoadError> {
+    let Some(list) = list else {
+        return Ok(Vec::new());
+    };
+    if list.len() > 32 {
+        return Err(err(
+            Some(list[32].span()),
+            "wasm.inline_triggers: at most 32 trigger bytes",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(list.len());
+    for item in list {
+        let value = spanned_string(item, "wasm.inline_triggers")?;
+        let raw = value.as_bytes();
+        if raw.len() != 1 || !raw[0].is_ascii_graphic() {
+            return Err(err(
+                Some(item.span()),
+                "wasm.inline_triggers: each trigger must be one printable ASCII byte",
+            ));
+        }
+        if is_core_trigger_byte(raw[0]) {
+            return Err(err(
+                Some(item.span()),
+                "wasm.inline_triggers: the core's own trigger bytes never reach the hook",
+            ));
+        }
+        if bytes.contains(&raw[0]) {
+            return Err(err(
+                Some(item.span()),
+                "wasm.inline_triggers: each trigger byte is declared once",
+            ));
+        }
+        bytes.push(raw[0]);
+    }
+    Ok(bytes)
+}
+
+/// The core's built-in inline trigger bytes, which an extension can
+/// never claim.
+fn is_core_trigger_byte(byte: u8) -> bool {
+    matches!(
+        byte,
+        b'\\' | b'`' | b'&' | b'<' | b'*' | b'_' | b'[' | b'!' | b']'
+    )
 }
 
 /// Collect every behavior entry, across patterns, as written.
@@ -971,11 +1022,16 @@ fn collect_entries(raw: &RawManifest) -> Vec<RawEntry<'_>> {
 }
 
 /// Validate the behavior entries against the kinds and each pattern's
-/// rules, returning them in declaration (source) order.
+/// rules, returning them in declaration (source) order. A tier-2 or
+/// tier-3 manifest declares no entries; its kinds are used by the
+/// component or the host instead, so the every-kind-used check does
+/// not apply there.
 fn validate_behavior(
     mut entries: Vec<RawEntry<'_>>,
     kinds: &[KindEntry],
     kind_spans: &[Range<usize>],
+    wasm: bool,
+    host: bool,
 ) -> Result<Vec<Behavior>, LoadError> {
     let replaces = entries
         .iter()
@@ -1029,15 +1085,17 @@ fn validate_behavior(
         built.push(behavior);
     }
 
-    for (i, kind) in kinds.iter().enumerate() {
-        if !used[i] {
-            return Err(err(
-                Some(kind_spans[i].clone()),
-                format!(
-                    "kinds[{i}].kind: kind \"{}\" is declared but no behavior entry uses it; every kind is used by exactly one behavior entry",
-                    kind.kind
-                ),
-            ));
+    if !wasm && !host {
+        for (i, kind) in kinds.iter().enumerate() {
+            if !used[i] {
+                return Err(err(
+                    Some(kind_spans[i].clone()),
+                    format!(
+                        "kinds[{i}].kind: kind \"{}\" is declared but no behavior entry uses it; every kind is used by exactly one behavior entry",
+                        kind.kind
+                    ),
+                ));
+            }
         }
     }
     Ok(built)

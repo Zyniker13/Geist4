@@ -59,6 +59,22 @@ pub struct KindDecl {
     pub attrs: Vec<String>,
 }
 
+/// What a line does to an open extension block, as
+/// [`Extension::try_continue`] reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContinueOutcome {
+    /// The block continues; the hook consumed its prefix through the
+    /// context's cursor.
+    Continue,
+    /// The block closes and the line is consumed whole — a closing
+    /// fence. Nothing on the line becomes content, and the line does
+    /// not start other blocks.
+    CloseAndConsume,
+    /// The block closes and the line is left free to start other
+    /// blocks.
+    Close,
+}
+
 /// The rendered HTML of one of an extension node's children, together
 /// with the child's own node when that child is itself an extension
 /// node, so a hook that arranges its children (as a table groups its
@@ -337,14 +353,17 @@ pub trait Extension: Send + Sync {
     }
 
     /// Runs for each line while an extension block of this extension
-    /// is open, to decide whether the line continues it. Returning
-    /// false closes the block; the line is then free to start other
-    /// blocks. The hook may read the block's state; it should not
-    /// depend on mutations here surviving, because a line that both
-    /// continues the block and starts a new one closes it first.
-    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> bool {
+    /// is open, to decide what the line does to it. `Close` closes
+    /// the block and leaves the line free to start other blocks;
+    /// `CloseAndConsume` closes it and consumes the line whole — a
+    /// closing fence; `Continue` keeps it open, the hook having
+    /// consumed its prefix through the context's cursor. The hook may
+    /// read the block's state; it should not depend on mutations here
+    /// surviving, because a line that both continues the block and
+    /// starts a new one closes it first.
+    fn try_continue(&self, ctx: &mut BlockContinueCtx<'_, '_, '_>) -> ContinueOutcome {
         let _ = ctx;
-        false
+        ContinueOutcome::Close
     }
 
     /// Runs when an extension block closes, before the tree is

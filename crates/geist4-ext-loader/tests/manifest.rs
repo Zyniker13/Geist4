@@ -633,6 +633,7 @@ fn wasm_section_and_limits() {
             path: "component.wasm".to_owned(),
             fuel: Some(1_000_000),
             memory_pages: Some(16),
+            inline_triggers: vec![],
         })
     );
     // fuel and memory_pages are optional.
@@ -643,6 +644,7 @@ fn wasm_section_and_limits() {
             path: "c.wasm".to_owned(),
             fuel: None,
             memory_pages: None,
+            inline_triggers: vec![],
         })
     );
     assert_rejected(&(header() + "[wasm]\npath = \"\"\n\n"), "non-empty");
@@ -662,6 +664,28 @@ fn wasm_section_and_limits() {
     assert_rejected(
         &(header() + "[wasm]\npath = \"c.wasm\"\nmemory_pages = 5000000000\n\n"),
         "wasm.memory_pages",
+    );
+}
+
+#[test]
+fn wasm_inline_triggers() {
+    // A declared list reaches the manifest, in bytes.
+    let m = ok_of(&(header() + "[wasm]\npath = \"c.wasm\"\ninline_triggers = [\"%\", \"^\"]\n\n"));
+    assert_eq!(m.wasm.expect("wasm").inline_triggers, vec![b'%', b'^']);
+    // A core trigger byte is rejected: the core never hands it over.
+    assert_rejected(
+        &(header() + "[wasm]\npath = \"c.wasm\"\ninline_triggers = [\"*\"]\n\n"),
+        "wasm.inline_triggers",
+    );
+    // More than one byte is rejected.
+    assert_rejected(
+        &(header() + "[wasm]\npath = \"c.wasm\"\ninline_triggers = [\"ab\"]\n\n"),
+        "wasm.inline_triggers",
+    );
+    // A duplicate byte is rejected.
+    assert_rejected(
+        &(header() + "[wasm]\npath = \"c.wasm\"\ninline_triggers = [\"%\", \"%\"]\n\n"),
+        "wasm.inline_triggers",
     );
 }
 
