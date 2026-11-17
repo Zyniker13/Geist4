@@ -15,5 +15,7 @@ name = "geist4"
 path = "src/main.rs"
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
 geist4-core = { path = "../geist4-core" }
-geist4-html = { path = "../geist4-html" }
+geist4-ext-loader = { path = "../geist4-ext-loader", features = ["sandbox"] }
+geist4-spec-harness = { path = "../geist4-spec-harness" }

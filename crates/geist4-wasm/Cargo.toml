@@ -11,5 +11,3 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
-geist4-core = { path = "../geist4-core" }
-geist4-html = { path = "../geist4-html" }
