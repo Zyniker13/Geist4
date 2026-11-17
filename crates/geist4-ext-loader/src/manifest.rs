@@ -1,7 +1,7 @@
 //! The manifest parser and validator for format version 1.
 //!
 //! [`parse`] turns `extension.toml` source into a validated
-//! [`types::Manifest`], enforcing every rule in `docs/extensions/format.md`:
+//! [`Manifest`], enforcing every rule in `docs/extensions/format.md`:
 //! the manifest schema (identity, hooks, kinds, options), the one-tier rule,
 //! the per-pattern behavior rules, and the cross-rules that tie kinds to
 //! behavior entries. Errors are one line each — what failed, which key, and

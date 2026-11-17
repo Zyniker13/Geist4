@@ -548,15 +548,17 @@ fn attach_block_attr_list(arena: &mut Arena<'_>, paragraph: NodeId, rules: &[Att
     arena.remove_child(paragraph, tail);
 }
 
-/// Attaches an attribute list to the inline span `span` when a text
-/// node follows it with the list at its start: `span{.class}` with the
-/// list immediately after the span's closing delimiter.
+/// Attaches an attribute list to the inline span `span` when text
+/// follows it with the list at its start: `span{.class}` with the list
+/// immediately after the span's closing delimiter.
 ///
-/// The list is consumed out of the text node; the line's end or a
-/// space must follow it, so `{.class}` only attaches where the list
-/// ends the token. The attributes merge into the span node's own
-/// attribute list, the channel the declared kind names for extension
-/// targets.
+/// The following siblings are joined for the parse — the inline pass
+/// may split one text run into several nodes (`{color=red}` splits at
+/// `=`) — and the consumed prefix is written back over the nodes it
+/// covered. A space or the line's end must follow the list, so
+/// `{.class}` only attaches where the list ends the token. The
+/// attributes merge into the span node's own attribute list, the
+/// channel the declared kind names for extension targets.
 fn attach_inline_attr_list(arena: &mut Arena<'_>, span: NodeId, rules: &[AttributeList]) {
     let Some(parent) = arena.parent(span) else {
         return;
@@ -568,24 +570,69 @@ fn attach_inline_attr_list(arena: &mut Arena<'_>, span: NodeId, rules: &[Attribu
     else {
         return;
     };
-    let Some(&next) = arena.children(parent).get(index + 1) else {
+    // The run of text nodes after the span; the parse runs over their
+    // concatenation.
+    let run: Vec<NodeId> = arena
+        .children(parent)
+        .iter()
+        .skip(index + 1)
+        .copied()
+        .take_while(|child| matches!(arena.kind(*child), Node::Text(_)))
+        .collect();
+    if run.is_empty() {
         return;
-    };
-    let Node::Text(cow) = arena.kind(next) else {
-        return;
-    };
-    let text = cow.to_string();
-    let Some((items, rest)) = parse_prefixed_list(rules, &text) else {
+    }
+    let joined: String = run
+        .iter()
+        .map(|child| match arena.kind(*child) {
+            Node::Text(cow) => cow.to_string(),
+            _ => String::new(),
+        })
+        .collect();
+    let Some((items, rest)) = parse_prefixed_list(rules, &joined) else {
         return;
     };
     if !rest.is_empty() && !rest.starts_with([' ', '\t']) {
         return;
     }
     merge_attributes(arena, span, &items);
-    if rest.is_empty() {
-        arena.remove_child(parent, index + 1);
-    } else {
-        arena.set_kind(next, Node::Text(Cow::Owned(rest.to_owned())));
+    let consumed = joined.len() - rest.len();
+    // Rewrite the run: drop the nodes fully under the consumed prefix,
+    // trim the one holding the boundary, keep the tail beyond it.
+    let mut taken = 0;
+    let mut rewritten: Vec<(NodeId, Option<String>)> = Vec::new();
+    for child in &run {
+        let Node::Text(cow) = arena.kind(*child) else {
+            unreachable!("selected as text above");
+        };
+        let text = cow.to_string();
+        if taken + text.len() <= consumed {
+            taken += text.len();
+            rewritten.push((*child, None));
+            continue;
+        }
+        let keep = &text[consumed - taken..];
+        if keep.is_empty() {
+            rewritten.push((*child, None));
+        } else {
+            rewritten.push((*child, Some(keep.to_owned())));
+        }
+        break;
+    }
+    for (child, replacement) in rewritten {
+        // Positions are taken fresh from the current child list, which
+        // already reflects earlier removals.
+        let at = arena
+            .children(parent)
+            .iter()
+            .position(|candidate| *candidate == child)
+            .unwrap_or(0);
+        match replacement {
+            Some(text) => arena.set_kind(child, Node::Text(Cow::Owned(text))),
+            None => {
+                arena.remove_child(parent, at);
+            }
+        }
     }
 }
 
@@ -890,4 +937,26 @@ fn substitute(template: &str, resolve: &dyn Fn(&str) -> Option<String>) -> Strin
         rest = close + 1;
     }
     out
+}
+
+#[cfg(test)]
+mod private_tests {
+    use super::*;
+
+    #[test]
+    fn list_parses_across_the_inline_pass_splits() {
+        // The inline pass splits `a ==x=={color=red} b` into text nodes
+        // at the `=`; the joined run must parse as one list.
+        let rules = [AttributeList {
+            kind: "hl".to_owned(),
+            prefix: "{:".to_owned(),
+            suffix: "}".to_owned(),
+        }];
+        let (items, rest) = parse_prefixed_list(&rules, "{:color=red} b").unwrap();
+        assert_eq!(
+            items,
+            vec![AttrItem::Pair("color".to_owned(), "red".to_owned())]
+        );
+        assert_eq!(rest, " b");
+    }
 }

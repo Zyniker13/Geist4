@@ -7,10 +7,12 @@
 //! a memory limit, so a hostile extension is stopped cleanly instead of
 //! hanging or exhausting the host.
 
+pub mod compile;
 pub mod decl_block;
 pub mod decl_inline;
 pub mod error;
 pub mod manifest;
+pub mod package;
 pub mod types;
 
 #[cfg(feature = "sandbox")]
