@@ -120,7 +120,14 @@ pub fn heading_identifiers() -> std::sync::Arc<dyn Extension> {
     heading_identifiers::heading_identifiers()
 }
 
+/// The description-list extension as a shared extension value.
+#[must_use]
+pub fn deflists() -> std::sync::Arc<dyn Extension> {
+    deflists::deflists()
+}
+
 pub mod autolink;
+pub mod deflists;
 pub mod footnotes;
 pub mod front_matter;
 pub mod heading_identifiers;
