@@ -100,8 +100,8 @@ impl Extension for Footnotes {
         true
     }
 
-    fn block_start_looks(&self, line: &[u8]) -> bool {
-        scan_definition(line).is_some()
+    fn block_start_looks(&self, ctx: &geist4_core::extension::LookCtx<'_, '_>) -> bool {
+        scan_definition(ctx.line).is_some()
     }
 
     fn try_start(&self, ctx: &mut BlockStartCtx<'_, '_, '_, '_>) {

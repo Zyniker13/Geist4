@@ -250,6 +250,7 @@ pub(crate) struct StartInner<'p, 'a, 'l, 'ext> {
     line: &'l [u8],
     line_blank: bool,
     indented: bool,
+    indent: usize,
     extension: usize,
     fired: bool,
     fired_node: Option<NodeId>,
@@ -276,6 +277,12 @@ impl<'p, 'a, 'l, 'ext> StartInner<'p, 'a, 'l, 'ext> {
     /// virtual columns past the container prefixes.
     pub(crate) fn indented(&self) -> bool {
         self.indented
+    }
+
+    /// How many virtual columns the line's first non-space byte sits
+    /// past the container prefixes.
+    pub(crate) fn indent(&self) -> usize {
+        self.indent
     }
 
     /// The arena, for hooks that build their block's children.
@@ -662,7 +669,10 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 if self.deepest_is_paragraph()
                     && !cursor.blank_from_here()
                     && !self.block_start_matches(&cursor)
-                    && !self.extension_block_start_looks(&cursor)
+                    && !self.extension_block_start_looks(
+                        &cursor,
+                        depth.checked_sub(1).map(|d| self.open[d].id),
+                    )
                 {
                     // The line's leading whitespace stays in the buffer;
                     // the inline phase strips it after each newline, and a
@@ -820,10 +830,18 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         matches!(self.open.last().unwrap().kind, OpenKind::Paragraph { .. })
     }
 
-    /// Whether a registered extension would start a block on this line;
-    /// the lazy continuation check consults it after the built-in starts.
-    fn extension_block_start_looks(&self, cursor: &Cursor<'_>) -> bool {
+    /// Whether a registered extension would start a block on this line
+    /// against the container the line still matches; the lazy
+    /// continuation check consults it after the built-in starts. The
+    /// container is the parent of the first block that failed to
+    /// continue — the same container the block-start phase would see
+    /// once the failed blocks close — so the hook's answer matches
+    /// what its `try_start` will do.
+    fn extension_block_start_looks(&self, cursor: &Cursor<'_>, container: Option<NodeId>) -> bool {
         let Some(extensions) = self.extensions else {
+            return false;
+        };
+        let Some(container) = container else {
             return false;
         };
         let (pos, _) = cursor.find_nonspace();
@@ -831,9 +849,16 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             return false;
         }
         let line = &cursor.line()[pos..];
+        let (_, nonspace_col) = cursor.find_nonspace();
+        let ctx = crate::extension::LookCtx {
+            line,
+            indented: nonspace_col - cursor.col() >= 4,
+            arena: &self.arena,
+            container,
+        };
         extensions
             .iter()
-            .any(|extension| extension.block_start_looks(line))
+            .any(|extension| extension.block_start_looks(&ctx))
     }
 
     /// Whether the deepest open frame is an extension block that holds
@@ -1009,10 +1034,16 @@ impl<'a, 'ext> Parser<'a, 'ext> {
 
             // Extension block starts: each registered hook in registration
             // order, until one opens a block or converts the paragraph.
+            // The loop then continues with the rest of the line, the way
+            // the reference implementation's loop does: a marker that
+            // consumed only its own prefix leaves the rest free to open
+            // further blocks — `: - item` opens the list inside the
+            // definition.
             if self.extensions.is_some() {
                 if let Some(id) = self.extension_starts(cursor, line_offset, line_stop, indent) {
                     opened = Some(id);
-                    break;
+                    maybe_lazy = false;
+                    continue;
                 }
             }
 
@@ -1056,6 +1087,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 line,
                 line_blank,
                 indented: indent >= 4,
+                indent,
                 extension: index,
                 fired: false,
                 fired_node: None,

@@ -17,6 +17,8 @@
 
 use std::sync::Arc;
 
+use crate::arena::{Arena, NodeId};
+
 /// A value of an extension node's attribute.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AttrValue {
@@ -134,6 +136,25 @@ impl OverrideChildren<'_, '_> {
     }
 }
 
+/// The context a block-start look hook sees: the line from the
+/// current content position, whether it is indented past four
+/// columns, and the deepest container that still matches the line,
+/// with the arena so the hook can inspect that container's children
+/// the way its `try_start` would.
+pub struct LookCtx<'a, 'doc> {
+    /// The line's bytes from the content position — after the
+    /// container prefixes that matched.
+    pub line: &'a [u8],
+    /// Whether the line is indented four or more columns past the
+    /// matched prefixes.
+    pub indented: bool,
+    /// The parse arena, for inspecting `container` and its children.
+    pub arena: &'a Arena<'doc>,
+    /// The deepest container that still matches the line: the parent
+    /// of the first block that failed to continue.
+    pub container: NodeId,
+}
+
 /// An extension: hooks for block starts and continuation, inline
 /// triggers, post-processing passes, and renderers for its node kinds.
 ///
@@ -203,12 +224,18 @@ pub trait Extension: Send + Sync {
 
     /// A pure look at a line, answering whether this extension would
     /// start a block on it. The parser consults it when a lazy
-    /// paragraph continuation is considered, so a line that would open
-    /// one of this extension's blocks never lazily continues the
-    /// paragraph — the same role the built-in block starts play there.
-    /// It must not change any state.
-    fn block_start_looks(&self, line: &[u8]) -> bool {
-        let _ = line;
+    /// paragraph continuation is considered: the line only lazily
+    /// continues the paragraph when no built-in block start matches it
+    /// and no extension would claim it — the same rule the reference
+    /// implementation applies, where the lazy branch fires only when
+    /// the block-start phase opened nothing. The hook sees the line
+    /// from the current content position and the deepest container
+    /// that still matches the line, with the arena to inspect it, so
+    /// it can answer the way its [`try_start`](Extension::try_start)
+    /// would once the failed blocks close. It must not change any
+    /// state.
+    fn block_start_looks(&self, ctx: &LookCtx<'_, '_>) -> bool {
+        let _ = ctx;
         false
     }
 
@@ -432,6 +459,13 @@ impl<'p, 'a, 'l, 'ext> BlockStartCtx<'p, 'a, 'l, 'ext> {
     /// virtual columns past the container prefixes.
     pub fn indented(&self) -> bool {
         self.inner.indented()
+    }
+
+    /// How many virtual columns the line's first non-space byte sits
+    /// past the container prefixes.
+    #[must_use]
+    pub fn indent(&self) -> usize {
+        self.inner.indent()
     }
 
     /// What the new block would open in.

@@ -72,6 +72,28 @@ followed by a sibling item renders loose, matching the reference byte
 for byte. Hooks that only look at the line without consuming it do not
 affect the flags.
 
+## Lazy continuation and the look hook
+
+When a line fails to continue the open blocks and the deepest open
+block is a paragraph, the parser considers a lazy continuation. It
+first asks whether anything would start a block on the line instead:
+the built-in block starts, and each extension's `block_start_looks`.
+Only when nothing would start a block does the line lazily continue
+the paragraph — the reference implementation's rule, where the lazy
+branch fires only when the block-start phase opened nothing.
+
+The look hook receives a `LookCtx`: the line from the content
+position, whether it is indented four or more columns, the arena, and
+`container` — the parent of the first block that failed to continue.
+That is the container the block-start phase would try against once
+the failed blocks close, so the hook's answer should mirror what its
+`try_start` would do from there. The description-lists built-in is
+the worked example: a marker line over a container whose last child
+is the extension's own item is a coming sibling definition, and the
+hook says so, which keeps the line from lazily joining the item's
+paragraph; over any other container it declines, so `> Term` followed
+by a lazy `: def` stays one paragraph inside the quote.
+
 ## Post-processing passes
 
 A `post_process` hook sees the finished tree and may rewrite it:

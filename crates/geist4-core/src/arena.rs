@@ -46,6 +46,9 @@ pub struct Arena<'a> {
     /// position in the parse options' extension list, set when the parse
     /// phase claims a built-in node for an extension.
     ext_owner: Vec<Option<usize>>,
+    /// Per-node parent, indexed by node id. Entries stay `None` until the
+    /// node is attached to a container; removal clears the entry again.
+    parents: Vec<Option<NodeId>>,
 }
 
 impl<'a> Arena<'a> {
@@ -56,6 +59,7 @@ impl<'a> Arena<'a> {
             nodes: Vec::new(),
             attrs: Vec::new(),
             ext_owner: Vec::new(),
+            parents: Vec::new(),
         }
     }
 
@@ -111,6 +115,18 @@ impl<'a> Arena<'a> {
         self.nodes[id.0].children.last().copied()
     }
 
+    /// The container `id` was last attached to, if any.
+    ///
+    /// Tree surgery hooks use this to reach a node's container without a
+    /// separate walk. It tracks [`push_child`](Self::push_child),
+    /// [`insert_child`](Self::insert_child), [`pop_child`](Self::pop_child)
+    /// and [`remove_child`](Self::remove_child); a node still held in a
+    /// frame but never attached has no parent.
+    #[must_use]
+    pub fn parent(&self, id: NodeId) -> Option<NodeId> {
+        self.parents.get(id.0).copied().flatten()
+    }
+
     /// Appends `child` as the last child of `parent`.
     pub fn push_child(&mut self, parent: NodeId, child: NodeId) {
         let kids = &mut self.nodes[parent.0].children;
@@ -120,11 +136,16 @@ impl<'a> Arena<'a> {
             kids.reserve(4);
         }
         kids.push(child);
+        self.set_parent(child, parent);
     }
 
     /// Removes and returns the last child of `parent`, if any.
     pub fn pop_child(&mut self, parent: NodeId) -> Option<NodeId> {
-        self.nodes[parent.0].children.pop()
+        let kid = self.nodes[parent.0].children.pop();
+        if let Some(kid) = kid {
+            self.clear_parent(kid);
+        }
+        kid
     }
 
     /// Sets an attribute on a node, replacing a same-named attribute and
@@ -197,6 +218,7 @@ impl<'a> Arena<'a> {
             kids.reserve(4);
         }
         kids.insert(index.min(kids.len()), child);
+        self.set_parent(child, parent);
     }
 
     /// Removes and returns the child of `parent` at `index`, if there
@@ -204,10 +226,29 @@ impl<'a> Arena<'a> {
     /// merged text runs this way.
     pub fn remove_child(&mut self, parent: NodeId, index: usize) -> Option<NodeId> {
         let kids = &mut self.nodes[parent.0].children;
-        if index < kids.len() {
+        let kid = if index < kids.len() {
             Some(kids.remove(index))
         } else {
             None
+        };
+        if let Some(kid) = kid {
+            self.clear_parent(kid);
+        }
+        kid
+    }
+
+    /// Records `parent` as the container of `child`, growing the table.
+    fn set_parent(&mut self, child: NodeId, parent: NodeId) {
+        if self.parents.len() <= child.0 {
+            self.parents.resize_with(child.0 + 1, || None);
+        }
+        self.parents[child.0] = Some(parent);
+    }
+
+    /// Clears the parent record of a detached child.
+    fn clear_parent(&mut self, child: NodeId) {
+        if self.parents.len() > child.0 {
+            self.parents[child.0] = None;
         }
     }
 
