@@ -18,5 +18,6 @@ let package = Package(
         .binaryTarget(name: "CGeist4", path: "CGeist4.xcframework"),
         .target(name: "Geist4", dependencies: ["CGeist4"]),
         .executableTarget(name: "Geist4Contract", dependencies: ["Geist4"]),
+        .executableTarget(name: "Geist4HostNotes", dependencies: ["Geist4"]),
     ]
 )

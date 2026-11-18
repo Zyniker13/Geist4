@@ -121,7 +121,7 @@ public func renderHTML(_ markdown: String,
 
 // MARK: - Internals
 
-private let errCapacity: Int = 256
+let errCapacity: Int = 256
 
 /// Runs `body` with the UTF-8 bytes of `text` as a C char pointer and
 /// their count. `withUTF8` is mutating in Swift 6, so the text is copied
@@ -141,7 +141,7 @@ private func withUTF8Pointer<T>(
 
 /// Runs a C entry point that returns a status; a non-OK status throws
 /// with the message the entry point wrote to the error buffer.
-private func call(
+func call(
     _ body: (UnsafeMutablePointer<CChar>?) throws -> Int32
 ) throws {
     var err = [CChar](repeating: 0, count: errCapacity)
