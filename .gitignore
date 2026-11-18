@@ -7,3 +7,4 @@ node_modules/
 *.profraw
 .DS_Store
 target/
+__pycache__/
