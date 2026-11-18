@@ -1,0 +1,35 @@
+name: Diag Swift Logs
+on: [workflow_dispatch]
+jobs:
+  diag:
+    runs-on: macos-latest
+    permissions:
+      statuses: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Post job log as commit statuses
+        run: |
+          JOB_ID=134556399419
+          # Fetch the log via the API (workflow has GITHUB_TOKEN)
+          curl -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/Zyniker13/Geist4/actions/jobs/$JOB_ID/logs" \
+            -o /tmp/job.log 2>/dev/null
+          # If that fails, try the redirect URL
+          if [ ! -s /tmp/job.log ]; then
+            curl -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              "https://github.com/Zyniker13/Geist4/actions/runs/44231198052/job/134556399419" \
+              -o /tmp/job.log 2>/dev/null
+          fi
+          # Post the last 100 lines as commit statuses
+          TAIL=$(tail -100 /tmp/job.log 2>/dev/null || echo "No log available")
+          STATUS_COUNT=0
+          while IFS= read -r line; do
+            SHORT=$(echo "$line" | head -c 140)
+            STATUS_TITLE="log-tail-${STATUS_COUNT}"
+            gh api repos/Zyniker13/Geist4/statuses/main \
+              -f "state=info" -f "description=$SHORT" -f "context=$STATUS_TITLE" \
+              >/dev/null 2>&1 || true
+            STATUS_COUNT=$((STATUS_COUNT + 1))
+            [ $STATUS_COUNT -ge 30 ] && break
+          done <<< "$TAIL"
+          echo "Posted $STATUS_COUNT status entries"
