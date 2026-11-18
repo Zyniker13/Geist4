@@ -17,29 +17,63 @@ fn broken_reference_is_a_problem_with_unchanged_output() {
     let src = "see [text][missing]\n";
     let document = parse_with(src, &Options::new());
     assert_eq!(html_of(src), "<p>see [text][missing]</p>\n");
-    // Two bracket groups fail here — the collapsed group whose label
-    // scan took `[missing]`, and the leftover `[missing]` itself — and
-    // each failed group records its own problem, with the block's span
-    // (inline nodes keep no spans). A reporter deduplicates.
-    assert_eq!(document.problems.len(), 2);
-    for problem in &document.problems {
-        assert_eq!(
-            problem.message,
-            "no link reference definition for 'missing'"
-        );
-        assert_eq!(problem.span, geist4_core::span::Span::new(0, src.len()));
-    }
+    // One problem for the author's one mistake. The failed attempt's
+    // rewind re-scans the following label as its own bracket group, and
+    // that retry records nothing — the parse's artifact, not a second
+    // mistake. The span is the block's (inline nodes keep no spans).
+    assert_eq!(document.problems.len(), 1);
+    assert_eq!(
+        document.problems[0].message,
+        "no link reference definition for 'missing'"
+    );
+    assert_eq!(
+        document.problems[0].span,
+        geist4_core::span::Span::new(0, src.len())
+    );
 }
 
 #[test]
 fn broken_image_reference_is_a_problem() {
     let document = parse_with("![alt][gone]\n", &Options::new());
-    assert_eq!(document.problems.len(), 2);
-    assert!(
-        document
-            .problems
-            .iter()
-            .all(|problem| { problem.message == "no link reference definition for 'gone'" })
+    assert_eq!(document.problems.len(), 1);
+    assert_eq!(
+        document.problems[0].message,
+        "no link reference definition for 'gone'"
+    );
+}
+
+#[test]
+fn a_retry_after_a_failure_is_not_a_second_problem() {
+    // The rewind after a failed attempt re-scans `[missing]` as a
+    // shortcut group, which fails the same way; the parse reports the
+    // mistake once. Distinct groups further on are distinct mistakes.
+    let document = parse_with("[a][missing] and [b][gone]\n", &Options::new());
+    let messages: Vec<&str> = document
+        .problems
+        .iter()
+        .map(|problem| problem.message.as_str())
+        .collect();
+    assert_eq!(
+        messages,
+        vec![
+            "no link reference definition for 'missing'",
+            "no link reference definition for 'gone'",
+        ]
+    );
+    // A whole chain of failed groups stays one problem per distinct
+    // label: the full reference, then each group the re-scan reaches.
+    let chain = parse_with("[a][b][c]\n", &Options::new());
+    let messages: Vec<&str> = chain
+        .problems
+        .iter()
+        .map(|problem| problem.message.as_str())
+        .collect();
+    assert_eq!(
+        messages,
+        vec![
+            "no link reference definition for 'b'",
+            "no link reference definition for 'c'",
+        ]
     );
 }
 

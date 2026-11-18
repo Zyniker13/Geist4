@@ -143,6 +143,10 @@ struct Bracket {
     /// Whether another bracket opened between this one and the current
     /// position.
     bracket_after: bool,
+    /// Whether this bracket is the retry a failed attempt's rewind
+    /// opened: the same author mistake seen twice, so its failure
+    /// records no second problem.
+    rescued: bool,
 }
 
 /// The inline parser state.
@@ -196,6 +200,10 @@ struct Parser<'defs, 'a, 'ext> {
     /// Problems noticed while parsing this block's inline content,
     /// drained by the caller after `run`.
     problems: Vec<crate::problems::Problem>,
+    /// Where a failed bracket attempt rewound to, so the bracket the
+    /// re-scan opens there is recognized as the parser's own retry —
+    /// the same author mistake seen twice — and stays silent.
+    rescue_position: Option<usize>,
 }
 
 /// Backtick runs longer than this are never scanned for closers, as in
@@ -298,6 +306,7 @@ pub(crate) fn parse_inlines_into(
         label_scratch: std::mem::take(&mut session.label_scratch),
         block_span,
         problems: Vec::new(),
+        rescue_position: None,
     };
     session.memo_gen = parser.memo_gen;
     parser.run();
@@ -921,12 +930,19 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
         if let Some(last) = self.brackets.last_mut() {
             last.bracket_after = true;
         }
+        // A bracket opening exactly where a failed attempt rewound is
+        // that attempt's own retry, not a second mistake: flag it and
+        // consume the marker. Anything opening elsewhere clears it.
+        // `self.pos` sits just past the `[` here, so the `[` right
+        // after the rewind matches `rescue + 1`.
+        let rescued = self.rescue_position.take() == Some(self.pos - 1);
         self.brackets.push(Bracket {
             image,
             node,
             bang,
             position: self.pos,
             bracket_after: false,
+            rescued,
         });
         if !image {
             self.no_link_openers = false;
@@ -1474,22 +1490,38 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                     self.remove_delimiters_since(opener_position);
                     self.brackets.pop();
                 } else {
+                    // A retried group — the parser's own re-scan after
+                    // the rewind below — has already had its author
+                    // mistake reported by the attempt it retries; its
+                    // failure records nothing new.
+                    let retried = self.brackets[opener_index].rescued;
                     self.brackets.pop();
                     self.pos = initial_pos;
                     self.push(Kind::Text("]".to_string()));
-                    // The group matched nothing: no inline link, no
-                    // reference definition, no extension claim. The
-                    // output stays exactly the literal text CommonMark
-                    // asks for, and the broken reference is recorded as
-                    // a problem for checkers to surface.
-                    let message = match broken_label.filter(|label| !label.is_empty()) {
-                        Some(label) => {
-                            format!("no link reference definition for '{label}'")
-                        }
-                        None => String::from("no link reference definition for the bracket group"),
-                    };
-                    self.problems
-                        .push(crate::problems::Problem::new(message, self.block_span));
+                    if !retried {
+                        // The group matched nothing: no inline link, no
+                        // reference definition, no extension claim. The
+                        // output stays exactly the literal text
+                        // CommonMark asks for, and the broken reference
+                        // is recorded as a problem for checkers to
+                        // surface. The rewind re-scans the text after
+                        // the literal `]`; the marker arms so the
+                        // bracket opening at the rewind point — the
+                        // parser's retry of this same mistake — stays
+                        // silent, while anything further away is
+                        // reported as the fresh mistake it is.
+                        self.rescue_position = Some(initial_pos);
+                        let message = match broken_label.filter(|label| !label.is_empty()) {
+                            Some(label) => {
+                                format!("no link reference definition for '{label}'")
+                            }
+                            None => {
+                                String::from("no link reference definition for the bracket group")
+                            }
+                        };
+                        self.problems
+                            .push(crate::problems::Problem::new(message, self.block_span));
+                    }
                 }
             }
         }
