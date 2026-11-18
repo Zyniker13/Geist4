@@ -33,17 +33,20 @@ jobs:
       - name: Run check.sh
         shell: bash
         run: |
-          bash scripts/check.sh > check.log 2>&1 || true
-          echo "EXIT=$?"
-          tail -60 check.log
+          bash scripts/check.sh > check.log 2>&1
+          ec=$?
+          echo "EXIT=$ec"
+          tail -80 check.log
+          exit $ec
       - name: Post the log tail
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.sha }}
         shell: bash
         run: |
           n=0
-          tail -c 3000 check.log |
+          tail -c 12000 check.log |
           grep -vE "^\s*$" |
           sed 's/"/\\"/g' |
           fold -w 130 |
