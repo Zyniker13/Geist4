@@ -50,27 +50,39 @@ jobs:
         run: |
           cargo install --locked wasm-bindgen-cli@0.2.130
           rustup target add wasm32-unknown-unknown
-      - name: Install binaryen (wasm-opt)
+      - name: Install binaryen (macOS)
         # check.sh post-processes the wasm with `wasm-opt -Oz --strip-debug`
         # (decision 0029); any current version fits the size budget.
-        # Windows gets the official release tarball, pinned with the
-        # checksum the project publishes for it — bump the version and the
-        # checksum together. (Chocolatey's binaryen package is third-party;
-        # the release tarball is the project's own artifact.)
+        if: runner.os == 'macOS'
+        run: brew install binaryen
+      - name: Install binaryen (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends binaryen
+      - name: Download binaryen (Windows)
+        # The official release tarball, pinned with the checksum the
+        # project publishes for it — bump the version and the checksum
+        # together. (Chocolatey's binaryen package is third-party; the
+        # release tarball is the project's own artifact.)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: curl -sSLo binaryen.tar.gz https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-windows.tar.gz
+      - name: Verify the binaryen checksum (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "17a2cbeac6b5693c5fbafab3838d3c65fd9c1eb38b05f5baec6c657e8c84995b  binaryen.tar.gz" | sha256sum -c -
+      - name: Extract binaryen (Windows)
+        if: runner.os == 'Windows'
         shell: bash
         run: |
-          if [ "$RUNNER_OS" = macOS ]; then
-            brew install binaryen
-          elif [ "$RUNNER_OS" = Linux ]; then
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends binaryen
-          else
-            curl -sSLo binaryen.tar.gz https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-windows.tar.gz
-            echo "17a2cbeac6b5693c5fbafab3838d3c65fd9c1eb38b05f5baec6c657e8c84995b  binaryen.tar.gz" | sha256sum -c -
-            mkdir -p "$RUNNER_TEMP/binaryen"
-            tar -xzf binaryen.tar.gz -C "$RUNNER_TEMP/binaryen" --strip-components=1
-            echo "$RUNNER_TEMP/binaryen/bin" >> "$GITHUB_PATH"
-            "$RUNNER_TEMP/binaryen/bin/wasm-opt.exe" --version
-          fi
+          mkdir -p "$RUNNER_TEMP/binaryen"
+          tar -xzf binaryen.tar.gz -C "$RUNNER_TEMP/binaryen" --strip-components=1
+          ls "$RUNNER_TEMP/binaryen/bin"
+      - name: Put wasm-opt on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "$RUNNER_TEMP/binaryen/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/binaryen/bin/wasm-opt.exe" --version
       - name: Install maturin
         # The version the Python wheel build is pinned to; the Python
         # contract suite runs against the wheel it produces (decision 0034).
