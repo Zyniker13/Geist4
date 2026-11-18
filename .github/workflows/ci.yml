@@ -50,6 +50,12 @@ jobs:
         run: |
           cargo install --locked wasm-bindgen-cli@0.2.130
           rustup target add wasm32-unknown-unknown
+      - name: Install binaryen (wasm-opt)
+        # check.sh post-processes the wasm with `wasm-opt -Oz --strip-debug`
+        # (decision 0029); any current version fits the size budget.
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then brew install binaryen; else sudo apt-get update && sudo apt-get install -y --no-install-recommends binaryen; fi
+          wasm-opt --version
       - name: Install maturin
         # The version the Python wheel build is pinned to; the Python
         # contract suite runs against the wheel it produces (decision 0034).

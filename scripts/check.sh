@@ -66,11 +66,24 @@ rustup target list --installed | grep -q wasm32-unknown-unknown || {
     exit 1
 }
 cargo build -p geist4-wasm --target wasm32-unknown-unknown --release
+command -v wasm-opt >/dev/null 2>&1 || {
+    echo 'wasm-opt not found; install binaryen (brew install binaryen on macOS,' >&2
+    echo 'apt-get install binaryen on Debian/Ubuntu) — decision 0029' >&2
+    exit 1
+}
 pkg_tmp=$(mktemp -d "${TMPDIR:-/tmp}/geist4-pkg-XXXXXX")
 trap 'rm -rf "$pkg_tmp" "$header_tmp"' EXIT
 wasm-bindgen --target web --typescript \
     --out-dir "$pkg_tmp" --out-name geist4 \
     target/wasm32-unknown-unknown/release/geist4_wasm.wasm >/dev/null 2>&1
+# Post-process with binaryen: -Oz optimizes, --strip-debug drops the wasm
+# name section (97 KiB of function names that only aid stack traces). This
+# is the same order wasm-pack uses: bindgen first, wasm-opt second, so the
+# shipped artifact — and the one every size number below measures — is the
+# optimized module. Regenerate the checked-in pkg/ the same way.
+wasm-opt -Oz --enable-bulk-memory --strip-debug \
+    -o "$pkg_tmp/geist4_bg.opt.wasm" "$pkg_tmp/geist4_bg.wasm"
+mv "$pkg_tmp/geist4_bg.opt.wasm" "$pkg_tmp/geist4_bg.wasm"
 # The JS glue and TypeScript types are text and identical on every machine;
 # the .wasm itself is not (rustc embeds platform-specific paths in panic
 # locations), so its behavior is pinned by running the harness against it
@@ -88,15 +101,17 @@ done
     exit 1
 }
 # The size budget from decision 0029: the .wasm stays under 512 KiB raw
-# and 160 KiB gzipped, the transfer size an editor's page load pays.
+# and 176 KiB gzipped (amended in m7-5 when the host-extension callback
+# surface joined the module; see decision 0029), the transfer size an
+# editor's page load pays.
 wasm_bytes=$(wc -c < "$pkg_tmp/geist4_bg.wasm" | tr -d ' ')
 gzip_bytes=$(gzip -9 -c "$pkg_tmp/geist4_bg.wasm" | wc -c | tr -d ' ')
 [ "$wasm_bytes" -le 524288 ] || {
     echo "the wasm is $wasm_bytes bytes; decision 0029's budget is 524288 raw" >&2
     exit 1
 }
-[ "$gzip_bytes" -le 163840 ] || {
-    echo "the gzipped wasm is $gzip_bytes bytes; decision 0029's budget is 163840" >&2
+[ "$gzip_bytes" -le 180224 ] || {
+    echo "the gzipped wasm is $gzip_bytes bytes; decision 0029's budget is 180224" >&2
     exit 1
 }
 GEIST4_PKG_DIR="$pkg_tmp" node crates/geist4-wasm/node-tests/run.mjs

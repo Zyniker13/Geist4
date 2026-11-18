@@ -50,11 +50,24 @@ silent corruption. The safe module's `catch_unwind` compiles unchanged;
 on WebAssembly it simply never fires, and host tests keep covering it.
 
 Size budget, enforced by `scripts/check.sh` on every run and in CI: the
-checked-in `geist4_bg.wasm` stays under 512 KiB raw and 160 KiB after
-`gzip -9`. The m7-2 baseline measures 418,381 bytes raw and 146,525
-gzipped, so both budgets leave real headroom for growth while still
-tripping on a careless dependency. Transfer size is what an editor's
-page load pays; the raw bound covers uncompressed local loads.
+checked-in `geist4_bg.wasm` stays under 512 KiB raw and 176 KiB after
+`gzip -9`. The artifact measured by the budget is post-processed with
+`wasm-opt -Oz --enable-bulk-memory --strip-debug` (binaryen, installed
+with `brew install binaryen` or `apt-get install binaryen`; `check.sh`
+requires it): `-Oz` optimizes the module and `--strip-debug` drops the
+wasm name section, which was 97 KiB of function names that only aid
+stack traces. The m7-2 baseline measured 418,381 bytes raw and 146,525
+gzipped. In m7-5 the host-extension callback surface (the shared
+`geist4-ffi` host machinery plus the wasm crate's JS interop for
+closures, decision 0035) pushed the unoptimized build to ~530 KiB raw /
+~180 KiB gzipped, over both lines; fat LTO with one codegen unit and
+the wasm-opt step bring the shipped artifact to 400,563 raw / 164,818
+gzipped — smaller raw than the m7-2 baseline, and a gzip number that
+no longer fits the old 160 KiB line with room for anything. The gzip
+budget is therefore amended 160 → 176 KiB (~5% headroom over the
+measured artifact) rather than trip on every following binding change.
+Transfer size is what an editor's page load pays; the raw bound covers
+uncompressed local loads.
 
 ## Consequences
 
