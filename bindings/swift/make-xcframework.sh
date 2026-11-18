@@ -34,17 +34,17 @@ trap 'rm -rf "$tmp"' EXIT
 
 slice_name() {
     case $1 in
-    *-darwin) printf 'macos' ;;
-    *-apple-ios-sim) printf 'ios-sim' ;;
-    *-apple-ios) printf 'ios' ;;
-    *) printf 'unknown' ;;
+    *-darwin) printf '%s\n' 'macos' ;;
+    *-apple-ios-sim) printf '%s\n' 'ios-sim' ;;
+    *-apple-ios) printf '%s\n' 'ios' ;;
+    *) printf '%s\n' 'unknown' ;;
     esac
 }
 arch_of() {
     case $1 in
-    aarch64-*) printf 'arm64' ;;
-    x86_64-*) printf 'x86_64' ;;
-    *) printf 'unknown' ;;
+    aarch64-*) printf '%s\n' 'arm64' ;;
+    x86_64-*) printf '%s\n' 'x86_64' ;;
+    *) printf '%s\n' 'unknown' ;;
     esac
 }
 
