@@ -573,6 +573,24 @@ pub struct HostHooks {
 // Construction and validation.
 // ---------------------------------------------------------------------------
 
+impl Default for HostHooks {
+    /// Every hook declined: an extension that does nothing.
+    fn default() -> Self {
+        Self {
+            init: None,
+            block_start_look: None,
+            block_start: None,
+            block_continue: None,
+            block_close: None,
+            inline_trigger: None,
+            inline_bracket: None,
+            post_process: None,
+            render: None,
+            render_override: None,
+        }
+    }
+}
+
 /// Why a vtable or a hook set was rejected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostError {
@@ -1026,6 +1044,20 @@ impl HostExtension {
         }
     }
 
+    /// Calls a `Result`-returning hook the way the C surface calls a
+    /// hook: an error is a failed call — it latches the message and
+    /// the hook declines — and so does a panic.
+    fn call_result<T>(&self, run: impl FnOnce() -> Result<Option<T>, String>) -> Option<T> {
+        match self.call(|| Some(run())) {
+            Some(Ok(value)) => value,
+            Some(Err(message)) => {
+                self.latch(message);
+                None
+            }
+            None => None,
+        }
+    }
+
     /// Whether the vtable declared `kind`. A hook may only answer with
     /// kinds its extension declared, so a foreign name cannot route
     /// another extension's renderer against content the hook chose.
@@ -1467,7 +1499,7 @@ impl Extension for HostExtension {
             return;
         }
         if let Some(init) = &self.hooks.init {
-            let _ = self.call(|| init().ok());
+            let _: Option<()> = self.call_result(|| init().map(|_| None));
         }
     }
 
@@ -1489,7 +1521,7 @@ impl Extension for HostExtension {
         };
         let line = lossy(ctx.line);
         let column = u32::try_from(ctx.column).unwrap_or(u32::MAX);
-        self.call(|| hook(&line, ctx.indented, column).ok())
+        self.call_result(|| hook(&line, ctx.indented, column).map(Some))
             .unwrap_or(false)
     }
 
@@ -1529,9 +1561,8 @@ impl Extension for HostExtension {
         };
         let line = lossy(ctx.line());
         let column = u32::try_from(ctx.column()).unwrap_or(u32::MAX);
-        let decision = self.call(|| {
-            hook(&line, ctx.indented(), column, container_kind.as_deref()).unwrap_or_default()
-        });
+        let decision =
+            self.call_result(|| hook(&line, ctx.indented(), column, container_kind.as_deref()));
         let Some(decision) = decision else {
             return;
         };
@@ -1605,7 +1636,7 @@ impl Extension for HostExtension {
         let indented = ctx.indent() >= 4;
         let line = lossy(ctx.line());
         let column = u32::try_from(ctx.column()).unwrap_or(u32::MAX);
-        let decision = self.call(|| hook(&line, indented, column, blank).unwrap_or_default());
+        let decision = self.call_result(|| hook(&line, indented, column, blank));
         let Some(decision) = decision else {
             return ContinueOutcome::Close;
         };
@@ -1641,7 +1672,7 @@ impl Extension for HostExtension {
         let Some(hook) = &self.hooks.block_close else {
             return;
         };
-        let Some(html) = self.call(|| hook().ok().flatten()) else {
+        let Some(html) = self.call_result(|| hook()) else {
             return;
         };
         let mut literal = html;
@@ -1671,7 +1702,7 @@ impl Extension for HostExtension {
         let prefix = String::from_utf8_lossy(ctx.line_prefix());
         let rest = String::from_utf8_lossy(ctx.rest_of_line());
         let line = format!("{prefix}{rest}");
-        let Some(kind) = self.call(|| hook(&line, pos).unwrap_or_default()) else {
+        let Some(kind) = self.call_result(|| hook(&line, pos)) else {
             return;
         };
         if !self.owns_kind(&kind) {
@@ -1702,7 +1733,7 @@ impl Extension for HostExtension {
             return;
         };
         let content = content.to_owned();
-        let Some(claim) = self.call(|| hook(&content).unwrap_or_default()) else {
+        let Some(claim) = self.call_result(|| hook(&content)) else {
             return;
         };
         if !self.owns_kind(&claim.kind) {
@@ -1733,7 +1764,7 @@ impl Extension for HostExtension {
                 stack.extend(ctx.arena.children(id).iter().copied());
                 continue;
             };
-            let Some(rewritten) = self.call(|| hook(&text).unwrap_or_default()) else {
+            let Some(rewritten) = self.call_result(|| hook(&text)) else {
                 return;
             };
             if rewritten != text {
@@ -1757,9 +1788,7 @@ impl Extension for HostExtension {
             .map(|(name, value)| (name.clone(), attr_string(value)))
             .collect();
         let children_html: String = children.iter().map(|child| child.html.as_str()).collect();
-        if let Some(html) =
-            self.call(|| hook(&node.kind, &attrs, &children_html).unwrap_or_default())
-        {
+        if let Some(html) = self.call_result(|| hook(&node.kind, &attrs, &children_html)) {
             out.push_str(&html);
         }
     }
@@ -1788,7 +1817,7 @@ impl Extension for HostExtension {
             kind: node.kind,
             attrs: node.attrs,
         };
-        let _ = self.call(|| hook(&owned, &rendered, out).ok());
+        let _ = self.call_result(|| hook(&owned, &rendered, out).map(Some));
     }
 }
 

@@ -282,6 +282,15 @@ pub unsafe extern "C" fn geist4_options_enable_host(
             return Status::GEIST4_ERR_INVALID;
         }
     };
+    let duplicate = options.options.by_name(extension.name()).is_some();
+    if duplicate {
+        set_error(
+            err,
+            err_cap,
+            &format!("host extension {} is already registered", extension.name()),
+        );
+        return Status::GEIST4_ERR_INVALID;
+    }
     options.options.extension(extension);
     Status::GEIST4_OK
 }
@@ -664,7 +673,7 @@ pub mod safe {
         BracketClaim, ContinueConsume, ContinueDecision, HostError, HostExtension, HostHooks,
         StartConsume, StartDecision,
     };
-    pub use geist4_core::extension::CoreNode;
+    pub use geist4_core::extension::{AttrValue, CoreNode, KindDecl};
 
     /// Every built-in name `Options::enable_builtin` accepts, for error
     /// messages. One source of truth for the C path and this module.
@@ -766,9 +775,21 @@ pub mod safe {
         /// with a vtable through `geist4_options_enable_host`. The
         /// extension runs for every document parsed with these
         /// options, after the built-ins in registration order.
-        pub fn enable_host(&mut self, extension: Arc<dyn Extension>) -> &mut Self {
+        ///
+        /// # Errors
+        /// [`HostError::Duplicate`] when an extension with the same
+        /// name — a built-in or another host extension — is already
+        /// registered.
+        pub fn enable_host(
+            &mut self,
+            extension: Arc<dyn Extension>,
+        ) -> Result<&mut Self, HostError> {
+            let name = extension.name().to_string();
+            if self.inner.by_name(&name).is_some() {
+                return Err(HostError::Duplicate { name });
+            }
             self.inner.extension(extension);
-            self
+            Ok(self)
         }
     }
 
