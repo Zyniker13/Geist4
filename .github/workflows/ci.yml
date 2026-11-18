@@ -53,9 +53,24 @@ jobs:
       - name: Install binaryen (wasm-opt)
         # check.sh post-processes the wasm with `wasm-opt -Oz --strip-debug`
         # (decision 0029); any current version fits the size budget.
+        # Windows gets the official release tarball, pinned with the
+        # checksum the project publishes for it — bump the version and the
+        # checksum together. (Chocolatey's binaryen package is third-party;
+        # the release tarball is the project's own artifact.)
+        shell: bash
         run: |
-          if [ "$RUNNER_OS" = macOS ]; then brew install binaryen; else sudo apt-get update && sudo apt-get install -y --no-install-recommends binaryen; fi
-          wasm-opt --version
+          if [ "$RUNNER_OS" = macOS ]; then
+            brew install binaryen
+          elif [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends binaryen
+          else
+            curl -sSLo binaryen.tar.gz https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-windows.tar.gz
+            echo "17a2cbeac6b5693c5fbafab3838d3c65fd9c1eb38b05f5baec6c657e8c84995b  binaryen.tar.gz" | sha256sum -c -
+            mkdir -p "$RUNNER_TEMP/binaryen"
+            tar -xzf binaryen.tar.gz -C "$RUNNER_TEMP/binaryen" --strip-components=1
+            echo "$RUNNER_TEMP/binaryen/bin" >> "$GITHUB_PATH"
+            "$RUNNER_TEMP/binaryen/bin/wasm-opt.exe" --version
+          fi
       - name: Install maturin
         # The version the Python wheel build is pinned to; the Python
         # contract suite runs against the wheel it produces (decision 0034).

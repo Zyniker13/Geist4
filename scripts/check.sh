@@ -67,8 +67,9 @@ rustup target list --installed | grep -q wasm32-unknown-unknown || {
 }
 cargo build -p geist4-wasm --target wasm32-unknown-unknown --release
 command -v wasm-opt >/dev/null 2>&1 || {
-    echo 'wasm-opt not found; install binaryen (brew install binaryen on macOS,' >&2
-    echo 'apt-get install binaryen on Debian/Ubuntu) — decision 0029' >&2
+    echo "wasm-opt not found; install binaryen (brew install binaryen on macOS," >&2
+    echo "apt-get install binaryen on Debian/Ubuntu, or the release tarball from" >&2
+    echo "https://github.com/WebAssembly/binaryen/releases on Windows) — decision 0029" >&2
     exit 1
 }
 pkg_tmp=$(mktemp -d "${TMPDIR:-/tmp}/geist4-pkg-XXXXXX")
