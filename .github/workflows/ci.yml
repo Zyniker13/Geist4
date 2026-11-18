@@ -44,6 +44,12 @@ jobs:
         # The version the checked-in header was generated with; bump both
         # together and regenerate crates/geist4-ffi/include/geist4.h.
         run: cargo install --locked cbindgen@0.29.0
+      - name: Install wasm-bindgen-cli and the wasm target
+        # The versions the checked-in glue was generated with; the CLI and
+        # crate must stay paired (decision 0029), and bump both together.
+        run: |
+          cargo install --locked wasm-bindgen-cli@0.2.130
+          rustup target add wasm32-unknown-unknown
       - name: Run check.sh
         shell: bash
         run: |

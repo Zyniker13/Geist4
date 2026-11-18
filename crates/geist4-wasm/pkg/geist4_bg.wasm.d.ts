@@ -1,0 +1,35 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const __wbg_document_free: (a: number, b: number) => void;
+export const __wbg_options_free: (a: number, b: number) => void;
+export const __wbg_problem_free: (a: number, b: number) => void;
+export const document_html: (a: number) => [number, number, number, number];
+export const document_parse: (a: number, b: number) => [number, number, number];
+export const document_parseWith: (a: number, b: number, c: number) => [number, number, number];
+export const document_problems: (a: number) => [number, number];
+export const options_enable_builtin: (a: number, b: number, c: number) => [number, number];
+export const options_new: () => number;
+export const problem_end: (a: number) => number;
+export const problem_message: (a: number) => [number, number];
+export const problem_start: (a: number) => number;
+export const renderHtml: (a: number, b: number) => [number, number, number, number];
+export const renderHtmlWith: (a: number, b: number, c: number) => [number, number, number, number];
+export const version: () => [number, number];
+export const geist4_document_free: (a: number) => void;
+export const geist4_document_html: (a: number, b: number, c: number, d: number) => number;
+export const geist4_document_problems: (a: number, b: number, c: number, d: number) => number;
+export const geist4_options_create: () => number;
+export const geist4_options_enable_builtin: (a: number, b: number, c: number, d: number, e: number) => number;
+export const geist4_options_free: (a: number) => void;
+export const geist4_parse: (a: number, b: number, c: number, d: number, e: number) => number;
+export const geist4_render_html: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+export const geist4_string_free: (a: number) => void;
+export const geist4_version: () => number;
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __externref_table_dealloc: (a: number) => void;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __externref_drop_slice: (a: number, b: number) => void;
+export const __wbindgen_start: () => void;

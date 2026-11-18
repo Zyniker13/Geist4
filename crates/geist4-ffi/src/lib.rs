@@ -13,13 +13,12 @@
 //! `c-tests/` for the C program that pins the contract.
 
 use std::ffi::{CString, c_char};
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 use std::sync::{Arc, LazyLock};
 
-use geist4_core::basic_html;
 use geist4_core::extension::{Extension, Options};
-use geist4_core::parser::{Document, parse_with};
+
+use crate::safe::OwnedDocument;
 
 /// The outcome of an FFI call.
 ///
@@ -121,15 +120,9 @@ pub struct OptionsHandle {
 /// `geist4_document_free`; every pointer borrowed from the handle — the
 /// problem messages — is invalid afterwards.
 pub struct DocumentHandle {
-    /// The input, leaked from a `Box<str>`; freed after the document.
-    input: *mut str,
-    /// The parsed document, whose borrows point into `input`. The
-    /// `'static` lifetime is erased, not real: it holds exactly as long
-    /// as `input` stays allocated, which this handle guarantees.
-    document: *mut Document<'static>,
-    /// The options the document was parsed with, so rendering needs no
-    /// other argument and extensions outlive their options handle.
-    options: Options,
+    /// The parse itself: the erased borrows, the input copy and the
+    /// options registration, dropped in the right order.
+    owned: OwnedDocument,
     /// The problem entries handed to C, in document order.
     problems: Box<[Geist4Problem]>,
     /// The messages `problems` points into; same order, freed last.
@@ -318,56 +311,40 @@ pub unsafe extern "C" fn geist4_parse(
     build_handle(source, options_ref, err, err_cap)
 }
 
-/// Copies `source` into a handle-owned allocation, parses it there, and
-/// boxes the result with the problem lists laid out for C.
-///
-/// The `'static` borrows inside the returned handle are erased, not
-/// real: they hold exactly as long as the input allocation does, and
-/// `geist4_document_free` frees the document before the input (decision
-/// 0028).
+/// Builds a C handle around [`parse_owned`]: the safe parse plus the
+/// problem list laid out for C.
 fn build_handle(
     source: &str,
     options: &Options,
     err: *mut c_char,
     err_cap: usize,
 ) -> *mut DocumentHandle {
-    let input: Box<str> = Box::from(source);
-    let input_ptr: *mut str = Box::into_raw(input);
-    // SAFETY: `input_ptr` is the live allocation of the Box just
-    // constructed; it stays allocated until geist4_document_free, and
-    // nothing writes through it afterwards.
-    let source: &str = unsafe { &*input_ptr };
-    let parsed = catch_unwind(AssertUnwindSafe(|| parse_with(source, options)));
-    let document = match parsed {
-        Ok(document) => document,
+    let owned = match safe::OwnedDocument::parse_inner(source, options) {
+        Ok(owned) => owned,
         Err(panic) => {
-            // SAFETY: the same pointer into_raw handed out, not yet
-            // freed; the parse failed, so nothing borrows it.
-            drop(unsafe { Box::from_raw(input_ptr) });
-            set_error(err, err_cap, &panic_message(&panic));
+            set_error(err, err_cap, &panic.message);
             return ptr::null_mut();
         }
     };
     // The problem list: one boxed message per problem, and a C entry
     // pointing into it. The messages' heap addresses never change, so
     // the entries stay valid for the handle's whole life.
-    let mut messages: Vec<Box<str>> = Vec::with_capacity(document.problems.len());
-    let mut entries: Vec<Geist4Problem> = Vec::with_capacity(document.problems.len());
-    for problem in &document.problems {
-        let message: Box<str> = problem.message.as_str().into();
+    let reports = owned.problems();
+    let mut messages: Vec<Box<str>> = Vec::with_capacity(reports.len());
+    let mut entries: Vec<Geist4Problem> = Vec::with_capacity(reports.len());
+    for report in &reports {
+        let message: Box<str> = report.message.as_str().into();
         let entry = Geist4Problem {
             message: message.as_ptr().cast::<c_char>(),
             message_len: message.len(),
-            start: problem.span.start,
-            end: problem.span.end,
+            start: report.start,
+            end: report.end,
         };
         messages.push(message);
         entries.push(entry);
     }
     let handle = DocumentHandle {
-        input: input_ptr,
-        document: Box::into_raw(Box::new(document)),
-        options: options.clone(),
+        owned,
         problems: entries.into_boxed_slice(),
         messages: messages.into_boxed_slice(),
     };
@@ -398,16 +375,12 @@ pub unsafe extern "C" fn geist4_document_html(
         set_error(err, err_cap, "output pointer is null");
         return Status::GEIST4_ERR_NULL;
     }
-    // SAFETY: the handle's document points into its own input, which
-    // stays allocated until geist4_document_free; see decision 0028.
-    let render = catch_unwind(AssertUnwindSafe(|| {
-        let tree = unsafe { &*document.document };
-        basic_html::render_with(tree, &document.options)
-    }));
-    match render {
+    // The render goes through the safe wrapper; the handle's owned
+    // document keeps its input alive for the erased borrows.
+    match document.owned.render_html() {
         Ok(html) => write_string(html, out, err, err_cap),
         Err(panic) => {
-            set_error(err, err_cap, &panic_message(&panic));
+            set_error(err, err_cap, &panic.message);
             Status::GEIST4_ERR_PANIC
         }
     }
@@ -461,16 +434,10 @@ pub unsafe extern "C" fn geist4_document_free(document: *mut DocumentHandle) {
         return;
     }
     // SAFETY: the caller guarantees the handle came from geist4_parse
-    // and is live. The two raw pointers are exactly the ones the
-    // constructor handed out; the document borrows the input, so it is
-    // dropped first.
-    let handle = unsafe { Box::from_raw(document) };
-    // SAFETY: `handle.document` came from `Box::into_raw` at parse time
-    // and has not been dropped yet.
-    drop(unsafe { Box::from_raw(handle.document) });
-    // SAFETY: `handle.input` came from `Box::into_raw` at parse time;
-    // with the document gone nothing borrows it any more.
-    drop(unsafe { Box::from_raw(handle.input) });
+    // and is live. The owned document's fields drop in declaration
+    // order — the parse before the input it borrows — and the problem
+    // entries pointing into `messages` are gone with them.
+    drop(unsafe { Box::from_raw(document) });
 }
 
 /// Parses and renders in one call, without a document handle.
@@ -507,22 +474,14 @@ pub unsafe extern "C" fn geist4_render_html(
         // SAFETY: non-null, from geist4_options_create, still live.
         unsafe { &(*options).options }
     };
-    let input: Box<str> = Box::from(source);
-    let input_ptr: *mut str = Box::into_raw(input);
-    // SAFETY: the allocation just constructed; freed on every path
-    // below before returning.
-    let source: &str = unsafe { &*input_ptr };
-    let rendered = catch_unwind(AssertUnwindSafe(|| {
-        let document = parse_with(source, options_ref);
-        basic_html::render_with(&document, options_ref)
-    }));
-    // SAFETY: the same pointer into_raw handed out, not yet freed, and
-    // after this point nothing borrows it.
-    drop(unsafe { Box::from_raw(input_ptr) });
+    // The one-shot path parses and renders an owned document, so the
+    // borrow of `source` never leaves this call.
+    let rendered = safe::OwnedDocument::parse_inner(source, options_ref)
+        .and_then(|document| document.render_html());
     match rendered {
         Ok(html) => write_string(html, out, err, err_cap),
         Err(panic) => {
-            set_error(err, err_cap, &panic_message(&panic));
+            set_error(err, err_cap, &panic.message);
             Status::GEIST4_ERR_PANIC
         }
     }
@@ -628,5 +587,240 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
         text.clone()
     } else {
         "the engine panicked without a message".to_string()
+    }
+}
+
+/// Safe Rust over the same internals the C entry points use.
+///
+/// Binding authors who already speak Rust — the WebAssembly layer via
+/// `wasm-bindgen`, tests, tools — call these instead of the raw `extern
+/// "C"` functions: identical behavior, the same `catch_unwind`
+/// boundary, no raw pointers. This module is the reason the workspace's
+/// only `unsafe` lives in this crate (decision 0028): every binding
+/// builds on one boundary, and none of them needs `unsafe` of its own.
+pub mod safe {
+    use geist4_core::basic_html;
+    use geist4_core::extension::Options as CoreOptions;
+    use geist4_core::parser::{Document, parse_with};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use super::panic_message;
+
+    /// Every built-in name `Options::enable_builtin` accepts, for error
+    /// messages. One source of truth for the C path and this module.
+    pub(crate) const BUILTIN_NAMES: &str = "tables, strikethrough, autolink, \
+         tasklist, tagfilter, footnotes, front_matter, heading_identifiers, \
+         description_lists, gfm, all";
+
+    /// A caught engine panic: always an engine bug, never an expected
+    /// outcome. The C ABI reports it as `GEIST4_ERR_PANIC`; this module
+    /// hands it to the caller as a value.
+    #[derive(Debug, Clone)]
+    pub struct PanicReport {
+        /// What the panic carried.
+        pub message: String,
+    }
+
+    impl std::fmt::Display for PanicReport {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "the engine panicked: {}", self.message)
+        }
+    }
+
+    impl std::error::Error for PanicReport {}
+
+    /// An extension name no built-in answers to.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct UnknownBuiltin {
+        /// The name that was rejected.
+        pub name: String,
+    }
+
+    impl std::fmt::Display for UnknownBuiltin {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "unknown extension `{}`; valid names: {}",
+                self.name, BUILTIN_NAMES
+            )
+        }
+    }
+
+    impl std::error::Error for UnknownBuiltin {}
+
+    /// One problem the parse noticed, with its source span.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ProblemReport {
+        /// What the problem is, as one line.
+        pub message: String,
+        /// The span's start, as a byte offset into the source.
+        pub start: usize,
+        /// The span's end, exclusive, as a byte offset into the source.
+        pub end: usize,
+    }
+
+    /// The parse options: which built-in extensions are registered.
+    ///
+    /// `Options::new` is plain `CommonMark`; `enable_builtin` registers
+    /// built-ins by name, idempotently, in the same order the C ABI
+    /// does. The registration is cloned into every document parsed with
+    /// these options, so documents keep working after the options value
+    /// is dropped.
+    #[derive(Debug, Clone, Default)]
+    pub struct Options {
+        pub(crate) inner: CoreOptions,
+    }
+
+    impl Options {
+        /// Plain `CommonMark`, no extensions registered.
+        #[must_use]
+        pub fn new() -> Self {
+            Self {
+                inner: CoreOptions::new(),
+            }
+        }
+
+        /// Registers a built-in extension by name. Idempotent: a name
+        /// already registered does nothing, so bundles and single names
+        /// compose freely. Registration order is run order; a bundle
+        /// inserts its members in the engine's canonical order.
+        ///
+        /// # Errors
+        /// [`UnknownBuiltin`] when no built-in answers to `name`.
+        pub fn enable_builtin(&mut self, name: &str) -> Result<(), UnknownBuiltin> {
+            let Some(added) = super::builtin_by_name(name) else {
+                return Err(UnknownBuiltin {
+                    name: name.to_string(),
+                });
+            };
+            for extension in added {
+                if self.inner.by_name(extension.name()).is_none() {
+                    self.inner.extension(extension);
+                }
+            }
+            Ok(())
+        }
+    }
+
+    /// A parsed document that owns everything it borrows.
+    ///
+    /// The core's `Document` borrows its source text, so the document
+    /// owns a private copy of the input and the registration it was
+    /// parsed with. The erased `'static` inside is not real: it holds
+    /// exactly as long as `input`'s heap allocation, and the field
+    /// order drops the parse before that allocation. Moving an
+    /// `OwnedDocument` moves the `Box`'s pointer, never the allocation,
+    /// so the borrows survive any move.
+    pub struct OwnedDocument {
+        /// Dropped first: nothing borrows the input after it.
+        document: Document<'static>,
+        /// The input the document's borrows point into. Never read —
+        /// the field exists to keep the allocation alive for exactly
+        /// the document's lifetime; dropping it after `document` is
+        /// the whole soundness argument.
+        #[allow(dead_code)]
+        input: Box<str>,
+        /// The registration the document was parsed with.
+        options: CoreOptions,
+    }
+
+    impl OwnedDocument {
+        /// Parses `source`, with `None` for plain `CommonMark`.
+        ///
+        /// Infallible for the type system's usual reasons: a `&str` is
+        /// valid UTF-8 by construction. The only failure is an engine
+        /// panic, caught and reported — always a bug.
+        ///
+        /// # Errors
+        /// [`PanicReport`] when the engine panicked.
+        pub fn parse(source: &str, options: Option<&Options>) -> Result<Self, PanicReport> {
+            match options {
+                Some(options) => Self::parse_inner(source, &options.inner),
+                None => Self::parse_inner(source, &super::PLAIN),
+            }
+        }
+
+        pub(crate) fn parse_inner(
+            source: &str,
+            options: &CoreOptions,
+        ) -> Result<Self, PanicReport> {
+            let input: Box<str> = source.into();
+            let parsed = catch_unwind(AssertUnwindSafe(|| parse_with(&input, options)));
+            let document = match parsed {
+                Ok(document) => document,
+                Err(panic) => {
+                    return Err(PanicReport {
+                        message: panic_message(&panic),
+                    });
+                }
+            };
+            // SAFETY: the document's borrows point into the heap
+            // allocation `input` owns; the allocation's address never
+            // changes while the Box lives, and the field order drops
+            // `document` before `input`. The `'static` is erased, not
+            // real, for exactly that span (decision 0028).
+            let document: Document<'static> =
+                unsafe { std::mem::transmute::<Document<'_>, Document<'static>>(document) };
+            Ok(Self {
+                document,
+                input,
+                options: options.clone(),
+            })
+        }
+
+        /// Renders the document's HTML.
+        ///
+        /// The extensions the document was parsed with render the node
+        /// kinds they declared, exactly as in the Rust API.
+        ///
+        /// # Errors
+        /// [`PanicReport`] when the engine panicked — always a bug.
+        pub fn render_html(&self) -> Result<String, PanicReport> {
+            let rendered = catch_unwind(AssertUnwindSafe(|| {
+                basic_html::render_with(&self.document, &self.options)
+            }));
+            rendered.map_err(|panic| PanicReport {
+                message: panic_message(&panic),
+            })
+        }
+
+        /// The problems the parse noticed: broken references and
+        /// similar issues the tree absorbed without changing the
+        /// output, in document order, with spans into the source.
+        #[must_use]
+        pub fn problems(&self) -> Vec<ProblemReport> {
+            self.document
+                .problems
+                .iter()
+                .map(|problem| ProblemReport {
+                    message: problem.message.clone(),
+                    start: problem.span.start,
+                    end: problem.span.end,
+                })
+                .collect()
+        }
+    }
+
+    /// Parses and renders in one call.
+    ///
+    /// The convenient path for callers who only want HTML: the
+    /// intermediate tree never leaves this function. `options` of
+    /// `None` parses plain `CommonMark`.
+    ///
+    /// # Errors
+    /// [`PanicReport`] when the engine panicked — always a bug.
+    pub fn render_html(source: &str, options: Option<&Options>) -> Result<String, PanicReport> {
+        match options {
+            Some(options) => OwnedDocument::parse_inner(source, &options.inner)
+                .and_then(|document| document.render_html()),
+            None => OwnedDocument::parse_inner(source, &super::PLAIN)
+                .and_then(|document| document.render_html()),
+        }
+    }
+
+    /// The version of the engine, as in the C header's `geist4_version`.
+    #[must_use]
+    pub fn version() -> &'static str {
+        env!("CARGO_PKG_VERSION")
     }
 }

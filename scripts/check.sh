@@ -31,6 +31,49 @@ cmp crates/geist4-ffi/include/geist4.h "$header_tmp" || {
 echo '== C ABI tests =='
 sh crates/geist4-ffi/c-tests/run.sh
 
+echo '== wasm binding =='
+command -v wasm-bindgen >/dev/null 2>&1 || {
+    echo 'wasm-bindgen not found; install it with: cargo install --locked wasm-bindgen-cli@0.2.130' >&2
+    exit 1
+}
+command -v node >/dev/null 2>&1 || {
+    echo 'node not found; the wasm binding tests need Node' >&2
+    exit 1
+}
+rustup target list --installed | grep -q wasm32-unknown-unknown || {
+    echo 'the wasm32-unknown-unknown target is missing; add it with: rustup target add wasm32-unknown-unknown' >&2
+    exit 1
+}
+cargo build -p geist4-wasm --target wasm32-unknown-unknown --release
+pkg_tmp=$(mktemp -d "${TMPDIR:-/tmp}/geist4-pkg-XXXXXX")
+trap 'rm -rf "$pkg_tmp" "$header_tmp"' EXIT
+wasm-bindgen --target web --typescript \
+    --out-dir "$pkg_tmp" --out-name geist4 \
+    target/wasm32-unknown-unknown/release/geist4_wasm.wasm >/dev/null 2>&1
+pkg_stale=0
+for glue_file in geist4.js geist4.d.ts geist4_bg.wasm geist4_bg.wasm.d.ts; do
+    cmp "crates/geist4-wasm/pkg/$glue_file" "$pkg_tmp/$glue_file" || pkg_stale=1
+done
+[ "$pkg_stale" -eq 0 ] || {
+    echo 'crates/geist4-wasm/pkg/ is stale; regenerate it with:' >&2
+    echo '  cargo build -p geist4-wasm --target wasm32-unknown-unknown --release' >&2
+    echo '  wasm-bindgen --target web --typescript --out-dir crates/geist4-wasm/pkg --out-name geist4 target/wasm32-unknown-unknown/release/geist4_wasm.wasm' >&2
+    exit 1
+}
+# The size budget from decision 0029: the .wasm stays under 512 KiB raw
+# and 160 KiB gzipped, the transfer size an editor's page load pays.
+wasm_bytes=$(wc -c < crates/geist4-wasm/pkg/geist4_bg.wasm | tr -d ' ')
+gzip_bytes=$(gzip -9 -c crates/geist4-wasm/pkg/geist4_bg.wasm | wc -c | tr -d ' ')
+[ "$wasm_bytes" -le 524288 ] || {
+    echo "the wasm is $wasm_bytes bytes; decision 0029's budget is 524288 raw" >&2
+    exit 1
+}
+[ "$gzip_bytes" -le 163840 ] || {
+    echo "the gzipped wasm is $gzip_bytes bytes; decision 0029's budget is 163840" >&2
+    exit 1
+}
+node crates/geist4-wasm/node-tests/run.mjs
+
 echo '== conformance kit =='
 sh conformance/run.sh
 
