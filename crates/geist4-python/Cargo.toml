@@ -28,4 +28,4 @@ geist4-ffi = { path = "../geist4-ffi" }
 # Recorded in decision 0034: PyO3's abi3 build (the stable Python ABI,
 # floor 3.9 — pyo3 0.30 dropped 3.8) so one wheel serves every
 # supported Python.
-pyo3 = { version = "0.30.1", features = ["abi3-py39"] }
+pyo3 = { version = "0.30.1", features = ["abi3-py39", "py-clone"] }
