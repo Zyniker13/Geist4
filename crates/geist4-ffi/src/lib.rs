@@ -671,8 +671,10 @@ pub mod safe {
     // surface hands callbacks.
     pub use super::host::{
         BracketClaim, BracketHook, CloseHook, ContinueConsume, ContinueDecision, ContinueHook,
-        HostError, HostExtension, HostHooks, InitHook, LookHook, OverrideHook, PostHook,
-        RenderNodeHook, StartConsume, StartDecision, StartHook, TriggerHook,
+        Geist4HookBracket, Geist4HookClose, Geist4HookContinue, Geist4HookInit, Geist4HookLook,
+        Geist4HookPostProcess, Geist4HookRender, Geist4HookRenderOverride, Geist4HookStart,
+        Geist4HookTrigger, HostError, HostExtension, HostHooks, InitHook, LookHook, OverrideHook,
+        PostHook, RenderNodeHook, StartConsume, StartDecision, StartHook, TriggerHook,
     };
     pub use geist4_core::extension::{AttrValue, CoreNode, Extension, KindDecl};
 

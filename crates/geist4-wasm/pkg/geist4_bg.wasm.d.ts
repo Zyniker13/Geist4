@@ -21,6 +21,7 @@ export const geist4_document_html: (a: number, b: number, c: number, d: number) 
 export const geist4_document_problems: (a: number, b: number, c: number, d: number) => number;
 export const geist4_options_create: () => number;
 export const geist4_options_enable_builtin: (a: number, b: number, c: number, d: number, e: number) => number;
+export const geist4_options_enable_host: (a: number, b: number, c: number, d: number) => number;
 export const geist4_options_free: (a: number) => void;
 export const geist4_parse: (a: number, b: number, c: number, d: number, e: number) => number;
 export const geist4_render_html: (a: number, b: number, c: number, d: number, e: number, f: number) => number;

@@ -255,8 +255,12 @@ pub const GEIST4_ATTR_INT: i32 = 1;
 /// Attribute tag: `number` carries a boolean value (zero or non-zero).
 pub const GEIST4_ATTR_BOOL: i32 = 2;
 
-// The hook function-pointer shapes, as type aliases so the vtable's
-// field types read as names.
+// The hook function-pointer shapes, as type aliases for the contracts'
+// documentation. The vtable spells the signatures out instead of using
+// these aliases: cbindgen renders `Option<alias>` fields as opaque
+// forward-declared structs, which do not compile, while an inline
+// `Option<unsafe extern "C" fn(...)>` field renders as the nullable
+// function pointer a C host expects.
 
 /// `init`: called once per parse before any other hook. Negative
 /// return rejects the parse — the extension latches and declines.
@@ -272,7 +276,7 @@ pub type Geist4HookLook = unsafe extern "C" fn(
     column: u32,
 ) -> i32;
 
-/// `block-start`: writes a [`Geist4StartDecision`] into `out` and
+/// `block-start`: writes a `Geist4StartDecision` into `out` and
 /// returns `1`, returns `0` to decline, or returns negative on
 /// failure. `container_kind` is `None` for the document and plain
 /// containers, `"paragraph"` for an open paragraph, the open block's
@@ -288,7 +292,7 @@ pub type Geist4HookStart = unsafe extern "C" fn(
     out: *mut Geist4StartDecision,
 ) -> i32;
 
-/// `block-continue`: writes a [`Geist4ContinueDecision`] into `out`
+/// `block-continue`: writes a `Geist4ContinueDecision` into `out`
 /// and returns `1`, returns `0` to close, or returns negative on
 /// failure.
 pub type Geist4HookContinue = unsafe extern "C" fn(
@@ -301,13 +305,13 @@ pub type Geist4HookContinue = unsafe extern "C" fn(
     out: *mut Geist4ContinueDecision,
 ) -> i32;
 
-/// `block-close`: writes a [`Geist4Rendered`] into `out` and returns
+/// `block-close`: writes a `Geist4Rendered` into `out` and returns
 /// `1`, returns `0` to keep the node with its children rendered as a
 /// plain container renders them, or returns negative on failure.
 pub type Geist4HookClose = unsafe extern "C" fn(ctx: *mut c_void, out: *mut Geist4Rendered) -> i32;
 
 /// `inline-trigger`: called for the registered trigger bytes only.
-/// Writes a [`Geist4InlineDecision`] into `out` and returns `1`,
+/// Writes a `Geist4InlineDecision` into `out` and returns `1`,
 /// returns `0` to leave the byte as text, or returns negative on
 /// failure. `pos` is the prefix's length: the line is the prefix
 /// before the cursor joined with the rest of the line.
@@ -321,7 +325,7 @@ pub type Geist4HookTrigger = unsafe extern "C" fn(
 
 /// `inline-bracket`: called for `[`…`]` groups that matched no link,
 /// with the group's content as text. Writes a
-/// [`Geist4InlineDecision`] into `out` and returns `1`, returns `0`
+/// `Geist4InlineDecision` into `out` and returns `1`, returns `0`
 /// to leave the group as text, or returns negative on failure.
 pub type Geist4HookBracket = unsafe extern "C" fn(
     ctx: *mut c_void,
@@ -342,7 +346,7 @@ pub type Geist4HookPostProcess = unsafe extern "C" fn(
 
 /// `render`: renders one extension node whole. `attrs` arrive with
 /// their typed tags; the children's rendered HTML arrives
-/// concatenated. Writes a [`Geist4Rendered`] into `out` and returns
+/// concatenated. Writes a `Geist4Rendered` into `out` and returns
 /// `1`, returns `0` for the neutral result — the node renders
 /// nothing — or returns negative on failure.
 pub type Geist4HookRender = unsafe extern "C" fn(
@@ -360,7 +364,7 @@ pub type Geist4HookRender = unsafe extern "C" fn(
 /// were pre-rendered with the built-in conventions before the call;
 /// the hook pulls child `i`'s HTML by calling `fetch` with `i` and
 /// `fetch_ctx`, in order, as many times as it wants. Writes a
-/// [`Geist4Rendered`] into `out` and returns `1`, returns `0` to
+/// `Geist4Rendered` into `out` and returns `1`, returns `0` to
 /// leave the node's output empty — a claimed node renders only
 /// through its override, so a decline renders nothing — or returns
 /// negative on failure.
@@ -400,27 +404,127 @@ pub struct Geist4HostVTable {
     pub triggers: *const u8,
     /// The number of trigger bytes.
     pub triggers_len: usize,
-    /// The `init` hook, or null.
-    pub init: Option<Geist4HookInit>,
-    /// The `block-start-look` hook, or null.
-    pub block_start_look: Option<Geist4HookLook>,
-    /// The `block-start` hook, or null.
-    pub block_start: Option<Geist4HookStart>,
-    /// The `block-continue` hook, or null.
-    pub block_continue: Option<Geist4HookContinue>,
-    /// The `block-close` hook, or null.
-    pub block_close: Option<Geist4HookClose>,
-    /// The `inline-trigger` hook, or null.
-    pub inline_trigger: Option<Geist4HookTrigger>,
-    /// The `inline-bracket` hook, or null.
-    pub inline_bracket: Option<Geist4HookBracket>,
-    /// The `post-process` hook, or null.
-    pub post_process: Option<Geist4HookPostProcess>,
-    /// The `render` hook, or null.
-    pub render: Option<Geist4HookRender>,
-    /// The `render_override` hook, or null.
-    pub render_override: Option<Geist4HookRenderOverride>,
+    /// The `init` hook, or null. See [`Geist4HookInit`] for the
+    /// contract.
+    pub init: Option<unsafe extern "C" fn(ctx: *mut c_void) -> i32>,
+    /// The `block-start-look` hook, or null. See [`Geist4HookLook`]
+    /// for the contract.
+    pub block_start_look: Option<
+        unsafe extern "C" fn(
+            ctx: *mut c_void,
+            line: *const u8,
+            line_len: usize,
+            indented: i32,
+            column: u32,
+        ) -> i32,
+    >,
+    /// The `block-start` hook, or null. See [`Geist4HookStart`] for
+    /// the contract.
+    pub block_start: Option<
+        unsafe extern "C" fn(
+            ctx: *mut c_void,
+            line: *const u8,
+            line_len: usize,
+            indented: i32,
+            column: u32,
+            container_kind: *const u8,
+            container_kind_len: usize,
+            out: *mut Geist4StartDecision,
+        ) -> i32,
+    >,
+    /// The `block-continue` hook, or null. See [`Geist4HookContinue`]
+    /// for the contract.
+    pub block_continue: Option<
+        unsafe extern "C" fn(
+            ctx: *mut c_void,
+            line: *const u8,
+            line_len: usize,
+            indented: i32,
+            column: u32,
+            blank: i32,
+            out: *mut Geist4ContinueDecision,
+        ) -> i32,
+    >,
+    /// The `block-close` hook, or null. See [`Geist4HookClose`] for
+    /// the contract.
+    pub block_close:
+        Option<unsafe extern "C" fn(ctx: *mut c_void, out: *mut Geist4Rendered) -> i32>,
+    /// The `inline-trigger` hook, or null. See [`Geist4HookTrigger`]
+    /// for the contract.
+    pub inline_trigger: Option<
+        unsafe extern "C" fn(
+            ctx: *mut c_void,
+            line: *const u8,
+            line_len: usize,
+            pos: u32,
+            out: *mut Geist4InlineDecision,
+        ) -> i32,
+    >,
+    /// The `inline-bracket` hook, or null. See [`Geist4HookBracket`]
+    /// for the contract.
+    pub inline_bracket: Option<
+        unsafe extern "C" fn(
+            ctx: *mut c_void,
+            content: *const u8,
+            content_len: usize,
+            out: *mut Geist4InlineDecision,
+        ) -> i32,
+    >,
+    /// The `post-process` hook, or null. See [`Geist4HookPostProcess`]
+    /// for the contract.
+    pub post_process: Option<
+        unsafe extern "C" fn(
+            ctx: *mut c_void,
+            text: *const u8,
+            text_len: usize,
+            out: *mut Geist4Span,
+        ) -> i32,
+    >,
+    /// The `render` hook, or null. See [`Geist4HookRender`] for the
+    /// contract.
+    pub render: Option<
+        unsafe extern "C" fn(
+            ctx: *mut c_void,
+            kind: *const u8,
+            kind_len: usize,
+            attrs: *const Geist4Attr,
+            attrs_len: usize,
+            children_html: *const u8,
+            children_html_len: usize,
+            out: *mut Geist4Rendered,
+        ) -> i32,
+    >,
+    /// The `render_override` hook, or null. See
+    /// [`Geist4HookRenderOverride`] for the contract.
+    pub render_override: Option<
+        unsafe extern "C" fn(
+            ctx: *mut c_void,
+            kind: *const u8,
+            kind_len: usize,
+            attrs: *const Geist4Attr,
+            attrs_len: usize,
+            n_children: u32,
+            fetch: Geist4ChildFetch,
+            fetch_ctx: *mut c_void,
+            out: *mut Geist4Rendered,
+        ) -> i32,
+    >,
 }
+
+// The `Geist4Hook*` aliases above are the documented shapes of the
+// vtable's hooks, spelled out inline in the fields because cbindgen
+// cannot render an `Option<alias>` field. These conversions fail to
+// compile if a field ever drifts from its alias.
+const _: fn(&Geist4HostVTable) -> Option<Geist4HookInit> = |v| v.init;
+const _: fn(&Geist4HostVTable) -> Option<Geist4HookLook> = |v| v.block_start_look;
+const _: fn(&Geist4HostVTable) -> Option<Geist4HookStart> = |v| v.block_start;
+const _: fn(&Geist4HostVTable) -> Option<Geist4HookContinue> = |v| v.block_continue;
+const _: fn(&Geist4HostVTable) -> Option<Geist4HookClose> = |v| v.block_close;
+const _: fn(&Geist4HostVTable) -> Option<Geist4HookTrigger> = |v| v.inline_trigger;
+const _: fn(&Geist4HostVTable) -> Option<Geist4HookBracket> = |v| v.inline_bracket;
+const _: fn(&Geist4HostVTable) -> Option<Geist4HookPostProcess> = |v| v.post_process;
+const _: fn(&Geist4HostVTable) -> Option<Geist4HookRender> = |v| v.render;
+const _: fn(&Geist4HostVTable) -> Option<Geist4HookRenderOverride> = |v| v.render_override;
 
 // ---------------------------------------------------------------------------
 // The safe surface: boxed closures.
@@ -794,7 +898,7 @@ impl HostExtension {
     /// The declared data is validated the same way the loader
     /// validates a tier-2 manifest and copied, so the host may free
     /// its registration arrays when this returns. The context pointer
-    /// and the function pointers are kept; [`Geist4HostVTable::free_ctx`]
+    /// and the function pointers are kept; `Geist4HostVTable::free_ctx`
     /// runs when the extension drops.
     ///
     /// # Errors

@@ -137,26 +137,6 @@ typedef int32_t geist4_status;
  */
 typedef struct geist4_document geist4_document;
 
-typedef struct Option_Geist4HookBracket Option_Geist4HookBracket;
-
-typedef struct Option_Geist4HookClose Option_Geist4HookClose;
-
-typedef struct Option_Geist4HookContinue Option_Geist4HookContinue;
-
-typedef struct Option_Geist4HookInit Option_Geist4HookInit;
-
-typedef struct Option_Geist4HookLook Option_Geist4HookLook;
-
-typedef struct Option_Geist4HookPostProcess Option_Geist4HookPostProcess;
-
-typedef struct Option_Geist4HookRender Option_Geist4HookRender;
-
-typedef struct Option_Geist4HookRenderOverride Option_Geist4HookRenderOverride;
-
-typedef struct Option_Geist4HookStart Option_Geist4HookStart;
-
-typedef struct Option_Geist4HookTrigger Option_Geist4HookTrigger;
-
 /**
  * The parse options: which built-in extensions are registered.
  *
@@ -211,6 +191,153 @@ typedef struct Geist4KindDecl {
 } Geist4KindDecl;
 
 /**
+ * One attribute: a name and a typed value. The value's shape follows
+ * `tag`: [`GEIST4_ATTR_STR`] reads `text`, [`GEIST4_ATTR_INT`] reads
+ * `number`, [`GEIST4_ATTR_BOOL`] reads `number` as zero or non-zero.
+ * Unused fields stay zero/null.
+ */
+typedef struct Geist4Attr {
+  /**
+   * The attribute's name.
+   */
+  struct Geist4Span name;
+  /**
+   * Which field carries the value: [`GEIST4_ATTR_STR`],
+   * [`GEIST4_ATTR_INT`] or [`GEIST4_ATTR_BOOL`].
+   */
+  int32_t tag;
+  /**
+   * The value for the integer and boolean tags.
+   */
+  int64_t number;
+  /**
+   * The value for the string tag.
+   */
+  struct Geist4Span text;
+} Geist4Attr;
+
+/**
+ * A `block-start` decision. The `tag` picks both the consume and how
+ * the other fields read:
+ *
+ * * [`GEIST4_START_WHOLE_LINE`] — open with the whole line consumed;
+ *   `kind` and the attributes apply.
+ * * [`GEIST4_START_COLUMNS`] — seek `columns` columns past the
+ *   content and open, leaving the rest of the line as the block's
+ *   first paragraph; `kind`, `columns` and the attributes apply.
+ * * [`GEIST4_START_REST`] — seek to the content and open, leaving
+ *   the whole rest of the line as the block's first paragraph; `kind`
+ *   and the attributes apply.
+ * * [`GEIST4_START_CLAIM`] — the task-list pattern: consume `columns`
+ *   bytes off the line, claim the deepest plain container with the
+ *   attributes, and open nothing; `columns` and the attributes apply,
+ *   `kind` is ignored.
+ */
+typedef struct Geist4StartDecision {
+  /**
+   * Which consume the decision names.
+   */
+  int32_t tag;
+  /**
+   * The extension kind to open; ignored for the claim tag.
+   */
+  struct Geist4Span kind;
+  /**
+   * The attributes to set on the opened or claimed node.
+   */
+  const struct Geist4Attr *attrs;
+  /**
+   * The number of attributes.
+   */
+  size_t attrs_len;
+  /**
+   * The columns to seek for [`GEIST4_START_COLUMNS`], or the bytes
+   * to consume for [`GEIST4_START_CLAIM`].
+   */
+  uint32_t columns;
+} Geist4StartDecision;
+
+/**
+ * A `block-continue` decision: [`GEIST4_CONTINUE_KEEP`] consumes the
+ * line's remaining columns as `columns` names (`u32::MAX` for every
+ * remaining column, `0` for none) and keeps the block open;
+ * [`GEIST4_CONTINUE_CLOSE_LINE`] closes the block and consumes the
+ * line whole.
+ */
+typedef struct Geist4ContinueDecision {
+  /**
+   * Which continue the decision names.
+   */
+  int32_t tag;
+  /**
+   * The columns to consume for the keep tag.
+   */
+  uint32_t columns;
+} Geist4ContinueDecision;
+
+/**
+ * A rendering a hook supplies: [`GEIST4_OUT_HTML`] with `html` set,
+ * or [`GEIST4_OUT_NONE`] to decline.
+ */
+typedef struct Geist4Rendered {
+  /**
+   * Which outcome the hook chose.
+   */
+  int32_t tag;
+  /**
+   * The HTML, for the [`GEIST4_OUT_HTML`] tag.
+   */
+  struct Geist4Span html;
+} Geist4Rendered;
+
+/**
+ * An inline decision. The `tag` picks the action:
+ *
+ * * [`GEIST4_INLINE_LITERAL`] — leave the bytes as text.
+ * * [`GEIST4_INLINE_DELIMITER`] — tag the run at the cursor with
+ *   `kind` (the `inline-trigger` hook only).
+ * * [`GEIST4_INLINE_NODE`] — claim the bracket group's content as an
+ *   inline node of `kind`, keeping up to `end` bytes of it as the
+ *   node's children (the `inline-bracket` hook only; the trigger
+ *   hook has no claim API and treats this tag as literal, the way
+ *   tier 2 does).
+ */
+typedef struct Geist4InlineDecision {
+  /**
+   * Which action the decision names.
+   */
+  int32_t tag;
+  /**
+   * The extension kind for the delimiter and node tags.
+   */
+  struct Geist4Span kind;
+  /**
+   * The content length to keep for the node tag; the whole group
+   * when it reaches past the content.
+   */
+  uint32_t end;
+  /**
+   * The typed attributes for the node tag, read with
+   * [`read_attrs`]; null with zero length for none. Ignored for the
+   * other tags.
+   */
+  const struct Geist4Attr *attrs;
+  /**
+   * The attribute count; zero when `attrs` is null.
+   */
+  size_t attrs_len;
+} Geist4InlineDecision;
+
+/**
+ * The engine-provided fetch a render-override hook pulls children
+ * with. `index` counts from zero up to the child count the hook was
+ * handed; the engine writes the child's HTML into `out`. Returns `0`
+ * when the child was delivered, negative when `index` is past the
+ * last child, which is how the host stops.
+ */
+typedef int32_t (*Geist4ChildFetch)(void *ctx, uint32_t index, struct Geist4Span *out);
+
+/**
  * The tier-3 vtable: the declared data plus one function pointer per
  * hook, every hook optional. A `None` hook declines.
  *
@@ -250,45 +377,94 @@ typedef struct Geist4HostVTable {
    */
   size_t triggers_len;
   /**
-   * The `init` hook, or null.
+   * The `init` hook, or null. See [`Geist4HookInit`] for the
+   * contract.
    */
-  struct Option_Geist4HookInit init;
+  int32_t (*init)(void *ctx);
   /**
-   * The `block-start-look` hook, or null.
+   * The `block-start-look` hook, or null. See [`Geist4HookLook`]
+   * for the contract.
    */
-  struct Option_Geist4HookLook block_start_look;
+  int32_t (*block_start_look)(void *ctx,
+                              const uint8_t *line,
+                              size_t line_len,
+                              int32_t indented,
+                              uint32_t column);
   /**
-   * The `block-start` hook, or null.
+   * The `block-start` hook, or null. See [`Geist4HookStart`] for
+   * the contract.
    */
-  struct Option_Geist4HookStart block_start;
+  int32_t (*block_start)(void *ctx,
+                         const uint8_t *line,
+                         size_t line_len,
+                         int32_t indented,
+                         uint32_t column,
+                         const uint8_t *container_kind,
+                         size_t container_kind_len,
+                         struct Geist4StartDecision *out);
   /**
-   * The `block-continue` hook, or null.
+   * The `block-continue` hook, or null. See [`Geist4HookContinue`]
+   * for the contract.
    */
-  struct Option_Geist4HookContinue block_continue;
+  int32_t (*block_continue)(void *ctx,
+                            const uint8_t *line,
+                            size_t line_len,
+                            int32_t indented,
+                            uint32_t column,
+                            int32_t blank,
+                            struct Geist4ContinueDecision *out);
   /**
-   * The `block-close` hook, or null.
+   * The `block-close` hook, or null. See [`Geist4HookClose`] for
+   * the contract.
    */
-  struct Option_Geist4HookClose block_close;
+  int32_t (*block_close)(void *ctx, struct Geist4Rendered *out);
   /**
-   * The `inline-trigger` hook, or null.
+   * The `inline-trigger` hook, or null. See [`Geist4HookTrigger`]
+   * for the contract.
    */
-  struct Option_Geist4HookTrigger inline_trigger;
+  int32_t (*inline_trigger)(void *ctx,
+                            const uint8_t *line,
+                            size_t line_len,
+                            uint32_t pos,
+                            struct Geist4InlineDecision *out);
   /**
-   * The `inline-bracket` hook, or null.
+   * The `inline-bracket` hook, or null. See [`Geist4HookBracket`]
+   * for the contract.
    */
-  struct Option_Geist4HookBracket inline_bracket;
+  int32_t (*inline_bracket)(void *ctx,
+                            const uint8_t *content,
+                            size_t content_len,
+                            struct Geist4InlineDecision *out);
   /**
-   * The `post-process` hook, or null.
+   * The `post-process` hook, or null. See [`Geist4HookPostProcess`]
+   * for the contract.
    */
-  struct Option_Geist4HookPostProcess post_process;
+  int32_t (*post_process)(void *ctx, const uint8_t *text, size_t text_len, struct Geist4Span *out);
   /**
-   * The `render` hook, or null.
+   * The `render` hook, or null. See [`Geist4HookRender`] for the
+   * contract.
    */
-  struct Option_Geist4HookRender render;
+  int32_t (*render)(void *ctx,
+                    const uint8_t *kind,
+                    size_t kind_len,
+                    const struct Geist4Attr *attrs,
+                    size_t attrs_len,
+                    const uint8_t *children_html,
+                    size_t children_html_len,
+                    struct Geist4Rendered *out);
   /**
-   * The `render_override` hook, or null.
+   * The `render_override` hook, or null. See
+   * [`Geist4HookRenderOverride`] for the contract.
    */
-  struct Option_Geist4HookRenderOverride render_override;
+  int32_t (*render_override)(void *ctx,
+                             const uint8_t *kind,
+                             size_t kind_len,
+                             const struct Geist4Attr *attrs,
+                             size_t attrs_len,
+                             uint32_t n_children,
+                             Geist4ChildFetch fetch,
+                             void *fetch_ctx,
+                             struct Geist4Rendered *out);
 } Geist4HostVTable;
 
 /**

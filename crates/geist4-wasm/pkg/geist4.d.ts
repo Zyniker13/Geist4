@@ -143,6 +143,7 @@ export interface InitOutput {
     readonly geist4_document_problems: (a: number, b: number, c: number, d: number) => number;
     readonly geist4_options_create: () => number;
     readonly geist4_options_enable_builtin: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly geist4_options_enable_host: (a: number, b: number, c: number, d: number) => number;
     readonly geist4_options_free: (a: number) => void;
     readonly geist4_parse: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly geist4_render_html: (a: number, b: number, c: number, d: number, e: number, f: number) => number;

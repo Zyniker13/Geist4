@@ -139,3 +139,12 @@ the Rust loader already validates the manifest.
   decisions — it never touches the tree.
 - The vtable gives any C-ABI consumer (not only Swift) the full tier-3
   surface, which keeps the C ABI the universal floor.
+- The C header spells each hook's signature out in the vtable fields
+  (`Option<unsafe extern "C" fn(...) -> i32>`, which cbindgen renders
+  as a nullable function pointer) instead of referring to the
+  `Geist4Hook*` type aliases: cbindgen renders an
+  `Option<alias-to-fn-pointer>` field as a forward-declared opaque
+  struct, and a header full of undefined `Option_Geist4Hook*` types
+  does not compile. The aliases stay as the documented shapes,
+  re-exported from `safe` as the C ABI's named function-pointer types
+  for any Rust host speaking the C ABI.
