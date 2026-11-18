@@ -295,8 +295,8 @@ fn post_process_rewrites_text_only() {
 }
 
 /// A callback failure latches: the extension declines for that parse,
-/// the document renders plain, and `take_error` hands the message
-/// back exactly once.
+/// the document renders plain, and the latched message surfaces
+/// through `problems` exactly once (the first read drains it).
 #[test]
 fn hook_failure_latches_and_surfaces_once() {
     let hooks = HostHooks {
@@ -309,17 +309,18 @@ fn hook_failure_latches_and_surfaces_once() {
         Arc::new(HostExtension::from_hooks("boom".to_string(), vec![], vec![], hooks).unwrap());
     let mut options = Options::new();
     options.enable_host(host.clone()).unwrap();
-    let html = OwnedDocument::parse("hello GMT\n", Some(&options))
-        .unwrap()
-        .render_html()
-        .unwrap();
+    let document = OwnedDocument::parse("hello GMT\n", Some(&options)).unwrap();
+    let html = document.render_html().unwrap();
     assert_eq!(html, "<p>hello GMT</p>\n", "the failed hook declined");
+    let problems = document.problems();
+    assert_eq!(problems.len(), 1, "the latched message surfaces");
     assert_eq!(
-        host.take_error().as_deref(),
-        Some("host callback exploded"),
-        "the latched message is handed back once"
+        problems[0].message,
+        "extension 'boom': host callback exploded"
     );
-    assert!(host.take_error().is_none(), "taken means taken");
+    assert_eq!(problems[0].start, 0, "host errors carry no span");
+    assert_eq!(document.problems(), problems, "problems is a view");
+    assert!(host.take_error().is_none(), "the drain took the latch");
 }
 
 /// The declared data is validated at construction, the way the loader

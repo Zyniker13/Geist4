@@ -14,7 +14,7 @@
 
 use std::ffi::{CString, c_char};
 use std::ptr;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use geist4_core::extension::{Extension, Options};
 
@@ -661,7 +661,7 @@ pub mod safe {
     use geist4_core::extension::{Extension, Options as CoreOptions};
     use geist4_core::parser::{Document, parse_with};
     use std::panic::{AssertUnwindSafe, catch_unwind};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     use super::panic_message;
 
@@ -813,6 +813,19 @@ pub mod safe {
         input: Box<str>,
         /// The registration the document was parsed with.
         options: CoreOptions,
+        /// Errors the extensions latched, drained after the parse and
+        /// after each render; [`problems`](Self::problems) appends
+        /// them so every binding sees a failed hook without new API.
+        extension_errors: Mutex<Vec<String>>,
+    }
+
+    /// Drains every registered extension's latched error into `out`.
+    fn drain_extension_errors(options: &CoreOptions, out: &mut Vec<String>) {
+        for extension in options.extensions() {
+            if let Some(error) = extension.take_error() {
+                out.push(format!("extension '{}': {error}", extension.name()));
+            }
+        }
     }
 
     impl OwnedDocument {
@@ -852,10 +865,13 @@ pub mod safe {
             // real, for exactly that span (decision 0028).
             let document: Document<'static> =
                 unsafe { std::mem::transmute::<Document<'_>, Document<'static>>(document) };
+            let mut extension_errors = Vec::new();
+            drain_extension_errors(options, &mut extension_errors);
             Ok(Self {
                 document,
                 input,
                 options: options.clone(),
+                extension_errors: Mutex::new(extension_errors),
             })
         }
 
@@ -870,17 +886,27 @@ pub mod safe {
             let rendered = catch_unwind(AssertUnwindSafe(|| {
                 basic_html::render_with(&self.document, &self.options)
             }));
-            rendered.map_err(|panic| PanicReport {
+            let html = rendered.map_err(|panic| PanicReport {
                 message: panic_message(&panic),
-            })
+            })?;
+            // Render hooks can latch too: drain after the render, so
+            // the next `problems` call reports what failed.
+            let mut drained = self.extension_errors.lock().expect("sound mutex");
+            drain_extension_errors(&self.options, &mut drained);
+            Ok(html)
         }
 
         /// The problems the parse noticed: broken references and
         /// similar issues the tree absorbed without changing the
         /// output, in document order, with spans into the source.
+        ///
+        /// Extension errors the parse or a render latched — a host
+        /// hook that failed, say — follow the parse problems, with no
+        /// span and the failing extension's name in the message.
         #[must_use]
         pub fn problems(&self) -> Vec<ProblemReport> {
-            self.document
+            let mut problems: Vec<ProblemReport> = self
+                .document
                 .problems
                 .iter()
                 .map(|problem| ProblemReport {
@@ -888,7 +914,15 @@ pub mod safe {
                     start: problem.span.start,
                     end: problem.span.end,
                 })
-                .collect()
+                .collect();
+            for message in self.extension_errors.lock().expect("sound mutex").iter() {
+                problems.push(ProblemReport {
+                    message: message.clone(),
+                    start: 0,
+                    end: 0,
+                });
+            }
+            problems
         }
     }
 
