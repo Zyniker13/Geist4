@@ -14,7 +14,7 @@
 
 use std::ffi::{CString, c_char};
 use std::ptr;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock};
 
 use geist4_core::extension::{Extension, Options};
 
@@ -658,7 +658,7 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
 /// builds on one boundary, and none of them needs `unsafe` of its own.
 pub mod safe {
     use geist4_core::basic_html;
-    use geist4_core::extension::{Extension, Options as CoreOptions};
+    use geist4_core::extension::Options as CoreOptions;
     use geist4_core::parser::{Document, parse_with};
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{Arc, Mutex};
@@ -670,10 +670,11 @@ pub mod safe {
     // types stay behind the C ABI; these are the shapes the closure
     // surface hands callbacks.
     pub use super::host::{
-        BracketClaim, ContinueConsume, ContinueDecision, HostError, HostExtension, HostHooks,
-        StartConsume, StartDecision,
+        BracketClaim, BracketHook, CloseHook, ContinueConsume, ContinueDecision, ContinueHook,
+        HostError, HostExtension, HostHooks, InitHook, LookHook, OverrideHook, PostHook,
+        RenderNodeHook, StartConsume, StartDecision, StartHook, TriggerHook,
     };
-    pub use geist4_core::extension::{AttrValue, CoreNode, KindDecl};
+    pub use geist4_core::extension::{AttrValue, CoreNode, Extension, KindDecl};
 
     /// Every built-in name `Options::enable_builtin` accepts, for error
     /// messages. One source of truth for the C path and this module.
@@ -890,8 +891,13 @@ pub mod safe {
                 message: panic_message(&panic),
             })?;
             // Render hooks can latch too: drain after the render, so
-            // the next `problems` call reports what failed.
-            let mut drained = self.extension_errors.lock().expect("sound mutex");
+            // the next `problems` call reports what failed. A lock
+            // poisoned by a hook panic still holds consistent data —
+            // the drain is a plain append loop — so recover it.
+            let mut drained = self
+                .extension_errors
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             drain_extension_errors(&self.options, &mut drained);
             Ok(html)
         }
@@ -915,7 +921,14 @@ pub mod safe {
                     end: problem.span.end,
                 })
                 .collect();
-            for message in self.extension_errors.lock().expect("sound mutex").iter() {
+            // Same poisoned-lock rule as `render_html`: recover the
+            // vector; a panic mid-append cannot corrupt it.
+            for message in self
+                .extension_errors
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+            {
                 problems.push(ProblemReport {
                     message: message.clone(),
                     start: 0,

@@ -3,6 +3,7 @@
 //! binding's callbacks will, and every failure path declines
 //! instead of unwinding into the engine.
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 
 use geist4_core::extension::Extension;
@@ -157,7 +158,7 @@ fn claim_marks_the_container_and_the_override_renders() {
             },
         )),
         render_override: Some(Box::new(|_node, children: &[String], out: &mut String| {
-            out.push_str(&format!("<div class=\"todo\">{}</div>", children.concat()));
+            let _ = write!(out, "<div class=\"todo\">{}</div>", children.concat());
             Ok(true)
         })),
         ..HostHooks::default()

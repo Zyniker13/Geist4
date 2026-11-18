@@ -1499,7 +1499,7 @@ impl Extension for HostExtension {
             return;
         }
         if let Some(init) = &self.hooks.init {
-            let _: Option<()> = self.call_result(|| init().map(|_| None));
+            let _: Option<()> = self.call_result(|| init().map(|()| None));
         }
     }
 
@@ -1672,7 +1672,7 @@ impl Extension for HostExtension {
         let Some(hook) = &self.hooks.block_close else {
             return;
         };
-        let Some(html) = self.call_result(|| hook()) else {
+        let Some(html) = self.call_result(|| hook.as_ref()()) else {
             return;
         };
         let mut literal = html;
