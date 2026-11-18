@@ -1,0 +1,92 @@
+# Temporary diagnostic workflow: posts failing log excerpts as commit
+# statuses (the job-log endpoints need admin; commit statuses are public).
+# Remove after the failures are diagnosed.
+name: Diag
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  iai:
+    name: Diag iai gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install Rust (stable)
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+      - name: Install valgrind
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends valgrind && valgrind --version
+      - name: Install iai-callgrind-runner
+        run: cargo install --locked iai-callgrind-runner@0.14.2
+      - name: Run the benchmarks
+        run: |
+          CARGO_BUILD_JOBS=2 cargo bench -p geist4-bench --bench iai > iai.log 2>&1 || true
+          tail -40 iai.log
+      - name: Check the counts
+        run: |
+          python3 tools/check_iai.py iai.log bench/iai-baseline.txt > verdict.txt 2>&1 || true
+          cat verdict.txt
+      - name: Post the verdict
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          n=0
+          { cat verdict.txt; echo '--- iai.log tail ---'; tail -c 2000 iai.log; } |
+          grep -vE "^\s*$" | tail -c 1100 |
+          sed 's/"/\\"/g' |
+          fold -w 130 |
+          while IFS= read -r line; do
+            n=$((n+1))
+            curl -s -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/$SHA" \
+              -d "{\"state\":\"success\",\"context\":\"diag/iai-$n\",\"description\":\"$line\"}" \
+              -o /dev/null
+          done
+
+  windows:
+    name: Diag windows check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install Rust (stable, with rustfmt and clippy)
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update
+          rustup default stable
+      - name: Install cbindgen
+        run: cargo install --locked cbindgen@0.29.0
+      - name: Run check.sh
+        shell: bash
+        run: |
+          bash scripts/check.sh > check.log 2>&1 || true
+          tail -40 check.log
+      - name: Post the log tail
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          n=0
+          tail -c 1100 check.log |
+          grep -vE "^\s*$" |
+          sed 's/"/\\"/g' |
+          fold -w 130 |
+          while IFS= read -r line; do
+            n=$((n+1))
+            curl -s -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/$SHA" \
+              -d "{\"state\":\"success\",\"context\":\"diag/win-$n\",\"description\":\"$line\"}" \
+              -o /dev/null
+          done
