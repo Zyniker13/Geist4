@@ -31,6 +31,23 @@ cmp crates/geist4-ffi/include/geist4.h "$header_tmp" || {
 echo '== C ABI tests =='
 sh crates/geist4-ffi/c-tests/run.sh
 
+echo '== Swift binding =='
+case "$(uname -s)" in
+Darwin)
+    command -v swift >/dev/null 2>&1 || {
+        echo 'swift not found; the Swift binding gate needs the Swift toolchain' >&2
+        exit 1
+    }
+    # Builds the host-triple slice and assembles the XCFramework, then
+    # runs the Swift contract suite against it.
+    sh bindings/swift/make-xcframework.sh
+    (cd bindings/swift && swift run Geist4Contract)
+    ;;
+*)
+    echo 'skipped: the Swift binding needs macOS'
+    ;;
+esac
+
 echo '== wasm binding =='
 command -v wasm-bindgen >/dev/null 2>&1 || {
     echo 'wasm-bindgen not found; install it with: cargo install --locked wasm-bindgen-cli@0.2.130' >&2

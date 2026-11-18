@@ -27,6 +27,7 @@ Each suite below says where it lives and how it runs. Paths and commands are the
 | Cross-binding | JavaScript, Swift, Python and C give byte-identical output to the core on every spec | `tests/bindings/` | every CI run |
 | C ABI | The generated header matches the Rust ABI, and a C program linking the shared library gets the same contract (nulls, UTF-8, ownership, byte-exact HTML) as `tests/ffi.rs` | `crates/geist4-ffi/c-tests/` | every CI run |
 | Wasm binding | The checked-in JS glue and TypeScript types are current with the Rust source, the .wasm stays inside the size budget, and the real WebAssembly build gives JavaScript the same byte-exact contract as the C ABI | `crates/geist4-wasm/node-tests/` | every CI run |
+| Swift binding | The Swift wrapper over the C ABI gives the same byte-exact contract (HTML, problem reporting, error behavior) as the C test, and the XCFramework assembles for macOS and iOS | `bindings/swift/` | every CI run (macOS runner) |
 | Extension tiers | An extension's `spec.md` passes whichever tier implements it | `tests/ext-conformance/` | every CI run |
 | Round trip | `format` is idempotent and keeps the rendered HTML the same | `tests/roundtrip/` | every CI run |
 | JSON schema | Every JSON tree validates against the published schema | `tests/json/` | every CI run |
@@ -129,6 +130,34 @@ enforces the size budget from decision 0029: the `.wasm` stays under
 512 KiB raw and 160 KiB gzipped. There are no Rust unit tests inside
 `geist4-wasm`: wasm-bindgen's shims for exported types cannot run off
 WebAssembly, so the contract is pinned where it actually runs.
+
+### The Swift binding and contract executable
+
+`bindings/swift` is a Swift package that links the C ABI's static
+library (decision 0033). The XCFramework is a build artifact, never
+checked in: `make-xcframework.sh` rebuilds it deterministically and
+assembles the layout by hand — slice directories, per-slice and
+top-level `Info.plist` files — with no `xcodebuild`, so it runs under
+the Command Line Tools alone. With no arguments it builds the host
+triple only; passed iOS triples it builds the device and simulator
+slices (the simulator architectures merge into one slice with `lipo`),
+which need the Apple SDKs that only full Xcode ships.
+
+```sh
+sh bindings/swift/make-xcframework.sh            # host triple (macOS)
+cd bindings/swift && swift run Geist4Contract    # the contract executable
+```
+
+The contract executable mirrors the C contract test's byte-exact
+expectations: the same HTML for plain and GFM rendering, one problem
+per author mistake, unknown-extension rejection listing the valid
+names, and documents that outlive their options. The C-only cases
+(null input, invalid UTF-8) are unreachable from Swift, where a
+`String` is always valid UTF-8 and never null. `scripts/check.sh`
+runs the host slice and the contract on macOS and skips elsewhere; CI's
+macOS runner additionally builds the full framework — macOS plus the
+iOS device and simulator slices — so the iOS paths are proven on every
+push.
 
 ## Known Differences
 

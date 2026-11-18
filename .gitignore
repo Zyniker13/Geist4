@@ -8,3 +8,5 @@ node_modules/
 .DS_Store
 target/
 __pycache__/
+bindings/swift/CGeist4.xcframework/
+bindings/swift/.build/
