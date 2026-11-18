@@ -1,3 +1,3 @@
 error
 reason: wasm-file-missing
-sandbox extension hook `load`: cannot read component: No such file or directory (os error 2)
+sandbox extension hook `load`: cannot read component: no such file or directory

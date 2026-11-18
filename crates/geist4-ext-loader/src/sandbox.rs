@@ -267,8 +267,12 @@ impl SandboxExtension {
         fuel: Option<u64>,
         memory_pages: Option<u32>,
     ) -> Result<Self, SandboxError> {
-        let bytes = std::fs::read(path)
-            .map_err(|err| SandboxError::new("load", format!("cannot read component: {err}")))?;
+        let bytes = std::fs::read(path).map_err(|err| {
+            SandboxError::new(
+                "load",
+                format!("cannot read component: {}", crate::error::io_message(&err)),
+            )
+        })?;
         Self::from_bytes(&bytes, fuel, memory_pages)
     }
 
@@ -1034,5 +1038,34 @@ mod tests {
         );
         assert_eq!(err.hook, "post-process");
         assert_eq!(err.message, "fuel exhausted");
+    }
+
+    #[test]
+    fn a_missing_component_file_reports_a_portable_message() {
+        let err = match SandboxExtension::load(
+            Path::new("geist4-no-such-component-file.wasm"),
+            None,
+            None,
+        ) {
+            Ok(_) => panic!("the file does not exist"),
+            Err(err) => err,
+        };
+        assert_eq!(
+            err.to_string(),
+            "sandbox extension hook `load`: cannot read component: no such file or directory"
+        );
+    }
+
+    #[test]
+    fn io_messages_for_the_common_kinds_are_stable() {
+        use std::io::ErrorKind;
+        assert_eq!(
+            crate::error::io_message(&std::io::Error::from(ErrorKind::NotFound)),
+            "no such file or directory"
+        );
+        assert_eq!(
+            crate::error::io_message(&std::io::Error::from(ErrorKind::PermissionDenied)),
+            "permission denied"
+        );
     }
 }

@@ -43,3 +43,22 @@ impl fmt::Display for LoadError {
 }
 
 impl std::error::Error for LoadError {}
+
+/// A stable, platform-independent message for a common I/O failure.
+///
+/// The raw `std::io::Error` text differs by operating system: a
+/// missing file reads "No such file or directory (os error 2)" on
+/// Unix and "The system cannot find the file specified. (os error 2)"
+/// on Windows. The loader's messages are a cross-platform contract
+/// pinned by the conformance kit, so the common kinds get fixed
+/// wording through this helper. The operating-system error code is
+/// dropped: the code for the same kind differs by platform (access
+/// denied is 13 on Unix, 5 on Windows). Rarer kinds keep the
+/// operating system's own text, which nothing pins.
+pub(crate) fn io_message(error: &std::io::Error) -> String {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => "no such file or directory".to_string(),
+        std::io::ErrorKind::PermissionDenied => "permission denied".to_string(),
+        _ => error.to_string(),
+    }
+}

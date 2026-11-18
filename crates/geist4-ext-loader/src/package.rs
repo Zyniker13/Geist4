@@ -108,7 +108,11 @@ fn load_wasm_extension(
 pub fn load(dir: &Path) -> Result<Package, LoadError> {
     let manifest_path = dir.join("extension.toml");
     let source = std::fs::read_to_string(&manifest_path).map_err(|error| {
-        LoadError::new(format!("cannot read {}: {error}", manifest_path.display()))
+        LoadError::new(format!(
+            "cannot read {}: {}",
+            manifest_path.display(),
+            crate::error::io_message(&error)
+        ))
     })?;
     let manifest = crate::manifest::parse(&source)?;
 
