@@ -19,3 +19,4 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 geist4-ffi = { path = "../geist4-ffi" }
 wasm-bindgen = "0.2.130"
+js-sys = "0.3.107"
