@@ -20,6 +20,8 @@ use geist4_core::extension::{Extension, Options};
 
 use crate::safe::OwnedDocument;
 
+mod host;
+
 /// The outcome of an FFI call.
 ///
 /// Every fallible entry point returns this; anything but `GEIST4_OK`
@@ -45,6 +47,9 @@ pub enum Status {
     /// The engine panicked; the panic was caught at the boundary and the
     /// error buffer carries the message. This is always an engine bug.
     GEIST4_ERR_PANIC = 5,
+    /// A host extension's declared data broke the manifest's rules; the
+    /// error buffer carries the reason and nothing was registered.
+    GEIST4_ERR_INVALID = 6,
 }
 
 /// An owned UTF-8 string the engine handed out.
@@ -234,6 +239,50 @@ pub unsafe extern "C" fn geist4_options_enable_builtin(
             options.options.extension(extension);
         }
     }
+    Status::GEIST4_OK
+}
+
+/// Registers a host extension (tier 3) from a vtable the caller owns.
+///
+/// The vtable's declared data — the name, the kinds and the trigger
+/// bytes — is read and copied during the call, so the host may free
+/// that memory when the call returns. The context pointer and the
+/// function pointers must stay valid for as long as the options value
+/// and every document parsed with it. A vtable that breaks the
+/// manifest's rules is rejected with `GEIST4_ERR_INVALID` and the
+/// reason in the error buffer; nothing is registered.
+///
+/// # Safety
+/// `options` must be a live handle from `geist4_options_create`;
+/// `vtable` must be a valid read for the duration of the call, and its
+/// spans must be valid reads; `err` must be null or writable for
+/// `err_cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn geist4_options_enable_host(
+    options: *mut OptionsHandle,
+    vtable: *const host::Geist4HostVTable,
+    err: *mut c_char,
+    err_cap: usize,
+) -> Status {
+    let Some(options) = (unsafe { options.as_mut() }) else {
+        set_error(err, err_cap, "options handle is null");
+        return Status::GEIST4_ERR_NULL;
+    };
+    let Some(vtable) = (unsafe { vtable.as_ref() }) else {
+        set_error(err, err_cap, "host vtable pointer is null");
+        return Status::GEIST4_ERR_NULL;
+    };
+    // SAFETY: the caller promises the vtable and its spans are valid
+    // reads for the duration of the call; `from_vtable` copies
+    // everything it keeps.
+    let extension = match unsafe { host::HostExtension::from_vtable(vtable) } {
+        Ok(extension) => Arc::new(extension),
+        Err(error) => {
+            set_error(err, err_cap, &error.to_string());
+            return Status::GEIST4_ERR_INVALID;
+        }
+    };
+    options.options.extension(extension);
     Status::GEIST4_OK
 }
 
@@ -600,11 +649,22 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
 /// builds on one boundary, and none of them needs `unsafe` of its own.
 pub mod safe {
     use geist4_core::basic_html;
-    use geist4_core::extension::Options as CoreOptions;
+    use geist4_core::extension::{Extension, Options as CoreOptions};
     use geist4_core::parser::{Document, parse_with};
     use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::Arc;
 
     use super::panic_message;
+
+    // Host extensions (tier 3), re-exported here so a binding builds
+    // its extension against one surface: `geist4_ffi::safe`. The C
+    // types stay behind the C ABI; these are the shapes the closure
+    // surface hands callbacks.
+    pub use super::host::{
+        BracketClaim, ContinueConsume, ContinueDecision, HostError, HostExtension, HostHooks,
+        StartConsume, StartDecision,
+    };
+    pub use geist4_core::extension::CoreNode;
 
     /// Every built-in name `Options::enable_builtin` accepts, for error
     /// messages. One source of truth for the C path and this module.
@@ -699,6 +759,16 @@ pub mod safe {
                 }
             }
             Ok(())
+        }
+
+        /// Registers a host extension (tier 3) the caller built with
+        /// `HostExtension::from_hooks` — or, from a C-ABI language,
+        /// with a vtable through `geist4_options_enable_host`. The
+        /// extension runs for every document parsed with these
+        /// options, after the built-ins in registration order.
+        pub fn enable_host(&mut self, extension: Arc<dyn Extension>) -> &mut Self {
+            self.inner.extension(extension);
+            self
         }
     }
 

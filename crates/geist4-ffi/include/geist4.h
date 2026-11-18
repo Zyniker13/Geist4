@@ -7,6 +7,83 @@
 #include <stdlib.h>
 
 /**
+ * `block-start`: open with the whole line consumed.
+ */
+#define GEIST4_START_WHOLE_LINE 0
+
+/**
+ * `block-start`: seek past the content, open, keep the rest of the
+ * line after `columns` columns as the block's first paragraph.
+ */
+#define GEIST4_START_COLUMNS 1
+
+/**
+ * `block-start`: seek to the content, open, keep the whole rest of
+ * the line as the block's first paragraph.
+ */
+#define GEIST4_START_REST 2
+
+/**
+ * `block-start`: the task-list pattern — consume `columns` bytes,
+ * claim the deepest plain container, open nothing.
+ */
+#define GEIST4_START_CLAIM 3
+
+/**
+ * `block-continue`: consume `columns` more columns and keep going.
+ */
+#define GEIST4_CONTINUE_KEEP 0
+
+/**
+ * `block-continue`: close the block and consume the line whole.
+ */
+#define GEIST4_CONTINUE_CLOSE_LINE 1
+
+/**
+ * Inline: leave the bytes as text.
+ *
+ * A C-surface value only: the Rust side declines by returning `None`.
+ */
+#define GEIST4_INLINE_LITERAL 0
+
+/**
+ * Inline: tag the scanned run with the decision's kind.
+ */
+#define GEIST4_INLINE_DELIMITER 1
+
+/**
+ * Inline: claim the bracket group's content as a node.
+ */
+#define GEIST4_INLINE_NODE 2
+
+/**
+ * A hook outcome: no HTML, no decision, decline.
+ *
+ * A C-surface value only: the Rust side declines by returning `None`.
+ */
+#define GEIST4_OUT_NONE 0
+
+/**
+ * A hook outcome: the HTML in `html` applies.
+ */
+#define GEIST4_OUT_HTML 1
+
+/**
+ * Attribute tag: `text` carries a string value.
+ */
+#define GEIST4_ATTR_STR 0
+
+/**
+ * Attribute tag: `number` carries an integer value.
+ */
+#define GEIST4_ATTR_INT 1
+
+/**
+ * Attribute tag: `number` carries a boolean value (zero or non-zero).
+ */
+#define GEIST4_ATTR_BOOL 2
+
+/**
  * The outcome of an FFI call.
  *
  * Every fallible entry point returns this; anything but `GEIST4_OK`
@@ -42,6 +119,11 @@ enum geist4_status {
    * error buffer carries the message. This is always an engine bug.
    */
   GEIST4_ERR_PANIC = 5,
+  /**
+   * A host extension's declared data broke the manifest's rules; the
+   * error buffer carries the reason and nothing was registered.
+   */
+  GEIST4_ERR_INVALID = 6,
 };
 typedef int32_t geist4_status;
 
@@ -55,6 +137,26 @@ typedef int32_t geist4_status;
  */
 typedef struct geist4_document geist4_document;
 
+typedef struct Option_Geist4HookBracket Option_Geist4HookBracket;
+
+typedef struct Option_Geist4HookClose Option_Geist4HookClose;
+
+typedef struct Option_Geist4HookContinue Option_Geist4HookContinue;
+
+typedef struct Option_Geist4HookInit Option_Geist4HookInit;
+
+typedef struct Option_Geist4HookLook Option_Geist4HookLook;
+
+typedef struct Option_Geist4HookPostProcess Option_Geist4HookPostProcess;
+
+typedef struct Option_Geist4HookRender Option_Geist4HookRender;
+
+typedef struct Option_Geist4HookRenderOverride Option_Geist4HookRenderOverride;
+
+typedef struct Option_Geist4HookStart Option_Geist4HookStart;
+
+typedef struct Option_Geist4HookTrigger Option_Geist4HookTrigger;
+
 /**
  * The parse options: which built-in extensions are registered.
  *
@@ -63,6 +165,131 @@ typedef struct geist4_document geist4_document;
  * Passing null where one is expected parses plain `CommonMark`.
  */
 typedef struct geist4_options geist4_options;
+
+/**
+ * A borrowed byte span. The engine fills spans it passes to a hook;
+ * the host fills spans it hands back, and the engine reads them
+ * before the call returns.
+ */
+typedef struct Geist4Span {
+  /**
+   * The bytes, borrowed for the call. Null with `len == 0` is an
+   * empty span.
+   */
+  const uint8_t *data;
+  /**
+   * The span's length in bytes.
+   */
+  size_t len;
+} Geist4Span;
+
+/**
+ * One declared kind: a name, its two shape flags and the attribute
+ * names the kind carries.
+ */
+typedef struct Geist4KindDecl {
+  /**
+   * The kind's name.
+   */
+  struct Geist4Span kind;
+  /**
+   * Non-zero when the kind opens a block that holds blocks.
+   */
+  int32_t container;
+  /**
+   * Non-zero when the kind may hold inline text.
+   */
+  int32_t inline_text;
+  /**
+   * The kind's attribute names.
+   */
+  const struct Geist4Span *attrs;
+  /**
+   * The number of attribute names.
+   */
+  size_t attrs_len;
+} Geist4KindDecl;
+
+/**
+ * The tier-3 vtable: the declared data plus one function pointer per
+ * hook, every hook optional. A `None` hook declines.
+ *
+ * The declared data is read and copied during
+ * [`HostExtension::from_vtable`]; the host may free it afterwards.
+ * The context pointer and the function pointers must stay valid for
+ * as long as the extension does.
+ */
+typedef struct Geist4HostVTable {
+  /**
+   * The host's context, the first argument of every hook.
+   */
+  void *ctx;
+  /**
+   * Called with the context when the last engine-side reference to
+   * the extension drops. Optional.
+   */
+  void (*free_ctx)(void *ctx);
+  /**
+   * The extension's name.
+   */
+  struct Geist4Span name;
+  /**
+   * The declared kinds.
+   */
+  const struct Geist4KindDecl *kinds;
+  /**
+   * The number of declared kinds.
+   */
+  size_t kinds_len;
+  /**
+   * The inline trigger bytes to register.
+   */
+  const uint8_t *triggers;
+  /**
+   * The number of trigger bytes.
+   */
+  size_t triggers_len;
+  /**
+   * The `init` hook, or null.
+   */
+  struct Option_Geist4HookInit init;
+  /**
+   * The `block-start-look` hook, or null.
+   */
+  struct Option_Geist4HookLook block_start_look;
+  /**
+   * The `block-start` hook, or null.
+   */
+  struct Option_Geist4HookStart block_start;
+  /**
+   * The `block-continue` hook, or null.
+   */
+  struct Option_Geist4HookContinue block_continue;
+  /**
+   * The `block-close` hook, or null.
+   */
+  struct Option_Geist4HookClose block_close;
+  /**
+   * The `inline-trigger` hook, or null.
+   */
+  struct Option_Geist4HookTrigger inline_trigger;
+  /**
+   * The `inline-bracket` hook, or null.
+   */
+  struct Option_Geist4HookBracket inline_bracket;
+  /**
+   * The `post-process` hook, or null.
+   */
+  struct Option_Geist4HookPostProcess post_process;
+  /**
+   * The `render` hook, or null.
+   */
+  struct Option_Geist4HookRender render;
+  /**
+   * The `render_override` hook, or null.
+   */
+  struct Option_Geist4HookRenderOverride render_override;
+} Geist4HostVTable;
 
 /**
  * An owned UTF-8 string the engine handed out.
@@ -173,6 +400,28 @@ geist4_status geist4_options_enable_builtin(struct geist4_options *options,
                                             size_t name_len,
                                             char *err,
                                             size_t err_cap);
+
+/**
+ * Registers a host extension (tier 3) from a vtable the caller owns.
+ *
+ * The vtable's declared data — the name, the kinds and the trigger
+ * bytes — is read and copied during the call, so the host may free
+ * that memory when the call returns. The context pointer and the
+ * function pointers must stay valid for as long as the options value
+ * and every document parsed with it. A vtable that breaks the
+ * manifest's rules is rejected with `GEIST4_ERR_INVALID` and the
+ * reason in the error buffer; nothing is registered.
+ *
+ * # Safety
+ * `options` must be a live handle from `geist4_options_create`;
+ * `vtable` must be a valid read for the duration of the call, and its
+ * spans must be valid reads; `err` must be null or writable for
+ * `err_cap` bytes.
+ */
+geist4_status geist4_options_enable_host(struct geist4_options *options,
+                                         const struct Geist4HostVTable *vtable,
+                                         char *err,
+                                         size_t err_cap);
 
 /**
  * Parses a document.
