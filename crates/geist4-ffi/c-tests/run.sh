@@ -11,6 +11,12 @@ if ! command -v cc >/dev/null 2>&1; then
     echo 'no C compiler on PATH; skipping the C contract tests'
     exit 0
 fi
+case "$(uname -s)" in
+    *MINGW*|*MSYS*|*CYGWIN*)
+        echo 'skipping the C contract tests on Windows (tests/ffi.rs pins the same contract from Rust)'
+        exit 0
+        ;;
+esac
 
 echo '== building geist4-ffi (release) =='
 cargo build -p geist4-ffi --release

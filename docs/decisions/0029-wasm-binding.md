@@ -28,9 +28,15 @@ for browsers, Node, and bundlers. `init` takes no argument in a browser
 (fetch) and explicit bytes in Node or a wasm-only environment. The glue,
 the TypeScript declarations, and the `.wasm` live in
 `crates/geist4-wasm/pkg/`, checked in like the C header so callers never
-need a Rust toolchain; `scripts/check.sh` regenerates into a scratch
-directory and compares byte for byte, failing with the regeneration
-command when stale — the same discipline as the header.
+need a Rust toolchain. `scripts/check.sh` regenerates into a scratch
+directory and compares the text parts (the JS glue and both `.d.ts`
+files) byte for byte; the `.wasm` cannot be compared across machines
+because rustc embeds platform-specific paths in panic locations, so its
+correctness is pinned by running the Node harness twice — against the
+freshly built glue (current source behaves) and against the checked-in
+`pkg/` (the committed artifact behaves; a stale `pkg/` fails its own run
+the moment a fix changes behavior). The size budget is measured on the
+fresh build.
 
 Errors are JavaScript `Error`s: option and parse results map the safe
 module's `Result`s onto thrown errors. Optional arguments use paired

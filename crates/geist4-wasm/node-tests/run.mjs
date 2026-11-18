@@ -7,19 +7,22 @@
 // Output: one `ok - description` or `FAIL - description (why)` line per
 // check; the exit status is the number of failures.
 //
-// The glue is the checked-in `--target web` build; Node has no `fetch`
-// for a sibling file, so the test hands `init` the bytes directly — the
-// same entry point a wasm-only environment uses.
+// The glue is the checked-in `--target web` build by default; Node has no
+// `fetch` for a sibling file, so the test hands `init` the bytes directly —
+// the same entry point a wasm-only environment uses. GEIST4_PKG_DIR points
+// the harness at another glue directory (check.sh uses it to exercise the
+// freshly built glue next to the checked-in one).
 
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import init, {
-  Document,
-  Options,
-  renderHtml,
-  renderHtmlWith,
-  version,
-} from "../pkg/geist4.js";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const pkgDir =
+  process.env.GEIST4_PKG_DIR ??
+  join(dirname(fileURLToPath(import.meta.url)), "..", "pkg");
+const glue = await import(pathToFileURL(join(pkgDir, "geist4.js")).href);
+const init = glue.default;
+const { Document, Options, renderHtml, renderHtmlWith, version } = glue;
 
 const failures = [];
 let checks = 0;
@@ -40,9 +43,7 @@ function deepEqual(actual, expected) {
 }
 
 await init({
-  module_or_path: readFileSync(
-    fileURLToPath(new URL("../pkg/geist4_bg.wasm", import.meta.url)),
-  ),
+  module_or_path: readFileSync(join(pkgDir, "geist4_bg.wasm")),
 });
 
 check("the version reads", typeof version() === "string" && version().length > 0);

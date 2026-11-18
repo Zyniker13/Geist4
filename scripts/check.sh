@@ -50,8 +50,14 @@ trap 'rm -rf "$pkg_tmp" "$header_tmp"' EXIT
 wasm-bindgen --target web --typescript \
     --out-dir "$pkg_tmp" --out-name geist4 \
     target/wasm32-unknown-unknown/release/geist4_wasm.wasm >/dev/null 2>&1
+# The JS glue and TypeScript types are text and identical on every machine;
+# the .wasm itself is not (rustc embeds platform-specific paths in panic
+# locations), so its behavior is pinned by running the harness against it
+# instead of comparing bytes. Both runs matter: the fresh glue proves the
+# current source behaves, the checked-in glue proves the committed artifact
+# does — a stale pkg/ fails its own run the moment a fix changes behavior.
 pkg_stale=0
-for glue_file in geist4.js geist4.d.ts geist4_bg.wasm geist4_bg.wasm.d.ts; do
+for glue_file in geist4.js geist4.d.ts geist4_bg.wasm.d.ts; do
     cmp "crates/geist4-wasm/pkg/$glue_file" "$pkg_tmp/$glue_file" || pkg_stale=1
 done
 [ "$pkg_stale" -eq 0 ] || {
@@ -62,8 +68,8 @@ done
 }
 # The size budget from decision 0029: the .wasm stays under 512 KiB raw
 # and 160 KiB gzipped, the transfer size an editor's page load pays.
-wasm_bytes=$(wc -c < crates/geist4-wasm/pkg/geist4_bg.wasm | tr -d ' ')
-gzip_bytes=$(gzip -9 -c crates/geist4-wasm/pkg/geist4_bg.wasm | wc -c | tr -d ' ')
+wasm_bytes=$(wc -c < "$pkg_tmp/geist4_bg.wasm" | tr -d ' ')
+gzip_bytes=$(gzip -9 -c "$pkg_tmp/geist4_bg.wasm" | wc -c | tr -d ' ')
 [ "$wasm_bytes" -le 524288 ] || {
     echo "the wasm is $wasm_bytes bytes; decision 0029's budget is 524288 raw" >&2
     exit 1
@@ -72,6 +78,7 @@ gzip_bytes=$(gzip -9 -c crates/geist4-wasm/pkg/geist4_bg.wasm | wc -c | tr -d ' 
     echo "the gzipped wasm is $gzip_bytes bytes; decision 0029's budget is 163840" >&2
     exit 1
 }
+GEIST4_PKG_DIR="$pkg_tmp" node crates/geist4-wasm/node-tests/run.mjs
 node crates/geist4-wasm/node-tests/run.mjs
 
 echo '== conformance kit =='

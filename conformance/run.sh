@@ -16,17 +16,23 @@
 # see conformance/README.md.
 #
 # Env: GEIST4 overrides the CLI path. The default is
-# target/debug/geist4, built with the sandbox feature if missing.
+# target/debug/geist4 (plus .exe where Windows names its binaries
+# that way), built with the sandbox feature if missing.
 set -eu
 cd "$(dirname "$0")/.."
+
+exe=
+case "$(uname -s)" in
+    *MINGW*|*MSYS*|*CYGWIN*) exe=.exe ;;
+esac
 
 if [ -n "${GEIST4:-}" ]; then
     GEIST="$GEIST4"
 else
-    if [ ! -x target/debug/geist4 ]; then
+    if [ ! -x "target/debug/geist4$exe" ]; then
         cargo build -q -p geist4-cli --features geist4-ext-loader/sandbox
     fi
-    GEIST=target/debug/geist4
+    GEIST="target/debug/geist4$exe"
 fi
 
 fails=0
