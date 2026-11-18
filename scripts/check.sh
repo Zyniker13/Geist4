@@ -108,7 +108,7 @@ command -v maturin >/dev/null 2>&1 || {
     exit 1
 }
 # Prefer python3, fall back to python (Windows names it the latter).
-if [ -z "$PYTHON" ]; then
+if [ -z "${PYTHON:-}" ]; then
     if command -v python3 >/dev/null 2>&1; then
         PYTHON=python3
     elif command -v python >/dev/null 2>&1; then
