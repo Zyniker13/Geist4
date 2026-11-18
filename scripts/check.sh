@@ -102,6 +102,36 @@ gzip_bytes=$(gzip -9 -c "$pkg_tmp/geist4_bg.wasm" | wc -c | tr -d ' ')
 GEIST4_PKG_DIR="$pkg_tmp" node crates/geist4-wasm/node-tests/run.mjs
 node crates/geist4-wasm/node-tests/run.mjs
 
+echo '== Python binding =='
+command -v maturin >/dev/null 2>&1 || {
+    echo 'maturin not found; install it with: cargo install --locked maturin@1.16.0' >&2
+    exit 1
+}
+# Prefer python3, fall back to python (Windows names it the latter).
+if [ -z "$PYTHON" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+        PYTHON=python3
+    elif command -v python >/dev/null 2>&1; then
+        PYTHON=python
+    else
+        echo 'python not found; the Python binding gate needs Python 3.9 or newer' >&2
+        exit 1
+    fi
+fi
+# Build the wheel exactly as pip users receive it, install it into a
+# throwaway venv, and run the contract suite against the installed
+# package — not a source-tree import (decision 0034).
+rm -rf target/wheels target/py-venv
+(cd crates/geist4-python && maturin build --release --out ../../target/wheels) >/dev/null
+"$PYTHON" -m venv target/py-venv
+if [ -x target/py-venv/Scripts/python.exe ]; then
+    venv_python=target/py-venv/Scripts/python.exe
+else
+    venv_python=target/py-venv/bin/python
+fi
+"$venv_python" -m pip install --quiet --no-index --find-links target/wheels geist4
+"$venv_python" -m unittest discover -s crates/geist4-python/tests
+
 echo '== conformance kit =='
 sh conformance/run.sh
 

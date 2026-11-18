@@ -28,6 +28,7 @@ Each suite below says where it lives and how it runs. Paths and commands are the
 | C ABI | The generated header matches the Rust ABI, and a C program linking the shared library gets the same contract (nulls, UTF-8, ownership, byte-exact HTML) as `tests/ffi.rs` | `crates/geist4-ffi/c-tests/` | every CI run |
 | Wasm binding | The checked-in JS glue and TypeScript types are current with the Rust source, the .wasm stays inside the size budget, and the real WebAssembly build gives JavaScript the same byte-exact contract as the C ABI | `crates/geist4-wasm/node-tests/` | every CI run |
 | Swift binding | The Swift wrapper over the C ABI gives the same byte-exact contract (HTML, problem reporting, error behavior) as the C test, and the XCFramework assembles for macOS and iOS | `bindings/swift/` | every CI run (macOS runner) |
+| Python binding | The wheel `pip` installs gives the same byte-exact contract (HTML, problem reporting, error behavior) as the C test | `crates/geist4-python/tests/` | every CI run |
 | Extension tiers | An extension's `spec.md` passes whichever tier implements it | `tests/ext-conformance/` | every CI run |
 | Round trip | `format` is idempotent and keeps the rendered HTML the same | `tests/roundtrip/` | every CI run |
 | JSON schema | Every JSON tree validates against the published schema | `tests/json/` | every CI run |
@@ -160,6 +161,34 @@ names, and documents that outlive their options. The C-only cases
 builds the full framework — macOS plus the iOS device and simulator
 slices — and runs the contract on macOS, and skips elsewhere; CI runs
 the same script, so the iOS paths are proven identically everywhere.
+
+### The Python binding and its contract suite
+
+`crates/geist4-python` is a PyO3 extension module over the same safe
+module as the other bindings (decision 0034), packaged as a wheel
+named `geist4` with maturin and installed as `geist4._geist4` behind a
+thin `geist4` package. The wheel is a build artifact and never checked
+in.
+
+```sh
+cargo install --locked maturin@1.16.0
+cd crates/geist4-python && maturin build --release --out ../../target/wheels
+python3 -m venv target/py-venv
+target/py-venv/bin/pip install --no-index --find-links target/wheels geist4
+target/py-venv/bin/python -m unittest discover -s crates/geist4-python/tests
+```
+
+The contract suite mirrors the C contract test: byte-exact HTML for
+plain and GFM rendering, a NUL byte rendering as the replacement
+character, empty documents, unknown-extension rejection listing the
+valid names, bundle/single composition and idempotence, documents that
+outlive their options, and problem spans as byte offsets. It runs
+against the wheel pip installed, so it tests exactly what a pip user
+gets, not a source-tree import. A Python string is always valid
+Unicode, so the C-only cases (null input, invalid UTF-8) are
+unreachable from Python, as from Swift. `scripts/check.sh` builds the
+wheel, installs it into a throwaway venv, and runs the suite on every
+platform CI runs the gate on.
 
 ## Known Differences
 

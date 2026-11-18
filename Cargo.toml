@@ -8,6 +8,7 @@ members = [
     "crates/geist4-cli",
     "crates/geist4-ffi",
     "crates/geist4-wasm",
+    "crates/geist4-python",
     "crates/geist4-spec-harness",
     "crates/geist4-bench",
 ]

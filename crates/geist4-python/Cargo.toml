@@ -1,0 +1,31 @@
+[package]
+name = "geist4-python"
+description = "Python bindings for the Geist4 Markdown engine, packaged as wheels with maturin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+# `cdylib` is the extension module Python imports (`geist4._geist4`);
+# `rlib` keeps the crate buildable and lintable as a workspace member
+# on every host. Maturin enables `pyo3/extension-module` when it builds
+# the wheel, so the cdylib links against the stable ABI, not libpython.
+crate-type = ["cdylib", "rlib"]
+# The contract suite runs against the installed wheel from Python
+# (scripts/check.sh, decision 0034), so there is no Rust test harness
+# to build — and building one under `--all-features` would flip
+# `extension-module` on and produce a harness the loader can't exec.
+test = false
+doctest = false
+
+[dependencies]
+geist4-ffi = { path = "../geist4-ffi" }
+# Recorded in decision 0034: PyO3's abi3 build (the stable Python ABI,
+# floor 3.9 — pyo3 0.30 dropped 3.8) so one wheel serves every
+# supported Python.
+pyo3 = { version = "0.30.1", features = ["abi3-py39"] }
