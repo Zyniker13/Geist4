@@ -38,9 +38,13 @@ Darwin)
         echo 'swift not found; the Swift binding gate needs the Swift toolchain' >&2
         exit 1
     }
-    # Builds the host-triple slice and assembles the XCFramework, then
-    # runs the Swift contract suite against it.
-    sh bindings/swift/make-xcframework.sh
+    # Builds the full XCFramework — macOS, iOS device and both iOS
+    # simulator triples — assembles it, and runs the Swift contract
+    # suite against it. A staticlib never links, so the iOS slices
+    # need no Apple SDK: the whole build runs under the Command Line
+    # Tools on every macOS machine the gate runs on.
+    sh bindings/swift/make-xcframework.sh aarch64-apple-darwin \
+        aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
     (cd bindings/swift && swift run Geist4Contract)
     ;;
 *)

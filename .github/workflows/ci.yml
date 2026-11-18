@@ -61,12 +61,6 @@ jobs:
         with:
           name: check-log-${{ matrix.os }}
           path: check.log
-      - name: Build the full XCFramework (macOS and iOS slices)
-        # The gate builds the host-triple slice; this proves the iOS
-        # slices build and assemble too, which needs the Apple SDKs full
-        # Xcode ships (decision 0033). macos-latest is arm64.
-        if: runner.os == 'macOS'
-        run: bash bindings/swift/make-xcframework.sh aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
 
   msrv:
     name: MSRV check

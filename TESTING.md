@@ -140,11 +140,14 @@ assembles the layout by hand — slice directories, per-slice and
 top-level `Info.plist` files — with no `xcodebuild`, so it runs under
 the Command Line Tools alone. With no arguments it builds the host
 triple only; passed iOS triples it builds the device and simulator
-slices (the simulator architectures merge into one slice with `lipo`),
-which need the Apple SDKs that only full Xcode ships.
+slices (the simulator architectures merge into one slice with `lipo`).
+The libraries are built with `cargo rustc --crate-type staticlib`: a
+static library is archived, never linked, so no Apple SDK is needed —
+not even for the iOS triples.
 
 ```sh
-sh bindings/swift/make-xcframework.sh            # host triple (macOS)
+sh bindings/swift/make-xcframework.sh aarch64-apple-darwin \
+    aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios  # full framework
 cd bindings/swift && swift run Geist4Contract    # the contract executable
 ```
 
@@ -154,10 +157,9 @@ per author mistake, unknown-extension rejection listing the valid
 names, and documents that outlive their options. The C-only cases
 (null input, invalid UTF-8) are unreachable from Swift, where a
 `String` is always valid UTF-8 and never null. `scripts/check.sh`
-runs the host slice and the contract on macOS and skips elsewhere; CI's
-macOS runner additionally builds the full framework — macOS plus the
-iOS device and simulator slices — so the iOS paths are proven on every
-push.
+builds the full framework — macOS plus the iOS device and simulator
+slices — and runs the contract on macOS, and skips elsewhere; CI runs
+the same script, so the iOS paths are proven identically everywhere.
 
 ## Known Differences
 

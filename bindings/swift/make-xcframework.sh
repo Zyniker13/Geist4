@@ -2,12 +2,15 @@
 # Builds static geist4-ffi libraries with cargo and assembles them, with
 # the current generated header, into bindings/swift/CGeist4.xcframework.
 #
+# The libraries are built with `cargo rustc --crate-type staticlib`: a
+# static library is archived, never linked, so no Apple SDK is needed —
+# not even for the iOS triples; the script runs wherever the Rust
+# toolchain does.
+#
 # No xcodebuild involved: the XCFramework layout (slice directories, one
 # Info.plist per slice, a top-level Info.plist listing the slices) is
-# written directly, so the script works under the Command Line Tools
-# alone and behaves identically on CI.
+# written directly.
 #
-# Usage: make-xcframework.sh [rust-triple ...]
 # With no arguments it builds the host triple only, which is what the
 # gate and `swift run Geist4Contract` on macOS need. Pass iOS triples for
 # a full framework:
@@ -45,26 +48,13 @@ arch_of() {
     esac
 }
 
-# Build every requested target first, so a failure costs nothing.
-# iOS targets need the Apple SDK, which only full Xcode ships; the
-# Command Line Tools build the macOS slice only.
+# Build every requested target first, so a failure costs nothing. A
+# staticlib is archived, never linked: rustc needs no Apple SDK even for
+# the iOS triples, only the rustup std for each target.
 for triple in $targets; do
     rustup target add "$triple" >/dev/null 2>&1 || true
-    case $triple in
-    *-apple-ios-sim) sdk=iphonesimulator ;;
-    *-apple-ios) sdk=iphoneos ;;
-    *) sdk='' ;;
-    esac
-    if [ -n "$sdk" ]; then
-        sysroot=$(xcrun --sdk "$sdk" --show-sdk-path) || {
-            echo "no $sdk SDK for $triple; install full Xcode" >&2
-            exit 1
-        }
-        (cd "$root" && RUSTFLAGS="-isysroot $sysroot" \
-            cargo build -p geist4-ffi --release --target "$triple")
-    else
-        (cd "$root" && cargo build -p geist4-ffi --release --target "$triple")
-    fi
+    (cd "$root" && cargo rustc -p geist4-ffi --release --target "$triple" \
+        --crate-type staticlib)
 done
 
 # Assemble.

@@ -29,9 +29,10 @@ by hand — slice directories, one XML `Info.plist` per slice, a top-level
 the Command Line Tools alone and behaves identically on CI. With no
 arguments it builds the host triple only; passed iOS triples it builds the
 device and simulator slices (the two simulator architectures merge into
-one slice with `lipo`). iOS triples need the Apple SDKs, which only full
-Xcode ships, so the script fails with a clear message when they are
-missing.
+one slice with `lipo`). The libraries are built with `cargo rustc
+--crate-type staticlib`: a static library is archived, never linked, so
+no Apple SDK is needed for any triple and the whole framework assembles
+wherever the Rust toolchain runs.
 
 The contract suite is a plain executable (`Geist4Contract`), not XCTest:
 the Command Line Tools do not ship `XCTest.framework`, and the C and Node
@@ -42,11 +43,12 @@ quietly diverge. The C-only cases (null input, invalid UTF-8) are
 unreachable from Swift, where a `String` is always valid UTF-8 and never
 null.
 
-The gate: `scripts/check.sh` builds the host-triple slice and runs the
-contract executable on macOS, and skips with a note elsewhere. CI's macOS
-runner additionally builds the full framework — macOS plus the iOS device
-and simulator slices — so the iOS paths are proven on every push even
-though no local machine here has full Xcode.
+The gate: `scripts/check.sh` builds the full framework — macOS plus the
+iOS device and simulator slices — and runs the contract executable on
+macOS, and skips with a note elsewhere; CI runs the same script, so the
+iOS paths are proven identically on every machine. Building the iOS
+slices needs no Apple SDK (a staticlib never links), so nothing here
+requires full Xcode.
 
 ## Consequences
 
