@@ -379,3 +379,77 @@ fn check_reports_an_extension_load_failure() {
     let stderr = stderr_of(&output);
     assert!(stderr.contains("broken"), "{stderr}");
 }
+
+#[test]
+fn render_html_matches_the_renderer() {
+    let temp = TempDir::new("render-html");
+    let file = temp.path().join("doc.md");
+    std::fs::write(&file, "# Hi\n\nSome *text*.\n").expect("the document is written");
+    let output = run_cli(["render", file.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        stdout_of(&output),
+        "<h1>Hi</h1>\n<p>Some <em>text</em>.</p>\n\n"
+    );
+}
+
+#[test]
+fn render_json_carries_the_format_tag() {
+    let temp = TempDir::new("render-json");
+    let file = temp.path().join("doc.md");
+    std::fs::write(&file, "*a* [b](/u)\n\n[r]: /r\n").expect("the document is written");
+    let output = run_cli(["render", file.to_str().unwrap(), "--format", "json"]);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = stdout_of(&output);
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout).expect("the tree output is JSON");
+    assert_eq!(value["format"], "geist4/tree@1");
+    assert_eq!(value["root"]["children"][0]["type"], "paragraph");
+    assert!(value["linkDefs"].as_array().expect("defs").len() == 1);
+    assert!(value["problems"].as_array().expect("problems").is_empty());
+}
+
+#[test]
+fn ast_prints_the_same_tree_pretty() {
+    let temp = TempDir::new("ast");
+    let file = temp.path().join("doc.md");
+    std::fs::write(&file, "# One\n\n*two*.\n").expect("the document is written");
+    let ast = run_cli(["ast", file.to_str().unwrap()]);
+    assert_eq!(ast.status.code(), Some(0));
+    let json = run_cli([
+        "render",
+        file.to_str().unwrap(),
+        "--format",
+        "json",
+        "--pretty",
+    ]);
+    assert_eq!(json.status.code(), Some(0));
+    assert_eq!(stdout_of(&ast), stdout_of(&json));
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout_of(&ast)).expect("the ast output is JSON");
+    assert_eq!(value["format"], "geist4/tree@1");
+}
+
+#[test]
+fn render_mdast_exports_the_unist_shape() {
+    let temp = TempDir::new("render-mdast");
+    let file = temp.path().join("doc.md");
+    std::fs::write(&file, "# One\n").expect("the document is written");
+    let output = run_cli(["render", file.to_str().unwrap(), "--format", "mdast"]);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = stdout_of(&output);
+    let value: serde_json::Value =
+        serde_json::from_str(&stdout).expect("the mdast output is JSON");
+    assert_eq!(value["type"], "root");
+    assert_eq!(value["children"][0]["type"], "heading");
+    assert_eq!(value["children"][0]["depth"], 1);
+}
+
+#[test]
+fn render_reports_a_missing_file() {
+    let temp = TempDir::new("render-missing");
+    let file = temp.path().join("absent.md");
+    let output = run_cli(["render", file.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr_of(&output).contains("cannot read"));
+}

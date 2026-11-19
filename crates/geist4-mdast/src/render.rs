@@ -810,3 +810,17 @@ fn ref_type(kind: LinkRefKind) -> &'static str {
         LinkRefKind::Shortcut => SHORTCUT,
     }
 }
+
+/// The mdast tree as JSON text, compact or pretty.
+///
+/// The same serialization the reference implementation's fixture
+/// comparisons use: `serde_json` on the tree. This is what
+/// `geist4 render --format mdast` prints.
+#[must_use]
+pub fn to_json(mdast: &Mdast, pretty: bool) -> String {
+    if pretty {
+        serde_json::to_string_pretty(mdast).expect("mdast JSON serializes")
+    } else {
+        serde_json::to_string(mdast).expect("mdast JSON serializes")
+    }
+}

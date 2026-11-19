@@ -18,4 +18,9 @@ path = "src/main.rs"
 clap = { version = "4", features = ["derive"] }
 geist4-core = { path = "../geist4-core" }
 geist4-ext-loader = { path = "../geist4-ext-loader", features = ["sandbox"] }
+geist4-json = { path = "../geist4-json" }
+geist4-mdast = { path = "../geist4-mdast" }
 geist4-spec-harness = { path = "../geist4-spec-harness" }
+
+[dev-dependencies]
+serde_json = "1"

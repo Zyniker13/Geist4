@@ -1,0 +1,20 @@
+[package]
+name = "geist4-json"
+description = "The Geist4 JSON tree format: the parsed document tree as versioned, schema-described JSON"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+geist4-core = { path = "../geist4-core" }
+geist4-mdast = { path = "../geist4-mdast" }
+serde_json = "1"
+
+[dev-dependencies]
+jsonschema = "0.61"
+geist4-ext = { path = "../geist4-ext" }

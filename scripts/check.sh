@@ -160,8 +160,11 @@ ref_bin=target/release/cross_reference
 cross_args="--reference $ref_bin --node node --python $venv_python"
 case "$(uname -s)" in
 Darwin)
-    # The Swift binding's gate above built the package, the cross runner
-    # with it.
+    # The Swift gate above built the contract runner; the cross runner
+    # is a separate executable target, so build it here. A fresh runner
+    # has nothing in .build yet — `swift run Geist4Contract` builds
+    # only the product it runs.
+    (cd bindings/swift && swift build --product Geist4Cross)
     cross_args="$cross_args --swift bindings/swift/.build/debug/Geist4Cross"
     ;;
 esac

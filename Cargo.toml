@@ -11,6 +11,7 @@ members = [
     "crates/geist4-python",
     "crates/geist4-spec-harness",
     "crates/geist4-mdast",
+    "crates/geist4-json",
     "crates/geist4-bench",
 ]
 # The fuzz crate builds with nightly instrumentation flags and must not

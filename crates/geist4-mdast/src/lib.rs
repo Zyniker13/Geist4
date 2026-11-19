@@ -19,7 +19,7 @@ mod nodes;
 mod render;
 
 pub use nodes::Mdast;
-pub use render::to_mdast;
+pub use render::{to_json, to_mdast};
 
 /// A `position` point as mdast serializes it: 1-based `line`, 1-based
 /// `column` counted in UTF-16 code units since the line start, and the

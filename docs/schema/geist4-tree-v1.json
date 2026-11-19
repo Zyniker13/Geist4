@@ -1,0 +1,247 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/Zyniker13/Geist4/main/docs/schema/geist4-tree-v1.json",
+  "title": "Geist4 JSON tree format, version 1",
+  "description": "The JSON serialization of a Geist4 document tree: the format tag geist4/tree@1, the root node, every link reference definition in document order, and the problems the parse recorded. Positions use 1-based lines, 1-based columns and 0-based offsets, all counted in UTF-16 code units. Node type names mirror the engine's node kinds one to one in snake case; an extension node's type is the kind name its extension declared. Extension attributes are an array of {name, value} pairs so declaration order survives.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "root", "linkDefs", "problems"],
+  "properties": {
+    "format": { "const": "geist4/tree@1" },
+    "root": { "$ref": "#/definitions/node" },
+    "linkDefs": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/linkDef" }
+    },
+    "problems": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/problem" }
+    }
+  },
+  "definitions": {
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["line", "column", "offset"],
+      "properties": {
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 },
+        "offset": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": { "$ref": "#/definitions/point" },
+        "end": { "$ref": "#/definitions/point" }
+      }
+    },
+    "children": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/node" }
+    },
+    "attrs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "value"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "value": { "type": ["string", "integer", "boolean"] }
+        }
+      }
+    },
+    "linkDef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "url", "title", "titled", "position"],
+      "properties": {
+        "label": { "type": "string" },
+        "url": { "type": "string" },
+        "title": { "type": ["string", "null"] },
+        "titled": { "type": "boolean" },
+        "position": { "$ref": "#/definitions/position" }
+      }
+    },
+    "problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message", "position"],
+      "properties": {
+        "message": { "type": "string" },
+        "position": { "$ref": "#/definitions/position" }
+      }
+    },
+    "reference": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label", "kind"],
+          "properties": {
+            "label": { "type": "string" },
+            "kind": { "enum": ["full", "collapsed", "shortcut"] }
+          }
+        }
+      ]
+    },
+    "node": {
+      "type": "object",
+      "required": ["type", "position"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "minLength": 1 },
+        "position": { "$ref": "#/definitions/position" },
+        "children": { "$ref": "#/definitions/children" },
+        "attrs": { "$ref": "#/definitions/attrs" },
+        "ordered": { "type": "boolean" },
+        "start": { "type": "integer", "minimum": 0 },
+        "tight": { "type": "boolean" },
+        "marker": { "type": "string", "minLength": 1, "maxLength": 1 },
+        "padding": { "type": "integer", "minimum": 0 },
+        "level": { "type": "integer", "minimum": 1, "maximum": 6 },
+        "setext": { "type": "boolean" },
+        "fenced": { "type": "boolean" },
+        "fence_char": { "type": "string", "minLength": 1, "maxLength": 1 },
+        "info": { "type": ["string", "null"] },
+        "literal": { "type": "string" },
+        "kind": { "type": "integer", "minimum": 1, "maximum": 7 },
+        "value": { "type": "string" },
+        "url": { "type": "string" },
+        "title": { "type": ["string", "null"] },
+        "image": { "type": "boolean" },
+        "reference": { "$ref": "#/definitions/reference" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "document" } }, "required": ["type"] },
+          "then": { "required": ["children"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "block_quote" } }, "required": ["type"] },
+          "then": { "required": ["children"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "list" } }, "required": ["type"] },
+          "then": {
+            "required": ["ordered", "start", "tight", "marker", "children"]
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "item" } }, "required": ["type"] },
+          "then": { "required": ["padding", "children"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "heading" } }, "required": ["type"] },
+          "then": { "required": ["level", "setext", "children"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "thematic_break" } }, "required": ["type"] },
+          "then": { "not": { "required": ["children"] } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "paragraph" } }, "required": ["type"] },
+          "then": { "required": ["children"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "code_block" } }, "required": ["type"] },
+          "then": {
+            "required": ["fenced", "fence_char", "info", "literal"],
+            "not": { "required": ["children"] }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "html_block" } }, "required": ["type"] },
+          "then": {
+            "required": ["kind", "literal"],
+            "not": { "required": ["children"] }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "text" } }, "required": ["type"] },
+          "then": {
+            "required": ["value"],
+            "not": { "required": ["children"] }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "code_span" } }, "required": ["type"] },
+          "then": {
+            "required": ["value"],
+            "not": { "required": ["children"] }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "inline_html" } }, "required": ["type"] },
+          "then": {
+            "required": ["value"],
+            "not": { "required": ["children"] }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "soft_break" } }, "required": ["type"] },
+          "then": { "not": { "required": ["children"] } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "hard_break" } }, "required": ["type"] },
+          "then": { "not": { "required": ["children"] } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "emphasis" } }, "required": ["type"] },
+          "then": { "required": ["children"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "strong" } }, "required": ["type"] },
+          "then": { "required": ["children"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "link" } }, "required": ["type"] },
+          "then": {
+            "required": ["url", "title", "image", "reference", "children"],
+            "properties": {
+              "url": { "type": "string" },
+              "title": { "type": ["string", "null"] },
+              "image": { "type": "boolean" },
+              "reference": { "$ref": "#/definitions/reference" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "not": {
+                  "enum": [
+                    "document",
+                    "block_quote",
+                    "list",
+                    "item",
+                    "heading",
+                    "thematic_break",
+                    "paragraph",
+                    "code_block",
+                    "html_block",
+                    "text",
+                    "code_span",
+                    "inline_html",
+                    "soft_break",
+                    "hard_break",
+                    "emphasis",
+                    "strong",
+                    "link"
+                  ]
+                }
+              }
+            },
+            "required": ["type"]
+          },
+          "then": { "required": ["attrs", "children"] }
+        }
+      ]
+    }
+  }
+}

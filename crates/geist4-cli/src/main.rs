@@ -9,6 +9,7 @@ mod check;
 mod ext_check;
 mod manifest_check;
 mod packages;
+mod render;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -31,6 +32,28 @@ enum Command {
         /// The extension subcommand to run.
         #[command(subcommand)]
         command: ExtCommand,
+    },
+    /// Render a document as HTML, the JSON tree or mdast.
+    Render {
+        /// The Markdown file to render.
+        file: PathBuf,
+        /// The output format.
+        #[arg(long = "format", value_enum, default_value_t = render::Format::Html)]
+        format: render::Format,
+        /// Extension packages to load and register for the parse.
+        #[arg(long = "ext")]
+        ext: Vec<PathBuf>,
+        /// Pretty-print JSON output.
+        #[arg(long)]
+        pretty: bool,
+    },
+    /// Print the document's tree as pretty JSON, the JSON tree format.
+    Ast {
+        /// The Markdown file to print.
+        file: PathBuf,
+        /// Extension packages to load and register for the parse.
+        #[arg(long = "ext")]
+        ext: Vec<PathBuf>,
     },
     /// Check a Markdown document for problems.
     Check {
@@ -70,6 +93,13 @@ fn main() -> ExitCode {
         Command::Ext {
             command: ExtCommand::Manifest { path },
         } => manifest_check::run(&path),
+        Command::Render {
+            file,
+            format,
+            ext,
+            pretty,
+        } => render::run(&file, format, pretty, &ext),
+        Command::Ast { file, ext } => render::run(&file, render::Format::Json, true, &ext),
         Command::Check { file, ext } => check::run(&file, &ext),
     }
 }
