@@ -1,4 +1,8 @@
 # Instruction counts from `cargo bench -p geist4-bench --bench iai` (iai-callgrind, Linux).
 # Update with tools/update_iai_baseline.py after a deliberate, reviewed performance change.
-iai::parse_to_html_group::spec_parse_to_html spec 24924844
-iai::parse_to_html_group::corpus_parse_to_html corpus:corpus_text() 11826964
+# Decision 0038: the block-side TextMap (0036) and the reference-correct span
+# ends raise the counted work; the quadratic anchor lookup and the per-line
+# hashing found on the way are fixed, and these are the runner's measured
+# counts of the fix commit.
+iai::parse_to_html_group::spec_parse_to_html spec 27540069
+iai::parse_to_html_group::corpus_parse_to_html corpus:corpus_text() 17292643
