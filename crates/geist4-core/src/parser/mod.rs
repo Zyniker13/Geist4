@@ -2431,8 +2431,8 @@ pub fn normalize_label(label: &str) -> String {
 }
 
 /// Resolves a link label's escapes and character references in one pass,
-/// as the reference reads labels; see [`crate::inline::decode_label`] for
-/// the rules.
+/// as the reference reads labels; the rules are the inline phase's label
+/// decoder, applied at definition-insert time.
 #[must_use]
 pub fn decode_label(label: &str) -> String {
     crate::inline::decode_label(label)

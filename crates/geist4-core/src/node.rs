@@ -154,7 +154,7 @@ pub struct LinkRef<'a> {
 
 /// A link reference definition with the source span of its construct,
 /// in document order. Every definition scanned appears here, including
-/// duplicates the first definition shadows in [`Document::link_defs`].
+/// duplicates the first definition shadows in [`crate::Document::link_defs`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpannedDef<'a> {
     /// The definition's fields.
