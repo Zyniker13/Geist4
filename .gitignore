@@ -10,3 +10,5 @@ target/
 __pycache__/
 bindings/swift/CGeist4.xcframework/
 bindings/swift/.build/
+target-writer/
+mutants-out*/

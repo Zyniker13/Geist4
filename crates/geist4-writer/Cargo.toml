@@ -1,0 +1,18 @@
+[package]
+name = "geist4-writer"
+description = "CommonMark writer: serialize a Geist4 document tree back to normalized CommonMark source."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+geist4-core = { path = "../geist4-core" }
+
+[dev-dependencies]
+geist4-spec-harness = { path = "../geist4-spec-harness" }

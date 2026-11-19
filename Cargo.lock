@@ -972,6 +972,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "geist4-writer"
+version = "0.1.0-dev"
+dependencies = [
+ "geist4-core",
+ "geist4-spec-harness",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
