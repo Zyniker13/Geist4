@@ -22,10 +22,11 @@ fn undefined_footnote_reference_is_a_problem_with_unchanged_output() {
         "no footnote definition for footnote reference '[^1]'"
     );
     // The problem carries the span of the block that holds the
-    // reference; inline nodes keep no spans.
+    // reference; inline nodes keep no spans. The paragraph ends at its
+    // last content byte, before the final newline.
     assert_eq!(
         document.problems[0].span,
-        geist4_core::span::Span::new(0, src.len())
+        geist4_core::span::Span::new(0, src.len() - 1)
     );
 }
 

@@ -75,6 +75,9 @@ pub(crate) enum Kind {
         url: String,
         title: Option<String>,
         image: bool,
+        /// The reference provenance when the link resolved through a
+        /// link reference definition, `None` for inline links.
+        reference: Option<crate::node::LinkRef<'static>>,
     },
 }
 
@@ -492,10 +495,16 @@ fn node_from_kind(kind: Kind) -> Node<'static> {
         // would be a wrapper the walk skipped.
         Kind::Escaped => unreachable!("escaped wrapper survived to the arena"),
         Kind::Ext { kind, attrs } => Node::Extension(crate::extension::ExtNode { kind, attrs }),
-        Kind::Link { url, title, image } => Node::Link(crate::node::LinkData {
+        Kind::Link {
+            url,
+            title,
+            image,
+            reference,
+        } => Node::Link(crate::node::LinkData {
             url: url.into(),
             title: title.map(std::borrow::Cow::Owned),
             image,
+            reference,
         }),
     }
 }
@@ -824,6 +833,7 @@ impl<'p, 'defs, 'a, 'ext> TriggerInner<'p, 'defs, 'a, 'ext> {
             url,
             title: None,
             image: false,
+            reference: None,
         });
         let child = self.parser.alloc(Kind::Text(text));
         {
@@ -1153,7 +1163,11 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                 }
                 {
                     let cell = &mut self.pool[text as usize];
-                    cell.start = (self.pos - 1) as u32;
+                    // The character's span covers its backslash too: the
+                    // wrapper dissolves, and the surviving text node's
+                    // position then covers the escape as the source wrote
+                    // it, as the reference's text chunk does.
+                    cell.start = (self.pos - 2) as u32;
                     cell.end = self.pos as u32;
                 }
                 self.pool[text as usize].parent = Some(esc);
@@ -1451,18 +1465,24 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
         // lookup was attempted; kept for the problem message when
         // nothing matched.
         let mut broken_label: Option<String> = None;
+        // The reference provenance, when the link resolved through a
+        // definition: the exported trees show `linkReference` nodes for
+        // these, with the label as written and the reference form the
+        // source used.
+        let mut reference: Option<crate::node::LinkRef<'static>> = None;
         if matched.is_none() {
             // A reference link: a following label or the link text itself.
             self.pos = after_link_text_pos;
-            let mut raw_label: Option<String> = None;
+            let mut scanned_label: Option<String> = None;
             if let Some((label, len)) = scan_link_label(self.bytes, self.pos) {
                 self.pos += len;
-                raw_label = Some(label);
+                scanned_label = Some(label);
             } else {
                 self.pos = initial_pos;
             }
-            let shortcut = raw_label.as_ref().is_none_or(String::is_empty)
+            let shortcut = scanned_label.as_ref().is_none_or(String::is_empty)
                 && !self.brackets[opener_index].bracket_after;
+            let mut raw_label = scanned_label.clone();
             if shortcut {
                 // The link text itself becomes the label.
                 let text_start = self.brackets[opener_index].position;
@@ -1476,6 +1496,18 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                         def.destination.to_string(),
                         def.title.as_ref().map(|t| t.to_string()),
                     ));
+                    // The scanned label decides the form: a non-empty
+                    // one is a full reference, an empty one a collapsed
+                    // reference, none a shortcut reference.
+                    let kind = match &scanned_label {
+                        Some(label) if !label.is_empty() => crate::node::LinkRefKind::Full,
+                        Some(_) => crate::node::LinkRefKind::Collapsed,
+                        None => crate::node::LinkRefKind::Shortcut,
+                    };
+                    reference = Some(crate::node::LinkRef {
+                        label: raw_label.clone().unwrap_or_default().into(),
+                        kind,
+                    });
                 }
             }
             broken_label = raw_label;
@@ -1489,6 +1521,7 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                     url,
                     title,
                     image: is_image,
+                    reference,
                 });
                 // The link covers the whole group: the image marker and
                 // the opening bracket when there is one, through the
@@ -2071,6 +2104,7 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
             url,
             title: None,
             image: false,
+            reference: None,
         });
         let text_id = self.alloc(Kind::Text(text));
         {
@@ -2347,6 +2381,41 @@ pub(crate) fn unescape_entities(text: &str) -> String {
         }
     }
     out.push_str(rest);
+    out
+}
+
+/// Resolves a link label's escapes the way the reference reads labels: one
+/// pass where a backslash before ASCII punctuation yields the character
+/// and a character reference decodes, with the backslash winning where
+/// both could apply. `a\&b` is `a&b`, `a&amp;b` is `a&b`, and a backslash
+/// before a non-punctuation character stays literal.
+pub(crate) fn decode_label(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out = String::with_capacity(raw.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' if bytes.get(i + 1).is_some_and(|b| b.is_ascii_punctuation()) => {
+                out.push(bytes[i + 1] as char);
+                i += 2;
+            }
+            b'&' => match entities::scan_entity(&raw[i + 1..]) {
+                Some((decoded, len)) => {
+                    out.push_str(&decoded);
+                    i += 1 + len;
+                }
+                None => {
+                    out.push('&');
+                    i += 1;
+                }
+            },
+            _ => {
+                let ch = raw[i..].chars().next().expect("a byte inside a char");
+                out.push(ch);
+                i += ch.len_utf8();
+            }
+        }
+    }
     out
 }
 

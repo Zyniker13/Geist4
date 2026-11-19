@@ -2,6 +2,8 @@
 
 use std::borrow::Cow;
 
+use crate::span::Span;
+
 /// A link reference definition collected during block parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkDef<'a> {
@@ -120,6 +122,52 @@ pub struct LinkData<'a> {
     pub title: Option<Cow<'a, str>>,
     /// Whether this is an image (`![text](url)`) rather than a link.
     pub image: bool,
+    /// The link's reference provenance: `Some` when the link resolved
+    /// through a link reference definition rather than an inline
+    /// destination, carrying the label as written and the reference
+    /// form. `None` for inline links, images and autolinks.
+    pub reference: Option<LinkRef<'a>>,
+}
+
+/// Which reference form produced a [`Node::Link`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkRefKind {
+    /// A full reference: the link text plus a separate label,
+    /// `[text][label]`.
+    Full,
+    /// A collapsed reference: the link text as its own empty label,
+    /// `[text][]`.
+    Collapsed,
+    /// A shortcut reference: the link text alone, `[text]`.
+    Shortcut,
+}
+
+/// The reference provenance of a [`Node::Link`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkRef<'a> {
+    /// The label as written: the separate label for a full reference,
+    /// the link text for collapsed and shortcut references.
+    pub label: Cow<'a, str>,
+    /// Which reference form the source used.
+    pub kind: LinkRefKind,
+}
+
+/// A link reference definition with the source span of its construct,
+/// in document order. Every definition scanned appears here, including
+/// duplicates the first definition shadows in [`Document::link_defs`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpannedDef<'a> {
+    /// The definition's fields.
+    pub def: LinkDef<'a>,
+    /// The source span of the definition construct: from the opening
+    /// bracket through the end of the line the definition ends on,
+    /// excluding that line's ending.
+    pub span: Span,
+    /// Whether the definition's construct consumed its title. A title
+    /// that failed its own end-of-line check stays captured in `def`
+    /// for link resolution, as the reference implementations resolve
+    /// it, but the definition the export shows carries no title.
+    pub titled: bool,
 }
 
 impl<'a> Node<'a> {

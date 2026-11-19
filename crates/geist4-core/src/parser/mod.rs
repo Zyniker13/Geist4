@@ -16,7 +16,9 @@ mod leaf;
 mod textmap;
 
 use crate::arena::{Arena, NodeId};
-use crate::node::{CodeBlockData, HeadingData, HtmlBlockData, ItemData, LinkDef, ListData, Node};
+use crate::node::{
+    CodeBlockData, HeadingData, HtmlBlockData, ItemData, LinkDef, ListData, Node, SpannedDef,
+};
 use crate::span::Span;
 pub(crate) use cursor::Cursor;
 use std::borrow::Cow;
@@ -109,6 +111,9 @@ pub struct Document<'a> {
     /// The document's link reference definitions, keyed by their normalized
     /// label (lowercased, whitespace runs collapsed to one space).
     pub link_defs: HashMap<String, LinkDef<'a>>,
+    /// Every link reference definition the document defines, in document
+    /// order and including duplicates; see [`SpannedDef`].
+    pub defs: Vec<SpannedDef<'a>>,
     /// The problems the parse noticed in its source: broken references
     /// and similar issues the tree absorbed without changing the
     /// output. Empty unless something was found; see
@@ -145,7 +150,8 @@ pub fn parse_with<'a>(src: &'a str, options: &crate::extension::Options) -> Docu
             ext.begin_parse();
         }
     }
-    let (mut arena, root, link_defs, mut problems) = Parser::new(src).extensions(extensions).run();
+    let (mut arena, root, link_defs, mut problems, defs) =
+        Parser::new(src).extensions(extensions).run();
     if !options.is_empty() {
         for ext in options.extensions() {
             ext.post_process(&mut crate::extension::TreeCtx {
@@ -161,6 +167,7 @@ pub fn parse_with<'a>(src: &'a str, options: &crate::extension::Options) -> Docu
         root,
         link_defs,
         problems,
+        defs,
     }
 }
 
@@ -243,6 +250,9 @@ struct Parser<'a, 'ext> {
     open: Vec<Frame>,
     line_number: usize,
     link_defs: HashMap<String, LinkDef<'a>>,
+    /// Every definition scanned, in document order with duplicates;
+    /// `link_defs` keeps only the first of each label.
+    defs: Vec<SpannedDef<'a>>,
     /// Whether each node's last processed line was blank, indexed by node.
     last_line_blank: Vec<bool>,
     /// Whether the text being added is a lazy paragraph continuation.
@@ -489,8 +499,8 @@ impl<'p, 'a, 'l, 'ext> StartInner<'p, 'a, 'l, 'ext> {
         kind: String,
         state: Box<dyn std::any::Any + Send>,
     ) -> NodeId {
-        self.parser.interrupt_paragraph(self.line_stop);
-        self.parser.close_until_can_contain(self.line_stop);
+        self.parser.interrupt_paragraph();
+        self.parser.close_until_can_contain();
         let parent = self.parser.open.last().unwrap().id;
         let id = self.parser.arena.alloc(
             Node::Extension(crate::extension::ExtNode {
@@ -530,8 +540,8 @@ impl<'p, 'a, 'l, 'ext> StartInner<'p, 'a, 'l, 'ext> {
         kind: String,
         state: Box<dyn std::any::Any + Send>,
     ) -> NodeId {
-        self.parser.interrupt_paragraph(self.line_stop);
-        self.parser.close_until_can_contain(self.line_stop);
+        self.parser.interrupt_paragraph();
+        self.parser.close_until_can_contain();
         let parent = self.parser.open.last().unwrap().id;
         let id = self.parser.arena.alloc(
             Node::Extension(crate::extension::ExtNode {
@@ -580,6 +590,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             }],
             line_number: 0,
             link_defs: HashMap::new(),
+            defs: Vec::new(),
             last_line_blank: vec![false],
             adding_lazy: false,
             line_is_src: true,
@@ -645,6 +656,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         NodeId,
         HashMap<String, LinkDef<'a>>,
         Vec<crate::problems::Problem>,
+        Vec<SpannedDef<'a>>,
     ) {
         let bytes = self.src.as_bytes();
         // A registered front matter delimiter claims a prologue before
@@ -696,13 +708,18 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             self.process_line(line, line_start, line_stop, next_start);
             line_start = next_start;
         }
-        let final_offset = self.src.len();
         while self.open.len() > 1 {
-            self.close_last(final_offset);
+            self.close_last(None);
         }
         let root = self.open[0].id;
         self.parse_all_inlines(root);
-        (self.arena, root, self.link_defs, self.problems)
+        (
+            self.arena,
+            root,
+            self.link_defs,
+            self.problems,
+            std::mem::take(&mut self.defs),
+        )
     }
 
     /// Processes one line against the open block stack. `next_line_start`
@@ -723,8 +740,10 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             WalkResult::FenceClosed => return,
             WalkResult::ClosedAt(depth) => {
                 // A closing fence consumed the line; the block closes and
-                // nothing else happens to the line.
-                self.close_from(depth, line_stop);
+                // nothing else happens to the line. The hook's block ends
+                // at this line's char end, its own last content.
+                self.open[depth].end_offset = line_stop;
+                self.close_from(depth);
                 return;
             }
             WalkResult::FailedAt(depth) => {
@@ -754,7 +773,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                     self.update_last_line_blank(self.open[depth - 1].id, Some(depth - 1), false);
                     return;
                 }
-                self.close_from(depth, line_stop);
+                self.close_from(depth);
             }
             WalkResult::Matched => {}
         }
@@ -820,6 +839,9 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 }
                 continue;
             }
+            // Whether this frame's match consumed part of the line as its
+            // own: if it did, the line extends the frame's span.
+            let mut extends = false;
             let matched = match &self.open[depth].kind {
                 OpenKind::Document | OpenKind::List(_) | OpenKind::Heading => true,
                 OpenKind::BlockQuote => {
@@ -832,6 +854,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                         if matches!(cursor.peek(), Some(b' ') | Some(b'\t')) {
                             cursor.advance_cols(1);
                         }
+                        extends = true;
                         true
                     } else {
                         false
@@ -852,6 +875,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                         let (_, col) = cursor.find_nonspace();
                         if col >= cursor.col() + *content_offset {
                             cursor.advance_cols(*content_offset);
+                            extends = true;
                             true
                         } else {
                             false
@@ -863,6 +887,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                     let (_, col) = cursor.find_nonspace();
                     if col - cursor.col() >= 4 {
                         cursor.advance_cols(4);
+                        extends = true;
                         true
                     } else if cursor.blank_from_here() {
                         cursor.skip_to_content();
@@ -880,7 +905,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 } => {
                     let (ch, len, offset) = (*fence_char, *fence_len, *fence_offset);
                     if leaf::fence_close(cursor, ch, len) {
-                        self.close_last(line_stop);
+                        self.close_last(Some(line_stop));
                         return WalkResult::FenceClosed;
                     }
                     cursor.skip_up_to_cols(offset);
@@ -901,6 +926,9 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             };
             if !matched {
                 return WalkResult::FailedAt(depth);
+            }
+            if extends {
+                self.open[depth].end_offset = line_stop;
             }
         }
         WalkResult::Matched
@@ -1018,9 +1046,9 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             // Block quote. Four or more spaces of indentation form an
             // indented code block instead.
             if indent < 4 && at.peek() == Some(b'>') {
-                self.interrupt_paragraph(line_stop);
-                self.close_until_can_contain(line_stop);
-                let id = self.open_block_quote(line_offset);
+                self.interrupt_paragraph();
+                self.close_until_can_contain();
+                let id = self.open_block_quote(line_offset + pos, line_stop);
                 cursor.set_pos_col(pos, col);
                 cursor.bump();
                 if matches!(cursor.peek(), Some(b' ') | Some(b'\t')) {
@@ -1034,10 +1062,17 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             // ATX heading.
             if indent < 4 {
                 if let Some((level, text, content_pos)) = leaf::atx_heading(&at) {
-                    self.interrupt_paragraph(line_stop);
-                    self.close_until_can_contain(line_stop);
-                    let id =
-                        self.open_atx_heading(level, text, content_pos, line_offset, line_stop);
+                    self.interrupt_paragraph();
+                    self.close_until_can_contain();
+                    let id = self.open_atx_heading(
+                        level,
+                        text,
+                        content_pos,
+                        line_offset,
+                        line_offset + pos,
+                        line_stop,
+                    );
+                    self.raise_ancestor_ends(line_stop);
                     cursor.bump_all();
                     return Some(id);
                 }
@@ -1047,9 +1082,9 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             // literal's first line and is extracted when the block closes.
             if indent < 4 {
                 if let Some(fence) = leaf::fence_start(&at) {
-                    self.interrupt_paragraph(line_stop);
-                    self.close_until_can_contain(line_stop);
-                    let id = self.open_fenced_code(&fence, indent, line_offset);
+                    self.interrupt_paragraph();
+                    self.close_until_can_contain();
+                    let id = self.open_fenced_code(&fence, indent, line_offset + pos);
                     cursor.set_pos_col(pos, col);
                     cursor.bump_n(fence.len);
                     return Some(id);
@@ -1061,9 +1096,9 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             // part of the text, so the cursor stays where it is.
             if indent < 4 {
                 if let Some(start) = leaf::html_block_start(&at, !maybe_lazy && !scan_is_para) {
-                    self.interrupt_paragraph(line_stop);
-                    self.close_until_can_contain(line_stop);
-                    let id = self.open_html_block(start.kind, line_offset);
+                    self.interrupt_paragraph();
+                    self.close_until_can_contain();
+                    let id = self.open_html_block(start.kind, line_offset + cursor.pos());
                     return Some(id);
                 }
             }
@@ -1088,9 +1123,10 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             // match a container prefix, which cannot happen here: a scanned
             // paragraph always matched.
             if indent < 4 && leaf::thematic_break(&at) {
-                self.interrupt_paragraph(line_stop);
-                self.close_until_can_contain(line_stop);
-                let id = self.open_thematic_break(line_offset, line_stop);
+                self.interrupt_paragraph();
+                self.close_until_can_contain();
+                let id = self.open_thematic_break(line_offset + pos, line_stop);
+                self.raise_ancestor_ends(line_stop);
                 cursor.bump_all();
                 return Some(id);
             }
@@ -1099,7 +1135,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             if indent < 4 {
                 if let Some(marker) = self.item_start(&at, scan_is_para) {
                     cursor.set_pos_col(pos, col);
-                    self.open_list_item(&marker, cursor, indent, line_offset, line_stop);
+                    self.open_list_item(&marker, cursor, indent, line_offset);
                     opened = Some(self.open.last().unwrap().id);
                     maybe_lazy = false;
                     continue;
@@ -1109,8 +1145,8 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             // Indented code: four columns come off the line from where the
             // container prefixes left it, not from the first non-space byte.
             if !maybe_lazy && !cursor.blank_from_here() && indent >= 4 {
-                self.close_until_can_contain(line_stop);
-                let id = self.open_indented_code(line_offset);
+                self.close_until_can_contain();
+                let id = self.open_indented_code(line_offset + cursor.pos());
                 cursor.advance_cols(4);
                 return Some(id);
             }
@@ -1213,37 +1249,50 @@ impl<'a, 'ext> Parser<'a, 'ext> {
     }
 
     /// Closes an open paragraph (extracting link definitions), so a new
-    /// block can interrupt it.
-    fn interrupt_paragraph(&mut self, line_stop: usize) {
+    /// block can interrupt it. The paragraph keeps its own end: the char
+    /// end of its last content line, not the interrupting line's.
+    fn interrupt_paragraph(&mut self) {
         if self.deepest_is_paragraph() {
-            self.close_last(line_stop);
+            self.close_last(None);
         }
     }
 
     /// Closes open frames until the deepest frame can hold a new child,
     /// mirroring the reference algorithm's add-child walk: only the
     /// document, block quotes and list items accept arbitrary blocks, a
-    /// list accepts items only, and leaf frames accept nothing.
-    fn close_until_can_contain(&mut self, line_stop: usize) {
+    /// list accepts items only, and leaf frames accept nothing. Closed
+    /// frames keep their own ends (see `close_last`).
+    fn close_until_can_contain(&mut self) {
         while !matches!(
             self.open.last().unwrap().kind,
             OpenKind::Document | OpenKind::BlockQuote | OpenKind::Item { .. }
         ) && !self.deepest_extension_contains_blocks()
         {
-            self.close_last(line_stop);
+            self.close_last(None);
         }
     }
 
     /// Closes the paragraph and any block in the way of a new list,
     /// mirroring the reference's add-child walk: a list may live under
     /// a document, block quote or item, so everything else closes.
-    fn make_room_for_list(&mut self, line_stop: usize) {
+    /// Closed frames keep their own ends (see `close_last`).
+    fn make_room_for_list(&mut self) {
         while !matches!(
             self.open.last().unwrap().kind,
             OpenKind::Document | OpenKind::BlockQuote | OpenKind::Item { .. }
         ) && !self.deepest_extension_contains_blocks()
         {
-            self.close_last(line_stop);
+            self.close_last(None);
+        }
+    }
+
+    /// Raises every open frame's recorded end to `end`: an atomic block
+    /// (a thematic break or an ATX heading) takes the line without a
+    /// frame of its own, so the containers it landed in keep the line as
+    /// their last consumed content.
+    fn raise_ancestor_ends(&mut self, end: usize) {
+        for frame in self.open.iter_mut() {
+            frame.end_offset = frame.end_offset.max(end);
         }
     }
 
@@ -1258,8 +1307,10 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         cursor: &mut Cursor<'_>,
         indent: usize,
         line_offset: usize,
-        line_stop: usize,
     ) {
+        // The item's span starts at its marker, the item's own first
+        // byte; capture it before the cursor moves into the padding.
+        let at_marker = line_offset + cursor.pos();
         // The item's padding: spaces and tabs after the marker, up to five
         // columns; more than four, none, or nothing but blankness rewind to
         // one column past the marker.
@@ -1271,7 +1322,12 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             cursor.advance_cols(1);
             padding += 1;
         }
+        // The padding the line actually carried, for the item's span: the
+        // rewind below changes the content offset, not the span.
+        let mut padding_span = padding;
         if !(1..5).contains(&padding) || cursor.blank_from_here() {
+            // The padding the line actually carried, for the item's span.
+            let consumed = cursor.pos() - after_marker.pos();
             *cursor = after_marker;
             if padding > 0 {
                 cursor.advance_cols(1);
@@ -1279,14 +1335,14 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             // The reference algorithm rewinds to one column past the marker
             // and counts a single column of padding.
             padding = 1;
+            padding_span = consumed;
         }
-
         let same_type = match &self.open.last().unwrap().kind {
             OpenKind::List(list) => list.ordered == marker.ordered && list.marker == marker.char,
             _ => false,
         };
         if !same_type {
-            self.make_room_for_list(line_stop);
+            self.make_room_for_list();
             let parent = self.open.last().unwrap().id;
             let list_id = self.arena.alloc(
                 Node::List(ListData {
@@ -1313,10 +1369,17 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             });
         }
         let list_id = self.open.last().unwrap().id;
-        let id = self.arena.alloc(
-            Node::Item(ItemData { padding: 0 }),
-            Span::empty(line_offset),
-        );
+        if !same_type {
+            // The list's span starts at its first item's marker, the
+            // list's own first byte.
+            self.arena.set_span(list_id, Span::empty(at_marker));
+            if let Some(Frame { start_offset, .. }) = self.open.last_mut() {
+                *start_offset = at_marker;
+            }
+        }
+        let id = self
+            .arena
+            .alloc(Node::Item(ItemData { padding: 0 }), Span::empty(at_marker));
         self.arena.push_child(list_id, id);
         self.last_line_blank.push(false);
         self.open.push(Frame {
@@ -1325,13 +1388,18 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 content_offset: indent + marker.width + padding,
             },
             start_line: self.line_number,
-            start_offset: line_offset,
-            end_offset: line_offset,
+            start_offset: at_marker,
+            // An empty item's span covers its marker and the padding the
+            // line actually carried (before the rewind), so `-\n` spans
+            // its marker alone and `- \n` its marker and its space.
+            end_offset: at_marker + marker.width + padding_span,
         });
     }
 
     /// Opens an indented code block under the deepest container.
-    fn open_indented_code(&mut self, line_offset: usize) -> NodeId {
+    /// `at_indent` is the source offset of the block's own four-space
+    /// indent, where the block's span starts.
+    fn open_indented_code(&mut self, at_indent: usize) -> NodeId {
         let parent = self.open.last().unwrap().id;
         let id = self.arena.alloc(
             Node::CodeBlock(CodeBlockData {
@@ -1340,7 +1408,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 info: None,
                 literal: Cow::Owned(String::new()),
             }),
-            Span::empty(line_offset),
+            Span::empty(at_indent),
         );
         self.arena.push_child(parent, id);
         self.last_line_blank.push(false);
@@ -1354,20 +1422,21 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 literal: String::new(),
             },
             start_line: self.line_number,
-            start_offset: line_offset,
-            end_offset: line_offset,
+            start_offset: at_indent,
+            end_offset: at_indent,
         });
         id
     }
 
     /// Opens a fenced code block. `fence_offset` is the fence's column past
     /// the parent container's content column, which fixes how much
-    /// indentation comes off each content line.
+    /// indentation comes off each content line, and `at_fence` is the
+    /// fence character's source offset, where the block's span starts.
     fn open_fenced_code(
         &mut self,
         fence: &leaf::FenceStart,
         fence_offset: usize,
-        line_offset: usize,
+        at_fence: usize,
     ) -> NodeId {
         let parent = self.open.last().unwrap().id;
         let id = self.arena.alloc(
@@ -1377,7 +1446,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 info: None,
                 literal: Cow::Owned(String::new()),
             }),
-            Span::empty(line_offset),
+            Span::empty(at_fence),
         );
         self.arena.push_child(parent, id);
         self.last_line_blank.push(false);
@@ -1391,21 +1460,24 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 literal: String::new(),
             },
             start_line: self.line_number,
-            start_offset: line_offset,
-            end_offset: line_offset,
+            start_offset: at_fence,
+            end_offset: at_fence,
         });
         id
     }
 
-    /// Opens an HTML block of the given kind.
-    fn open_html_block(&mut self, kind: u8, line_offset: usize) -> NodeId {
+    /// Opens an HTML block of the given kind. `at_start` is the source
+    /// offset of the block's own first byte, where the block's span
+    /// starts: the line's leading whitespace belongs to the block,
+    /// container prefixes do not.
+    fn open_html_block(&mut self, kind: u8, at_start: usize) -> NodeId {
         let parent = self.open.last().unwrap().id;
         let id = self.arena.alloc(
             Node::HtmlBlock(HtmlBlockData {
                 kind,
                 literal: Cow::Owned(String::new()),
             }),
-            Span::empty(line_offset),
+            Span::empty(at_start),
         );
         self.arena.push_child(parent, id);
         self.last_line_blank.push(false);
@@ -1416,34 +1488,38 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 literal: String::new(),
             },
             start_line: self.line_number,
-            start_offset: line_offset,
-            end_offset: line_offset,
+            start_offset: at_start,
+            end_offset: at_start,
         });
         id
     }
 
-    /// Opens a thematic break, closed at once.
-    fn open_thematic_break(&mut self, line_offset: usize, line_stop: usize) -> NodeId {
+    /// Opens a thematic break, closed at once. `at_marker` is the first
+    /// marker character's source offset, where the break's span starts.
+    fn open_thematic_break(&mut self, at_marker: usize, line_stop: usize) -> NodeId {
         let parent = self.open.last().unwrap().id;
         let id = self
             .arena
-            .alloc(Node::ThematicBreak, Span::new(line_offset, line_stop));
+            .alloc(Node::ThematicBreak, Span::new(at_marker, line_stop));
         self.arena.push_child(parent, id);
         id
     }
 
-    /// Opens a block quote.
-    fn open_block_quote(&mut self, line_offset: usize) -> NodeId {
+    /// Opens a block quote at the `>` the cursor found. `at_marker` is
+    /// the marker's source offset, where the block's span starts, and
+    /// `line_stop` is the line's char end, where the span ends: the
+    /// marker line is the quote's own first line.
+    fn open_block_quote(&mut self, at_marker: usize, line_stop: usize) -> NodeId {
         let parent = self.open.last().unwrap().id;
-        let id = self.arena.alloc(Node::BlockQuote, Span::empty(line_offset));
+        let id = self.arena.alloc(Node::BlockQuote, Span::empty(at_marker));
         self.arena.push_child(parent, id);
         self.last_line_blank.push(false);
         self.open.push(Frame {
             id,
             kind: OpenKind::BlockQuote,
             start_line: self.line_number,
-            start_offset: line_offset,
-            end_offset: line_offset,
+            start_offset: at_marker,
+            end_offset: line_stop,
         });
         id
     }
@@ -1457,6 +1533,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         text: String,
         content_pos: usize,
         line_offset: usize,
+        at_hash: usize,
         line_stop: usize,
     ) -> NodeId {
         let parent = self.open.last().unwrap().id;
@@ -1465,7 +1542,9 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 level,
                 setext: false,
             }),
-            Span::new(line_offset, line_stop),
+            // The heading's span starts at its `#`: the marker is the
+            // heading's own first byte.
+            Span::new(at_hash, line_stop),
         );
         let content_start = line_offset + content_pos;
         let content_end = content_start + text.len();
@@ -1574,7 +1653,10 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             }) => (std::mem::take(text), *id, *start_offset),
             _ => return SetextOutcome::NotSetext,
         };
-        let consumed = self.extract_link_defs(&frame_text);
+        let consumed = {
+            let map = self.text_maps.get(&id).cloned();
+            self.extract_link_defs(&frame_text, map.as_ref(), frame_start)
+        };
         let remainder = frame_text[consumed..].to_string();
         if remainder.is_empty() {
             // The paragraph was nothing but definitions; it stays open with
@@ -1610,7 +1692,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 *kind = OpenKind::Heading;
             }
         }
-        self.close_last(line_stop);
+        self.close_last(Some(line_stop));
         SetextOutcome::Converted(id)
     }
 
@@ -1652,26 +1734,28 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                         cursor.skip_to_content();
                         let (text, anchor) =
                             self.anchored_rest(cursor, line_offset, line_stop, next_line_start);
-                        Some(self.open_paragraph(&text, line_offset, anchor))
+                        Some(self.open_paragraph(&text, line_offset, line_stop, anchor))
                     }
                 } else {
                     if cursor.rest_len() > 0 {
                         cursor.bump_all();
                     }
+                    self.set_frame_end(line_stop);
                     Some(id)
                 }
             }
             OpenKind::CodeBlock { .. } => {
-                self.append_code_rest(id, cursor, line_offset);
+                self.append_code_rest(id, cursor, line_offset, line_stop, next_line_start);
                 Some(id)
             }
             OpenKind::HtmlBlock { kind, .. } => {
                 let kind = *kind;
                 self.append_html_rest(id, cursor, line_offset);
+                self.set_frame_end(line_stop);
                 if kind <= 5 {
                     let text = self.line_rest_bytes(cursor);
                     if leaf::html_block_end(kind, leaf::trim_ascii(&text)) {
-                        self.close_last(line_stop);
+                        self.close_last(Some(line_stop));
                     }
                 }
                 Some(id)
@@ -1687,8 +1771,8 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                     cursor.skip_to_content();
                     let (text, anchor) =
                         self.anchored_rest(cursor, line_offset, line_stop, next_line_start);
-                    self.close_until_can_contain(line_stop);
-                    Some(self.open_paragraph(&text, line_offset, anchor))
+                    self.close_until_can_contain();
+                    Some(self.open_paragraph(&text, line_offset, line_stop, anchor))
                 }
             }
         }
@@ -1699,7 +1783,17 @@ impl<'a, 'ext> Parser<'a, 'ext> {
     /// A lazily added line means the line was paragraph text of an
     /// enclosing container's existing paragraph child, so that child
     /// continues here instead of a new paragraph starting.
-    fn open_paragraph(&mut self, text: &str, line_offset: usize, anchor: LineAnchor) -> NodeId {
+    fn open_paragraph(
+        &mut self,
+        text: &str,
+        line_offset: usize,
+        line_stop: usize,
+        anchor: LineAnchor,
+    ) -> NodeId {
+        // The paragraph's span starts at its own first byte: the anchor's
+        // source start, which maps the content exactly (tabs and NUL
+        // replacements included).
+        let content_start = anchor.src_start;
         if self.adding_lazy {
             self.adding_lazy = false;
             let parent = self.open.last().unwrap().id;
@@ -1712,8 +1806,8 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                             text: String::new(),
                         },
                         start_line: self.line_number,
-                        start_offset: line_offset,
-                        end_offset: line_offset,
+                        start_offset: content_start,
+                        end_offset: line_stop,
                     });
                     return last;
                 }
@@ -1729,8 +1823,11 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 text: text.to_string(),
             },
             start_line: self.line_number,
-            start_offset: line_offset,
-            end_offset: line_offset,
+            // The paragraph's span starts at its own first byte: its
+            // content, which the anchor maps exactly (tabs and NUL
+            // replacements included), not at the line's container prefixes.
+            start_offset: content_start,
+            end_offset: line_stop,
         });
         self.text_maps
             .entry(id)
@@ -1910,16 +2007,45 @@ impl<'a, 'ext> Parser<'a, 'ext> {
     ) {
         let (text, anchor) = self.anchored_rest(cursor, line_offset, line_stop, next_line_start);
         self.append_paragraph_text(id, &text, anchor);
+        // The paragraph's span ends at its last content line's char end,
+        // trailing whitespace included; the text child's own span covers
+        // the trimmed content.
+        self.set_frame_end(line_stop);
     }
 
     /// Appends the cursor's remaining line to a code block's literal.
-    fn append_code_rest(&mut self, id: NodeId, cursor: &Cursor<'_>, line_offset: usize) {
+    fn append_code_rest(
+        &mut self,
+        id: NodeId,
+        cursor: &Cursor<'_>,
+        line_offset: usize,
+        line_stop: usize,
+        next_line_start: usize,
+    ) {
         let text = self.line_rest(cursor, line_offset);
         for frame in self.open.iter_mut().rev() {
             if frame.id == id {
-                if let OpenKind::CodeBlock { literal, .. } = &mut frame.kind {
+                if let OpenKind::CodeBlock {
+                    literal, fenced, ..
+                } = &mut frame.kind
+                {
                     literal.push_str(&text);
                     literal.push('\n');
+                    // A fenced block's span covers its literal's line ends,
+                    // but only at the document's end, where the flow's
+                    // final newline belongs to the unclosed fence; a fence
+                    // that stops mid-document ends at its last line's char
+                    // end. An indented block's span always ends at its last
+                    // content char, and a blank line adds nothing.
+                    if *fenced {
+                        frame.end_offset = if next_line_start == self.src.len() {
+                            next_line_start
+                        } else {
+                            line_stop
+                        };
+                    } else if !text.is_empty() {
+                        frame.end_offset = line_stop;
+                    }
                     return;
                 }
             }
@@ -1991,21 +2117,33 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         }
     }
 
-    /// Closes frames from `depth` to the end of the open stack.
-    fn close_from(&mut self, depth: usize, line_stop: usize) {
+    /// Closes frames from `depth` to the end of the open stack, each at its
+    /// own recorded end (see `close_last`).
+    fn close_from(&mut self, depth: usize) {
         while self.open.len() > depth.max(1) {
-            self.close_last(line_stop);
+            self.close_last(None);
         }
     }
 
-    /// Closes the deepest open block, finalizing it.
-    fn close_last(&mut self, line_stop: usize) {
+    /// Closes the deepest open block, finalizing it. `line_stop` is the
+    /// current line's char end; when given, the frame's end is at least
+    /// that, because the frame consumed the line itself (a closing fence,
+    /// a setext underline). When `None`, the frame keeps its own recorded
+    /// end: the char end of the last line its subtree consumed, which a
+    /// blank or sibling line must not extend. Either way, the closed
+    /// frame's end raises its parent's recorded end, so a container's end
+    /// covers its last consumed descendant line.
+    fn close_last(&mut self, line_stop: Option<usize>) {
         let mut frame = self.open.pop().expect("the document frame stays open");
-        frame.end_offset = line_stop.max(frame.end_offset);
+        if let Some(line_stop) = line_stop {
+            frame.end_offset = line_stop.max(frame.end_offset);
+        }
+        let end = frame.end_offset;
         match &mut frame.kind {
             OpenKind::Paragraph { text } => {
                 let text = std::mem::take(text);
-                let consumed = self.extract_link_defs(&text);
+                let map = self.text_maps.get(&frame.id).cloned();
+                let consumed = self.extract_link_defs(&text, map.as_ref(), frame.start_offset);
                 let remainder = &text[consumed..];
                 if remainder.is_empty() {
                     self.text_maps.remove(&frame.id);
@@ -2109,14 +2247,17 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                     arena: &mut self.arena,
                     node: frame.id,
                     start_offset: frame.start_offset,
-                    end_offset: frame.end_offset,
+                    end_offset: end,
                 };
                 extensions[*index].close(state.as_mut(), &mut ctx);
             }
             _ => {}
         }
+        if let Some(parent) = self.open.last_mut() {
+            parent.end_offset = parent.end_offset.max(end);
+        }
         self.arena
-            .set_span(frame.id, Span::new(frame.start_offset, frame.end_offset));
+            .set_span(frame.id, Span::new(frame.start_offset, end));
     }
 
     /// Removes a node from its parent's children (the parent is the frame
@@ -2184,11 +2325,16 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         }
     }
 
-    /// Extracts as many leading link reference definitions as the text
-    /// starts with, recording them and returning the consumed byte count.
-    /// Only whitespace may separate consecutive definitions; the first
-    /// non-definition text stops the scan.
-    fn extract_link_defs(&mut self, text: &str) -> usize {
+    /// Extracts the link reference definitions at the start of a
+    /// paragraph's text, recording them and returning the consumed byte
+    /// count. Only whitespace may separate consecutive definitions; the
+    /// first non-definition text stops the scan.
+    fn extract_link_defs(
+        &mut self,
+        text: &str,
+        map: Option<&TextMap>,
+        fallback_start: usize,
+    ) -> usize {
         // Definitions start with `[` after leading whitespace, and the
         // scan only continues after a successful definition, so when the
         // first non-whitespace byte is not `[` nothing can be consumed.
@@ -2211,18 +2357,42 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             let Some(scanned) = leaf::scan_link_def(&text[consumed + skip..]) else {
                 break;
             };
-            let key = normalize_label(&scanned.label);
-            if let std::collections::hash_map::Entry::Vacant(e) = self.link_defs.entry(key) {
-                e.insert(LinkDef {
-                    label: Cow::Owned(scanned.label),
-                    destination: Cow::Owned(crate::inline::clean_url(&scanned.destination)),
-                    title: scanned
-                        .title
-                        .and_then(|t| crate::inline::clean_title(&t))
-                        .map(Cow::Owned),
-                });
+            let buf_start = consumed + skip;
+            let buf_end = buf_start + scanned.consumed;
+            let consumed_len = scanned.consumed;
+            let def = LinkDef {
+                label: Cow::Owned(scanned.label),
+                destination: Cow::Owned(crate::inline::clean_url(&scanned.destination)),
+                title: scanned
+                    .title
+                    .and_then(|t| crate::inline::clean_title(&t))
+                    .map(Cow::Owned),
+            };
+            // The definition's span: the scanned buffer bytes mapped back
+            // to the source, then trimmed of the line ending the scan
+            // consumed so the span stops at the line's last byte.
+            let mut span = match map {
+                Some(map) => map.map_span(buf_start, buf_end, fallback_start),
+                None => Span::new(fallback_start + buf_start, fallback_start + buf_end),
+            };
+            while span.end > span.start
+                && matches!(
+                    self.src.as_bytes().get(span.end - 1),
+                    Some(b'\n') | Some(b'\r')
+                )
+            {
+                span.end -= 1;
             }
-            consumed += skip + scanned.consumed;
+            self.defs.push(SpannedDef {
+                span,
+                def: def.clone(),
+                titled: scanned.titled,
+            });
+            let key = normalize_label(&def.label);
+            if let std::collections::hash_map::Entry::Vacant(e) = self.link_defs.entry(key) {
+                e.insert(def);
+            }
+            consumed += skip + consumed_len;
         }
         consumed
     }
@@ -2254,10 +2424,18 @@ fn decode_info_string(raw: &str) -> Option<String> {
 
 /// Normalizes a link label: Unicode case folding with ASCII whitespace
 /// runs collapsed to a single space, as the reference parser does.
-pub(crate) fn normalize_label(label: &str) -> String {
+pub fn normalize_label(label: &str) -> String {
     let mut out = String::new();
     normalize_label_into(label, &mut out);
     out
+}
+
+/// Resolves a link label's escapes and character references in one pass,
+/// as the reference reads labels; see [`crate::inline::decode_label`] for
+/// the rules.
+#[must_use]
+pub fn decode_label(label: &str) -> String {
+    crate::inline::decode_label(label)
 }
 
 /// Writes the normalized form of `label` into `out`, which is cleared

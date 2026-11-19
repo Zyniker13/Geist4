@@ -20,7 +20,8 @@ fn broken_reference_is_a_problem_with_unchanged_output() {
     // One problem for the author's one mistake. The failed attempt's
     // rewind re-scans the following label as its own bracket group, and
     // that retry records nothing — the parse's artifact, not a second
-    // mistake. The span is the block's (inline nodes keep no spans).
+    // mistake. The span is the block's (inline nodes keep no spans): the
+    // paragraph ends at its last content byte, before the final newline.
     assert_eq!(document.problems.len(), 1);
     assert_eq!(
         document.problems[0].message,
@@ -28,7 +29,7 @@ fn broken_reference_is_a_problem_with_unchanged_output() {
     );
     assert_eq!(
         document.problems[0].span,
-        geist4_core::span::Span::new(0, src.len())
+        geist4_core::span::Span::new(0, src.len() - 1)
     );
 }
 

@@ -516,6 +516,7 @@ impl Autolink {
                     url: Cow::Owned(email.url.clone()),
                     title: None,
                     image: false,
+                    reference: None,
                 }),
                 span,
             );

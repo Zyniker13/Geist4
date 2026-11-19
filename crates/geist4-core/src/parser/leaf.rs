@@ -665,6 +665,10 @@ pub(super) struct ScannedDef {
     pub destination: String,
     /// The optional title, with backslash escapes resolved.
     pub title: Option<String>,
+    /// Whether the construct consumed the title: `false` when the title
+    /// failed its own end-of-line check and the definition ends at the
+    /// destination's line.
+    pub titled: bool,
     /// How many bytes of `text` the definition consumed, through the end of
     /// the line the definition ends on.
     pub consumed: usize,
@@ -765,6 +769,7 @@ pub(super) fn scan_link_def(text: &str) -> Option<ScannedDef> {
             label,
             destination,
             title: title.map(|(found, _)| found),
+            titled: true,
             consumed,
         });
     }
@@ -773,7 +778,11 @@ pub(super) fn scan_link_def(text: &str) -> Option<ScannedDef> {
             return Some(ScannedDef {
                 label,
                 destination,
+                // The title failed its own end-of-line check: it stays
+                // captured for link resolution, but the definition's
+                // construct ends at the destination's line without it.
                 title: title.map(|(found, _)| found),
+                titled: false,
                 consumed,
             });
         }
