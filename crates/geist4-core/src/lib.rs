@@ -25,6 +25,8 @@ pub mod unicode {
     pub use crate::inline::unicode::{is_punct_or_symbol, is_space};
 }
 
+pub use inline::{code_span_value, normalize_code};
+
 pub use parser::{Document, parse_document};
 
 /// The version of this crate, from its manifest.

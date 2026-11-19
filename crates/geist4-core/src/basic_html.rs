@@ -468,9 +468,10 @@ impl Renderer<'_> {
         {
             match self.arena.kind(child) {
                 Node::Text(text) => stack.push(Step::Text(escape_html(text))),
-                Node::CodeSpan(text) => {
-                    stack.push(Step::Text(format!("<code>{}</code>", escape_html(text))))
-                }
+                Node::CodeSpan(text) => stack.push(Step::Text(format!(
+                    "<code>{}</code>",
+                    escape_html(&crate::inline::normalize_code(text))
+                ))),
                 Node::InlineHtml(raw) => stack.push(Step::Filtered(raw.to_string())),
                 Node::SoftBreak => stack.push(Step::Text("\n".to_owned())),
                 Node::HardBreak => stack.push(Step::Text("<br />\n".to_owned())),
@@ -535,9 +536,8 @@ impl Renderer<'_> {
         let mut stack: Vec<NodeId> = self.arena.children(id).iter().rev().copied().collect();
         while let Some(node) = stack.pop() {
             match self.arena.kind(node) {
-                Node::Text(text) | Node::CodeSpan(text) | Node::InlineHtml(text) => {
-                    out.push_str(text)
-                }
+                Node::Text(text) | Node::InlineHtml(text) => out.push_str(text),
+                Node::CodeSpan(text) => out.push_str(&crate::inline::normalize_code(text)),
                 Node::SoftBreak | Node::HardBreak => out.push(' '),
                 _ => stack.extend(self.arena.children(node).iter().rev().copied()),
             }

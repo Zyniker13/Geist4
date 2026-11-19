@@ -175,7 +175,7 @@ fn collect_text(arena: &geist4_core::arena::Arena<'_>, children: &[NodeId], out:
     for &child in children {
         match arena.kind(child) {
             Node::Text(text) => out.push_str(text),
-            Node::CodeSpan(text) => out.push_str(text),
+            Node::CodeSpan(text) => out.push_str(&geist4_core::normalize_code(text)),
             // Both break forms leave a newline in the reference's
             // output; the removal step drops it either way.
             Node::SoftBreak | Node::HardBreak => out.push('\n'),

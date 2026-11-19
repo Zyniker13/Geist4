@@ -1110,6 +1110,12 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
         }
         let text_len = text.len();
         self.pos = end;
+        // A run that was all trailing whitespace contributes nothing; its
+        // bytes belong to no node, so the following break or text keeps
+        // the reference's span.
+        if text_len == 0 {
+            return;
+        }
         self.push_spanned(Kind::Text(text), start, start + text_len);
     }
 
@@ -1125,10 +1131,15 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
         let nl_end = self.pos;
         let hard = nlpos >= 2 && self.bytes[nlpos - 1] == b' ' && self.bytes[nlpos - 2] == b' ';
         // The break cell covers the trailing whitespace the preceding
-        // text run dropped plus the line ending itself.
+        // text run dropped plus the line ending itself — for a hard break,
+        // whose two spaces are its own syntax. A soft break's dropped
+        // whitespace belongs to nobody: the cell starts at the line
+        // ending, so text merged across it starts there too.
         let mut bstart = nlpos;
-        while bstart > 0 && matches!(self.bytes[bstart - 1], b' ' | b'\t' | b'\x0B' | b'\x0C') {
-            bstart -= 1;
+        if hard {
+            while bstart > 0 && matches!(self.bytes[bstart - 1], b' ' | b'\t' | b'\x0B' | b'\x0C') {
+                bstart -= 1;
+            }
         }
         self.push_spanned(
             if hard {
@@ -1236,10 +1247,13 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
         }
         match self.scan_to_closing_backticks(numticks) {
             Some(closer) => {
+                // The cell keeps the code span's raw source content — line
+                // endings and edge whitespace included — because the mdast
+                // export's `value` is the raw text; the renderers normalize
+                // per CommonMark when they emit.
                 let content = &self.input[startpos..closer - numticks];
-                let normalized = normalize_code(content);
                 self.pos = closer;
-                self.push_spanned(Kind::Code(normalized), startpos - numticks, closer);
+                self.push_spanned(Kind::Code(content.to_string()), startpos - numticks, closer);
             }
             None => {
                 self.scanned_for_backticks = true;
@@ -1959,20 +1973,32 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
         let closer_node = self.delims.cells[closer as usize].node;
         let opener_len = self.text_len(opener_node);
         let closer_len = self.text_len(closer_node);
-        // The emphasis covers the whole matched range, delimiters
-        // included: the opener's run start through the closer's run
-        // end, captured before the runs are truncated.
-        let emph_start = self.pool[opener_node as usize].start;
-        let emph_end = self.pool[closer_node as usize].end;
         let use_delims = if closer_len >= 2 && opener_len >= 2 {
             2
         } else {
             1
         };
+        // The emphasis's span is the delimiters it consumes: the opener
+        // run's last `use_delims` bytes and the closer run's first
+        // `use_delims` bytes. A run's leftover keeps the run's other end —
+        // the opener's leftover is the run's head, the closer's leftover
+        // its tail — so constructs sharing a run nest by position, the
+        // later pair's delimiters enclosing the earlier pair's.
+        let emph_start = self.pool[opener_node as usize].end - use_delims as u32;
+        let emph_end = self.pool[closer_node as usize].start + use_delims as u32;
         let new_opener_len = opener_len - use_delims;
         let new_closer_len = closer_len - use_delims;
         self.set_text_len(opener_node, new_opener_len);
-        self.set_text_len(closer_node, new_closer_len);
+        {
+            // The closer's leftover run is its tail: drop the consumed
+            // bytes from the text's head and move the span's start past
+            // them.
+            let cell = &mut self.pool[closer_node as usize];
+            if let Kind::Text(text) = &mut cell.kind {
+                text.replace_range(..use_delims, "");
+            }
+            cell.start += use_delims as u32;
+        }
         // Free the delimiters between opener and closer.
         let mut between = self.delims.cells[closer as usize].prev;
         while let Some(id) = between {
@@ -2202,9 +2228,26 @@ fn utf8_len(first: u8) -> usize {
     }
 }
 
-/// Normalizes code span content: line endings become spaces, and one
-/// leading and trailing space come off when the content is not all spaces.
-fn normalize_code(content: &str) -> String {
+/// The mdast value of a code span: the raw source content with one
+/// leading and one trailing whitespace byte (a space or a line ending)
+/// removed when both edges have one and the content is not all
+/// whitespace. Line endings inside stay as the source wrote them.
+pub fn code_span_value(content: &str) -> String {
+    let bytes = content.as_bytes();
+    let strip = |byte: u8| matches!(byte, b' ' | b'\n' | b'\r');
+    let all_strip = bytes.iter().all(|byte| strip(*byte));
+    if bytes.len() >= 2 && !all_strip && strip(bytes[0]) && strip(bytes[bytes.len() - 1]) {
+        content[1..bytes.len() - 1].to_string()
+    } else {
+        content.to_string()
+    }
+}
+
+/// Normalizes code span content for rendering: line endings become
+/// spaces, and one leading and trailing space come off when the content
+/// is not all spaces. Inline nodes carry the raw source content, so every
+/// renderer that emits code span text applies this.
+pub fn normalize_code(content: &str) -> String {
     let mut out = String::with_capacity(content.len());
     let mut chars = content.chars().peekable();
     let mut contains_nonspace = false;
