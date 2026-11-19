@@ -121,13 +121,15 @@ check(
 );
 
 const problems = document.problems();
+// The problem's span is the paragraph's: its last content byte, before
+// the final newline — the reference rule core/tests/problems.rs pins.
 check(
   "one broken reference is one problem",
   problems.length === 1 &&
     problems[0].message ===
       "no link reference definition for 'nope'" &&
     problems[0].start === 0 &&
-    problems[0].end === "~~x~~ [a][nope]\n".length,
+    problems[0].end === "~~x~~ [a][nope]".length,
   JSON.stringify(problems),
 );
 
