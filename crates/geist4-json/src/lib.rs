@@ -83,7 +83,7 @@ pub fn to_value(document: &Document<'_>, source: &str) -> Value {
 
 /// Serializes a parsed document to the JSON tree format as JSON text.
 ///
-/// The same tree [`to_value`][self::to_value] builds, rendered compact
+/// The same tree [`to_value`] builds, rendered compact
 /// or pretty. This is what `geist4 render --format json` prints.
 #[must_use]
 pub fn to_json(document: &Document<'_>, source: &str, pretty: bool) -> String {
