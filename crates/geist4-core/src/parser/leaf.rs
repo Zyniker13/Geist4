@@ -149,9 +149,10 @@ pub(super) fn setext_underline(c: &Cursor) -> Option<u8> {
 }
 
 /// Scans an ATX heading at the cursor: one to six `#` characters followed by
-/// a space, a tab, or the end of the line. Returns the level and the heading
-/// text with any closing hash run removed.
-pub(super) fn atx_heading(c: &Cursor) -> Option<(u8, String)> {
+/// a space, a tab, or the end of the line. Returns the level, the heading
+/// text with any closing hash run removed, and the content's absolute start
+/// position in the line, for span mapping.
+pub(super) fn atx_heading(c: &Cursor) -> Option<(u8, String, usize)> {
     let line = c.line();
     let mut pos = c.pos();
     let mut level = 0usize;
@@ -197,7 +198,7 @@ pub(super) fn atx_heading(c: &Cursor) -> Option<(u8, String)> {
     ) {
         text.pop();
     }
-    Some((level as u8, text))
+    Some((level as u8, text, pos))
 }
 
 /// Scans a fenced code block start at the cursor: three or more backticks or

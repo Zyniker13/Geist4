@@ -31,6 +31,13 @@ struct Cell {
     /// The container holding this cell, if any; lets `unlink` repair the
     /// container's child endpoints in constant time.
     parent: Option<u32>,
+    /// The cell's byte range in the block's inline text (not the source
+    /// document: the offset mapping to source coordinates happens when
+    /// the pool is attached to the tree). Containers' ranges cover their
+    /// delimiters; break cells cover the trimmed whitespace and the
+    /// line ending they stand for.
+    start: u32,
+    end: u32,
 }
 
 /// What a [`Cell`] holds.
@@ -257,6 +264,7 @@ pub(crate) fn parse_inlines_into(
     block_span: crate::span::Span,
     problems: &mut Vec<crate::problems::Problem>,
     extensions: Option<&[std::sync::Arc<dyn crate::extension::Extension>]>,
+    span_map: Option<&crate::parser::TextMap>,
 ) {
     // The paragraph's text loses trailing whitespace, as the reference's
     // `cmark_isspace` rtrim does; the spec's whitespace definition
@@ -311,9 +319,22 @@ pub(crate) fn parse_inlines_into(
     session.memo_gen = parser.memo_gen;
     parser.run();
     problems.append(&mut parser.problems);
+    // A container's span must enclose its children even when delimiter
+    // runs interleave across nested matches, so widen each container's
+    // range over its subtree before the ranges are mapped to the source.
+    widen_container_spans(&mut parser.pool);
     // Move the surviving cells straight into the arena: no intermediate
-    // node tree, no second copy of the text.
-    attach_pool(&mut parser.pool, parser.head, arena, parent);
+    // node tree, no second copy of the text. Cells' byte ranges map back
+    // to source offsets through the block's text map, falling back to the
+    // block's own span when no map covers this text.
+    attach_pool(
+        &mut parser.pool,
+        parser.head,
+        arena,
+        parent,
+        span_map,
+        block_span.start,
+    );
     // Give the grown buffers back to the session so the next leaf block
     // reuses their capacity instead of allocating from scratch.
     parser.pool.clear();
@@ -327,6 +348,63 @@ pub(crate) fn parse_inlines_into(
     session.label_scratch = parser.label_scratch;
 }
 
+/// Widens every alive container cell's byte range to cover its whole
+/// subtree, bottom-up. Nested emphasis matches can share a delimiter run,
+/// so a child's matched range may reach past its parent's own closer;
+/// the union keeps every container's span enclosing its content.
+fn widen_container_spans(pool: &mut [Cell]) {
+    enum Visit {
+        Enter(u32),
+        Exit(u32),
+    }
+    // Dead cells' ranges are stale; only alive subtrees matter, and the
+    // attach walk below visits exactly those.
+    let mut stack: Vec<Visit> = Vec::new();
+    for (id, cell) in pool.iter().enumerate() {
+        if cell.alive && cell.parent.is_none() {
+            stack.push(Visit::Enter(id as u32));
+        }
+    }
+    while let Some(step) = stack.pop() {
+        match step {
+            Visit::Enter(id) => {
+                stack.push(Visit::Exit(id));
+                let mut child = pool[id as usize].first_child;
+                while let Some(current) = child {
+                    if pool[current as usize].alive {
+                        stack.push(Visit::Enter(current));
+                    }
+                    child = pool[current as usize].next;
+                }
+            }
+            Visit::Exit(id) => {
+                let mut start = pool[id as usize].start;
+                let mut end = pool[id as usize].end;
+                let mut child = pool[id as usize].first_child;
+                while let Some(current) = child {
+                    if pool[current as usize].alive {
+                        let (cs, ce) = (pool[current as usize].start, pool[current as usize].end);
+                        // A (0, 0) range means "never recorded", not "the
+                        // source's first byte"; leave it out.
+                        if !(cs == 0 && ce == 0) {
+                            if cs < start {
+                                start = cs;
+                            }
+                            if ce > end {
+                                end = ce;
+                            }
+                        }
+                    }
+                    child = pool[current as usize].next;
+                }
+                let cell = &mut pool[id as usize];
+                cell.start = start;
+                cell.end = end;
+            }
+        }
+    }
+}
+
 /// Moves the surviving pool cells into the arena as children of `parent`,
 /// in document order. The walk is iterative — children queue behind their
 /// siblings on one stack — so a 10,000-deep emphasis tree cannot overflow
@@ -337,6 +415,8 @@ fn attach_pool(
     head: Option<u32>,
     arena: &mut crate::arena::Arena<'_>,
     parent: crate::arena::NodeId,
+    span_map: Option<&crate::parser::TextMap>,
+    fallback_start: usize,
 ) {
     let mut work: Vec<(crate::arena::NodeId, u32)> = Vec::new();
     let mut kids: Vec<u32> = Vec::new();
@@ -370,7 +450,20 @@ fn attach_pool(
             continue;
         }
         let node = node_from_kind(kind);
-        let id = arena.alloc(node, crate::span::Span::empty(0));
+        let span = match span_map {
+            Some(map) => {
+                let cell = &pool[cell_id as usize];
+                map.map_span(cell.start as usize, cell.end as usize, fallback_start)
+            }
+            None => {
+                let cell = &pool[cell_id as usize];
+                crate::span::Span::new(
+                    fallback_start + cell.start as usize,
+                    fallback_start + cell.end as usize,
+                )
+            }
+        };
+        let id = arena.alloc(node, span);
         arena.push_child(arena_parent, id);
         // Children in reverse, for the same reason as the roots.
         let mut kid = first_child;
@@ -557,7 +650,11 @@ impl<'p, 'defs, 'a, 'ext> crate::extension::InlineTriggerCtx<'p, 'defs, 'a, 'ext
         let (length, can_open, can_close) = self.inner.parser.scan_delims(self.inner.byte);
         let text = self.inner.parser.input[self.inner.parser.pos - length..self.inner.parser.pos]
             .to_string();
-        let node = self.inner.parser.push(Kind::Text(text));
+        let node = self.inner.parser.push_spanned(
+            Kind::Text(text),
+            self.inner.parser.pos - length,
+            self.inner.parser.pos,
+        );
         self.inner.pending = Some((node, self.inner.parser.pos));
         crate::extension::Run {
             length,
@@ -706,9 +803,11 @@ impl<'p, 'defs, 'a, 'ext> TriggerInner<'p, 'defs, 'a, 'ext> {
             if text.len() < n {
                 n -= text.len();
                 text.clear();
+                cell.end = cell.start;
                 cursor = cell.prev;
             } else {
                 text.truncate(text.len() - n);
+                cell.end -= n as u32;
                 n = 0;
             }
         }
@@ -727,6 +826,18 @@ impl<'p, 'defs, 'a, 'ext> TriggerInner<'p, 'defs, 'a, 'ext> {
             image: false,
         });
         let child = self.parser.alloc(Kind::Text(text));
+        {
+            let (start, end) = (
+                (self.parser.pos - rewind) as u32,
+                (self.parser.pos + take) as u32,
+            );
+            let lc = &mut self.parser.pool[link as usize];
+            lc.start = start;
+            lc.end = end;
+            let cc = &mut self.parser.pool[child as usize];
+            cc.start = start;
+            cc.end = end;
+        }
         self.parser.pool[link as usize].first_child = Some(child);
         self.parser.pool[link as usize].last_child = Some(child);
         self.parser.pool[child as usize].parent = Some(link);
@@ -760,14 +871,16 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                         // The image marker stays a text node of its own,
                         // as the reference keeps it: a footnote claim
                         // leaves it behind, a matched link removes it.
-                        let bang = self.push(Kind::Text("!".to_string()));
+                        let bang =
+                            self.push_spanned(Kind::Text("!".to_string()), self.pos, self.pos + 1);
                         self.pos += 1;
-                        let id = self.push(Kind::Text("[".to_string()));
+                        let id =
+                            self.push_spanned(Kind::Text("[".to_string()), self.pos, self.pos + 1);
                         self.pos += 1;
                         self.push_bracket(true, id, Some(bang));
                     } else {
                         self.pos += 1;
-                        self.push(Kind::Text("!".to_string()));
+                        self.push_spanned(Kind::Text("!".to_string()), self.pos - 1, self.pos);
                     }
                 }
                 b']' => self.handle_close_bracket(),
@@ -827,6 +940,8 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
             first_child: None,
             last_child: None,
             parent: None,
+            start: 0,
+            end: 0,
         });
         if let Some(prev) = self.tail {
             self.pool[prev as usize].next = Some(id);
@@ -834,6 +949,16 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
             self.head = Some(id);
         }
         self.tail = Some(id);
+        id
+    }
+
+    /// Allocates a cell with its byte range in the inline text and
+    /// appends it to the output list.
+    fn push_spanned(&mut self, kind: Kind, start: usize, end: usize) -> u32 {
+        let id = self.push(kind);
+        let cell = &mut self.pool[id as usize];
+        cell.start = start as u32;
+        cell.end = end as u32;
         id
     }
 
@@ -848,6 +973,8 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
             first_child: None,
             last_child: None,
             parent: None,
+            start: 0,
+            end: 0,
         });
         id
     }
@@ -971,8 +1098,9 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                 text.pop();
             }
         }
+        let text_len = text.len();
         self.pos = end;
-        self.push(Kind::Text(text));
+        self.push_spanned(Kind::Text(text), start, start + text_len);
     }
 
     /// Handles a line break inside the block's text.
@@ -984,12 +1112,23 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
         if self.bytes.get(self.pos) == Some(&b'\n') {
             self.pos += 1;
         }
+        let nl_end = self.pos;
         let hard = nlpos >= 2 && self.bytes[nlpos - 1] == b' ' && self.bytes[nlpos - 2] == b' ';
-        self.push(if hard {
-            Kind::HardBreak
-        } else {
-            Kind::SoftBreak
-        });
+        // The break cell covers the trailing whitespace the preceding
+        // text run dropped plus the line ending itself.
+        let mut bstart = nlpos;
+        while bstart > 0 && matches!(self.bytes[bstart - 1], b' ' | b'\t' | b'\x0B' | b'\x0C') {
+            bstart -= 1;
+        }
+        self.push_spanned(
+            if hard {
+                Kind::HardBreak
+            } else {
+                Kind::SoftBreak
+            },
+            bstart,
+            nl_end,
+        );
         // Leading whitespace of the next line does not belong to the text.
         while matches!(self.bytes.get(self.pos), Some(b' ') | Some(b'\t')) {
             self.pos += 1;
@@ -1007,32 +1146,47 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                 // reading the sibling chain see the wrapper, not text.
                 let esc = self.alloc(Kind::Escaped);
                 let text = self.alloc(Kind::Text((next as char).to_string()));
+                {
+                    let cell = &mut self.pool[esc as usize];
+                    cell.start = (self.pos - 2) as u32;
+                    cell.end = self.pos as u32;
+                }
+                {
+                    let cell = &mut self.pool[text as usize];
+                    cell.start = (self.pos - 1) as u32;
+                    cell.end = self.pos as u32;
+                }
                 self.pool[text as usize].parent = Some(esc);
                 self.pool[esc as usize].first_child = Some(text);
                 self.pool[esc as usize].last_child = Some(text);
                 self.append(esc);
             }
             Some(b'\r') | Some(b'\n') => {
-                self.handle_newline_raw();
-                self.push(Kind::HardBreak);
+                let bs = (self.pos - 1) as u32;
+                let nl_end = self.handle_newline_raw() as u32;
+                self.push_spanned(Kind::HardBreak, bs as usize, nl_end as usize);
             }
             _ => {
-                self.push(Kind::Text("\\".to_string()));
+                self.push_spanned(Kind::Text("\\".to_string()), self.pos - 1, self.pos);
             }
         }
     }
 
     /// Consumes a line ending at the cursor for a backslash break.
-    fn handle_newline_raw(&mut self) {
+    /// Returns the position just past the line ending, before any
+    /// leading whitespace of the next line.
+    fn handle_newline_raw(&mut self) -> usize {
         if self.bytes.get(self.pos) == Some(&b'\r') {
             self.pos += 1;
         }
         if self.bytes.get(self.pos) == Some(&b'\n') {
             self.pos += 1;
         }
+        let nl_end = self.pos;
         while matches!(self.bytes.get(self.pos), Some(b' ') | Some(b'\t')) {
             self.pos += 1;
         }
+        nl_end
     }
 
     /// Handles a code span or a run of literal backticks, following the
@@ -1062,7 +1216,8 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
             false
         };
         if numticks > MAXBACKTICKS || optimistic_fail {
-            self.push(Kind::Text("`".repeat(numticks)));
+            let tstart = self.pos - numticks;
+            self.push_spanned(Kind::Text("`".repeat(numticks)), tstart, self.pos);
             return;
         }
         match self.scan_to_closing_backticks(numticks) {
@@ -1070,12 +1225,16 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                 let content = &self.input[startpos..closer - numticks];
                 let normalized = normalize_code(content);
                 self.pos = closer;
-                self.push(Kind::Code(normalized));
+                self.push_spanned(Kind::Code(normalized), startpos - numticks, closer);
             }
             None => {
                 self.scanned_for_backticks = true;
                 self.pos = startpos;
-                self.push(Kind::Text("`".repeat(numticks)));
+                self.push_spanned(
+                    Kind::Text("`".repeat(numticks)),
+                    startpos - numticks,
+                    startpos,
+                );
             }
         }
     }
@@ -1114,13 +1273,14 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
     /// Handles an entity reference or a literal ampersand.
     fn handle_entity(&mut self) {
         self.pos += 1;
+        let amp = self.pos - 1;
         match entities::scan_entity(&self.input[self.pos..]) {
             Some((text, len)) => {
                 self.pos += len;
-                self.push(Kind::Text(text));
+                self.push_spanned(Kind::Text(text), amp, self.pos);
             }
             None => {
-                self.push(Kind::Text("&".to_string()));
+                self.push_spanned(Kind::Text("&".to_string()), amp, self.pos);
             }
         }
     }
@@ -1129,7 +1289,7 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
     fn handle_delim(&mut self, ch: u8) {
         let (numdelims, can_open, can_close) = self.scan_delims(ch);
         let text = self.input[self.pos - numdelims..self.pos].to_string();
-        let id = self.push(Kind::Text(text));
+        let id = self.push_spanned(Kind::Text(text), self.pos - numdelims, self.pos);
         if can_open || can_close {
             self.delims.push(DelimCell {
                 alive: true,
@@ -1235,7 +1395,7 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
 
     /// Opens a link or image bracket.
     fn handle_open_bracket(&mut self) {
-        let id = self.push(Kind::Text("[".to_string()));
+        let id = self.push_spanned(Kind::Text("[".to_string()), self.pos, self.pos + 1);
         self.pos += 1;
         self.push_bracket(false, id, None);
     }
@@ -1245,13 +1405,13 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
         self.pos += 1;
         let initial_pos = self.pos;
         let Some(opener_index) = (self.brackets.len()).checked_sub(1) else {
-            self.push(Kind::Text("]".to_string()));
+            self.push_spanned(Kind::Text("]".to_string()), initial_pos - 1, initial_pos);
             return;
         };
         let is_image = self.brackets[opener_index].image;
         if !is_image && self.no_link_openers {
             self.brackets.pop();
-            self.push(Kind::Text("]".to_string()));
+            self.push_spanned(Kind::Text("]".to_string()), initial_pos - 1, initial_pos);
             return;
         }
         let after_link_text_pos = self.pos;
@@ -1330,6 +1490,20 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                     title,
                     image: is_image,
                 });
+                // The link covers the whole group: the image marker and
+                // the opening bracket when there is one, through the
+                // closing `)` or the reference label. The bracket stack
+                // records the position just past the `[`.
+                {
+                    let start = if is_image {
+                        opener_position.saturating_sub(2)
+                    } else {
+                        opener_position.saturating_sub(1)
+                    };
+                    let cell = &mut self.pool[link_id as usize];
+                    cell.start = start as u32;
+                    cell.end = self.pos as u32;
+                }
                 // Move every node after the opener's text node into the
                 // link, as the reference parser does.
                 let first = self.pool[opener_node as usize].next;
@@ -1386,6 +1560,16 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                 if let Some((kind, attrs, end)) = claimed {
                     self.pos = initial_pos;
                     let ext_id = self.alloc(Kind::Ext { kind, attrs });
+                    // The node covers the bracket group up to the
+                    // content bytes the hook consumed.
+                    {
+                        let cell = &mut self.pool[ext_id as usize];
+                        cell.start = opener_position as u32;
+                        cell.end = match end {
+                            None => initial_pos as u32,
+                            Some(e) => (opener_position + 1 + e) as u32,
+                        };
+                    }
                     self.insert_before(ext_id, opener_node);
                     match end {
                         // The marker-node claim: the group's content is
@@ -1440,7 +1624,7 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                                 // A cut inside a character rounds down,
                                 // so both halves stay valid UTF-8 no
                                 // matter what `end` named.
-                                let (head, rest) = {
+                                let (head, rest, cut) = {
                                     let text = match &self.pool[cur as usize].kind {
                                         Kind::Text(t) | Kind::Html(t) => t,
                                         _ => unreachable!("handled above"),
@@ -1452,13 +1636,24 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                                     while cut > 0 && !text.is_char_boundary(cut) {
                                         cut -= 1;
                                     }
-                                    (text[..cut].to_owned(), text[cut..].to_owned())
+                                    (text[..cut].to_owned(), text[cut..].to_owned(), cut)
                                 };
                                 self.pool[cur as usize].kind = Kind::Text(head);
+                                {
+                                    let cell = &mut self.pool[cur as usize];
+                                    cell.end = cell.start + cut as u32;
+                                }
                                 kept.push(cur);
                                 consumed = end;
                                 if !rest.is_empty() {
+                                    let rest_len = rest.len() as u32;
                                     let rest_id = self.alloc(Kind::Text(rest));
+                                    {
+                                        let head_end = self.pool[cur as usize].end;
+                                        let rc = &mut self.pool[rest_id as usize];
+                                        rc.start = head_end;
+                                        rc.end = head_end + rest_len;
+                                    }
                                     let cur_next = self.pool[cur as usize].next;
                                     self.pool[cur as usize].next = Some(rest_id);
                                     self.pool[rest_id as usize].prev = Some(cur);
@@ -1497,7 +1692,7 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                     let retried = self.brackets[opener_index].rescued;
                     self.brackets.pop();
                     self.pos = initial_pos;
-                    self.push(Kind::Text("]".to_string()));
+                    self.push_spanned(Kind::Text("]".to_string()), initial_pos - 1, initial_pos);
                     if !retried {
                         // The group matched nothing: no inline link, no
                         // reference definition, no extension claim. The
@@ -1654,6 +1849,10 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
         let closer_node = self.delims.cells[closer as usize].node;
         let opener_len = self.text_len(opener_node);
         let closer_len = self.text_len(closer_node);
+        // The container covers the whole matched range, delimiters
+        // included, captured before the closer's node is freed.
+        let ext_start = self.pool[opener_node as usize].start;
+        let ext_end = self.pool[closer_node as usize].end;
         let next_after_closer = self.delims.cells[closer as usize].next;
         if opener_len == closer_len {
             // Remove the delimiters between opener and closer.
@@ -1670,6 +1869,11 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                 kind: kind.to_owned(),
                 attrs: Vec::new(),
             };
+            {
+                let cell = &mut self.pool[opener_node as usize];
+                cell.start = ext_start;
+                cell.end = ext_end;
+            }
             let first = self.pool[opener_node as usize].next;
             let last = self.pool[closer_node as usize].prev;
             if first.is_some() && first != Some(closer_node) {
@@ -1722,6 +1926,11 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
         let closer_node = self.delims.cells[closer as usize].node;
         let opener_len = self.text_len(opener_node);
         let closer_len = self.text_len(closer_node);
+        // The emphasis covers the whole matched range, delimiters
+        // included: the opener's run start through the closer's run
+        // end, captured before the runs are truncated.
+        let emph_start = self.pool[opener_node as usize].start;
+        let emph_end = self.pool[closer_node as usize].end;
         let use_delims = if closer_len >= 2 && opener_len >= 2 {
             2
         } else {
@@ -1745,6 +1954,11 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
         } else {
             Kind::Strong
         });
+        {
+            let cell = &mut self.pool[emph as usize];
+            cell.start = emph_start;
+            cell.end = emph_end;
+        }
         // Move the nodes between the two text nodes into the emphasis.
         let first = self.pool[opener_node as usize].next;
         let last = self.pool[closer_node as usize].prev;
@@ -1804,6 +2018,8 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
         if let Kind::Text(text) = &mut self.pool[id as usize].kind {
             text.truncate(len);
         }
+        let cell = &mut self.pool[id as usize];
+        cell.end = cell.start + len as u32;
     }
 
     /// Links an already-allocated cell at the end of the output list.
@@ -1821,12 +2037,13 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
     /// Handles `<...>`: autolinks, raw HTML, or a literal `<`.
     fn handle_pointy_brace(&mut self) {
         self.pos += 1; // past '<'
+        let lt = self.pos - 1;
         if let Some(len) = scan_autolink_uri(self.bytes, self.pos) {
             let contents = self.input[self.pos..self.pos + len - 1].to_string();
             self.pos += len;
             let url = clean_autolink(&contents, false);
             let text = entities::unescape_html_f(&contents);
-            self.append_autolink(url, text);
+            self.append_autolink(url, text, lt, self.pos);
             return;
         }
         if let Some(len) = scan_autolink_email(self.bytes, self.pos) {
@@ -1834,26 +2051,36 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
             self.pos += len;
             let url = clean_autolink(&contents, true);
             let text = entities::unescape_html_f(&contents);
-            self.append_autolink(url, text);
+            self.append_autolink(url, text, lt, self.pos);
             return;
         }
         if let Some(len) = self.scan_inline_html() {
             let raw = self.input[self.pos - 1..self.pos - 1 + len].to_string();
             self.pos += len - 1;
-            self.push(Kind::Html(raw));
+            self.push_spanned(Kind::Html(raw), lt, self.pos);
         } else {
-            self.push(Kind::Text("<".to_string()));
+            self.push_spanned(Kind::Text("<".to_string()), lt, self.pos);
         }
     }
 
     /// Builds an autolink node with its single text child and appends it.
-    fn append_autolink(&mut self, url: String, text: String) {
+    /// The node's range is `[lt, end)`; the child covers the angle
+    /// brackets' contents.
+    fn append_autolink(&mut self, url: String, text: String, lt: usize, end: usize) {
         let link = self.alloc(Kind::Link {
             url,
             title: None,
             image: false,
         });
         let text_id = self.alloc(Kind::Text(text));
+        {
+            let lc = &mut self.pool[link as usize];
+            lc.start = lt as u32;
+            lc.end = end as u32;
+            let tc = &mut self.pool[text_id as usize];
+            tc.start = (lt + 1) as u32;
+            tc.end = (end - 1) as u32;
+        }
         self.pool[text_id as usize].parent = Some(link);
         self.pool[link as usize].first_child = Some(text_id);
         self.pool[link as usize].last_child = Some(text_id);

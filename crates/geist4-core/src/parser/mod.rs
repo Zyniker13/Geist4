@@ -13,6 +13,7 @@
 
 mod cursor;
 mod leaf;
+mod textmap;
 
 use crate::arena::{Arena, NodeId};
 use crate::node::{CodeBlockData, HeadingData, HtmlBlockData, ItemData, LinkDef, ListData, Node};
@@ -20,6 +21,8 @@ use crate::span::Span;
 pub(crate) use cursor::Cursor;
 use std::borrow::Cow;
 use std::collections::HashMap;
+use textmap::LineAnchor;
+pub(crate) use textmap::TextMap;
 
 /// The mutable state of one open block while parsing.
 enum OpenKind {
@@ -248,6 +251,10 @@ struct Parser<'a, 'ext> {
     /// A line containing NUL bytes is rebuilt with U+FFFD replacements
     /// and is not, so its content must not be borrowed from the source.
     line_is_src: bool,
+    /// Per-leaf-block maps from text-buffer offsets back to source
+    /// offsets, keyed by the paragraph or heading node. The inline phase
+    /// consumes them to place inline nodes' spans in the source.
+    text_maps: HashMap<NodeId, TextMap>,
     /// The registered extensions, or `None` on the plain path; passed
     /// through to the inline phase's hook sites.
     extensions: Option<&'ext [std::sync::Arc<dyn crate::extension::Extension>]>,
@@ -576,6 +583,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             last_line_blank: vec![false],
             adding_lazy: false,
             line_is_src: true,
+            text_maps: HashMap::new(),
             extensions: None,
             visited_paragraphs: Vec::new(),
             problems: Vec::new(),
@@ -685,7 +693,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 line
             };
             self.line_is_src = !has_nul;
-            self.process_line(line, line_start, line_stop);
+            self.process_line(line, line_start, line_stop, next_start);
             line_start = next_start;
         }
         let final_offset = self.src.len();
@@ -697,8 +705,16 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         (self.arena, root, self.link_defs, self.problems)
     }
 
-    /// Processes one line against the open block stack.
-    fn process_line(&mut self, line: &[u8], line_offset: usize, line_stop: usize) {
+    /// Processes one line against the open block stack. `next_line_start`
+    /// is the offset just past the line's ending, for anchors that map
+    /// the buffer's joining newlines back to the line's ending bytes.
+    fn process_line(
+        &mut self,
+        line: &[u8],
+        line_offset: usize,
+        line_stop: usize,
+        next_line_start: usize,
+    ) {
         let mut cursor = Cursor::new(line);
         self.extension_opens = 0;
 
@@ -727,7 +743,13 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                     // the inline phase strips it after each newline, and a
                     // consumed reference definition must not hide it.
                     let id = self.open.last().unwrap().id;
-                    self.append_paragraph_rest(id, &cursor, line_offset);
+                    self.append_paragraph_rest(
+                        id,
+                        &cursor,
+                        line_offset,
+                        line_stop,
+                        next_line_start,
+                    );
                     self.set_frame_end(line_stop);
                     self.update_last_line_blank(self.open[depth - 1].id, Some(depth - 1), false);
                     return;
@@ -741,7 +763,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         let opened = self.open_new_blocks(&mut cursor, line_offset, line_stop);
 
         // Phase C: add the remaining line to the open leaf block.
-        let added = self.add_text(&mut cursor, line_offset, line_stop);
+        let added = self.add_text(&mut cursor, line_offset, line_stop, next_line_start);
 
         // The node the last-line-blank flag lands on: the block that received
         // the line's text, or the last block this line opened.
@@ -1011,10 +1033,11 @@ impl<'a, 'ext> Parser<'a, 'ext> {
 
             // ATX heading.
             if indent < 4 {
-                if let Some((level, text)) = leaf::atx_heading(&at) {
+                if let Some((level, text, content_pos)) = leaf::atx_heading(&at) {
                     self.interrupt_paragraph(line_stop);
                     self.close_until_can_contain(line_stop);
-                    let id = self.open_atx_heading(level, text, line_offset, line_stop);
+                    let id =
+                        self.open_atx_heading(level, text, content_pos, line_offset, line_stop);
                     cursor.bump_all();
                     return Some(id);
                 }
@@ -1425,11 +1448,14 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         id
     }
 
-    /// Opens an ATX heading with its text, closed at once.
+    /// Opens an ATX heading with its text, closed at once. `content_pos`
+    /// is the text's absolute start in the line, so the text child's
+    /// buffer maps linearly onto that source region.
     fn open_atx_heading(
         &mut self,
         level: u8,
         text: String,
+        content_pos: usize,
         line_offset: usize,
         line_stop: usize,
     ) -> NodeId {
@@ -1441,9 +1467,38 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             }),
             Span::new(line_offset, line_stop),
         );
-        let text_id = self
-            .arena
-            .alloc(Node::Text(Cow::Owned(text)), Span::empty(line_offset));
+        let content_start = line_offset + content_pos;
+        let content_end = content_start + text.len();
+        let (text_span, anchor) = if self.line_is_src {
+            (
+                Span::new(content_start, content_end),
+                LineAnchor::whole_line(0, content_start, content_end),
+            )
+        } else {
+            // The line was rebuilt with U+FFFD replacements, so the text's
+            // source offsets come from a per-byte walk of the original
+            // line, in replaced-line coordinates.
+            let entries =
+                self.replacement_range_map(line_offset, line_stop, content_pos, text.len());
+            let start = entries.first().copied().unwrap_or(content_start);
+            let end = entries.last().copied().unwrap_or(content_start) + 1;
+            (
+                Span::new(start, end),
+                LineAnchor {
+                    buf_start: 0,
+                    src_start: start,
+                    lin_start: start,
+                    tab_span: 0,
+                    src_end: end,
+                    nul_map: Some(entries),
+                },
+            )
+        };
+        self.text_maps
+            .entry(id)
+            .or_default()
+            .record(text.len(), anchor);
+        let text_id = self.arena.alloc(Node::Text(Cow::Owned(text)), text_span);
         self.arena.push_child(id, text_id);
         self.arena.push_child(parent, id);
         id
@@ -1489,6 +1544,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 }
                 self.arena.entry_mut(id).children.clear();
                 let block_span = self.arena.span(id);
+                let span_map = self.text_maps.remove(&id);
                 crate::inline::parse_inlines_into(
                     &mut session,
                     &text,
@@ -1498,6 +1554,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                     block_span,
                     &mut self.problems,
                     self.extensions,
+                    span_map.as_ref(),
                 );
             } else {
                 stack.extend(self.arena.children(id).iter().copied());
@@ -1508,12 +1565,13 @@ impl<'a, 'ext> Parser<'a, 'ext> {
     /// Converts the open paragraph into a setext heading of `level`, first
     /// extracting leading link reference definitions.
     fn setext_heading_or_defs(&mut self, level: u8, line_stop: usize) -> SetextOutcome {
-        let (frame_text, id) = match self.open.last_mut() {
+        let (frame_text, id, frame_start) = match self.open.last_mut() {
             Some(Frame {
                 kind: OpenKind::Paragraph { text },
                 id,
+                start_offset,
                 ..
-            }) => (std::mem::take(text), *id),
+            }) => (std::mem::take(text), *id, *start_offset),
             _ => return SetextOutcome::NotSetext,
         };
         let consumed = self.extract_link_defs(&frame_text);
@@ -1521,6 +1579,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         if remainder.is_empty() {
             // The paragraph was nothing but definitions; it stays open with
             // empty text and the line continues it.
+            self.text_maps.remove(&id);
             return SetextOutcome::Dissolved;
         }
         self.arena.set_kind(
@@ -1530,9 +1589,19 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 setext: true,
             }),
         );
+        // The map stays for the inline phase, but shifts: the parsed text
+        // is the remainder only, so the consumed definitions' bytes leave
+        // the buffer the cells index into.
+        let text_span = self.text_maps.get_mut(&id).map_or_else(
+            || Span::empty(frame_start),
+            |map| {
+                map.shift(consumed);
+                map.map_span(0, remainder.len(), frame_start)
+            },
+        );
         let text_id = self
             .arena
-            .alloc(Node::Text(Cow::Owned(remainder)), Span::empty(0));
+            .alloc(Node::Text(Cow::Owned(remainder)), text_span);
         self.arena.push_child(id, text_id);
         // The frame now only carries the span; the node itself is finished,
         // so the closing step must not treat it as an empty paragraph.
@@ -1554,6 +1623,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         cursor: &mut Cursor<'_>,
         line_offset: usize,
         line_stop: usize,
+        next_line_start: usize,
     ) -> Option<NodeId> {
         let id = self.open.last().unwrap().id;
         match &self.open.last().unwrap().kind {
@@ -1562,7 +1632,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 // consumed here, as the reference parser does. Lazy lines
                 // (handled in the walk) keep theirs.
                 cursor.skip_to_content();
-                self.append_paragraph_rest(id, cursor, line_offset);
+                self.append_paragraph_rest(id, cursor, line_offset, line_stop, next_line_start);
                 Some(id)
             }
             OpenKind::Extension { index, .. } => {
@@ -1580,8 +1650,9 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                         None
                     } else {
                         cursor.skip_to_content();
-                        let text = self.line_rest_string(cursor, line_offset);
-                        Some(self.open_paragraph(&text, line_offset))
+                        let (text, anchor) =
+                            self.anchored_rest(cursor, line_offset, line_stop, next_line_start);
+                        Some(self.open_paragraph(&text, line_offset, anchor))
                     }
                 } else {
                     if cursor.rest_len() > 0 {
@@ -1614,9 +1685,10 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                     None
                 } else {
                     cursor.skip_to_content();
-                    let text = self.line_rest_string(cursor, line_offset);
+                    let (text, anchor) =
+                        self.anchored_rest(cursor, line_offset, line_stop, next_line_start);
                     self.close_until_can_contain(line_stop);
-                    Some(self.open_paragraph(&text, line_offset))
+                    Some(self.open_paragraph(&text, line_offset, anchor))
                 }
             }
         }
@@ -1627,13 +1699,13 @@ impl<'a, 'ext> Parser<'a, 'ext> {
     /// A lazily added line means the line was paragraph text of an
     /// enclosing container's existing paragraph child, so that child
     /// continues here instead of a new paragraph starting.
-    fn open_paragraph(&mut self, text: &str, line_offset: usize) -> NodeId {
+    fn open_paragraph(&mut self, text: &str, line_offset: usize, anchor: LineAnchor) -> NodeId {
         if self.adding_lazy {
             self.adding_lazy = false;
             let parent = self.open.last().unwrap().id;
             if let Some(&last) = self.arena.children(parent).last() {
                 if *self.arena.kind(last) == Node::Paragraph {
-                    self.append_paragraph_text(last, text);
+                    self.append_paragraph_text(last, text, anchor);
                     self.open.push(Frame {
                         id: last,
                         kind: OpenKind::Paragraph {
@@ -1660,21 +1732,34 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             start_offset: line_offset,
             end_offset: line_offset,
         });
+        self.text_maps
+            .entry(id)
+            .or_default()
+            .record(text.len(), anchor);
         id
     }
 
-    /// Appends one line of text to a paragraph's buffer.
-    fn append_paragraph_text(&mut self, id: NodeId, text: &str) {
+    /// Appends one line of text to a paragraph's buffer, recording the
+    /// line's anchor after any joining newline.
+    fn append_paragraph_text(&mut self, id: NodeId, text: &str, anchor: LineAnchor) {
+        let mut joined = false;
         for frame in self.open.iter_mut().rev() {
             if frame.id == id {
                 if let OpenKind::Paragraph { text: buf } = &mut frame.kind {
                     if !buf.is_empty() {
                         buf.push('\n');
+                        joined = true;
                     }
                     buf.push_str(text);
-                    return;
+                    break;
                 }
             }
+        }
+        let map = self.text_maps.entry(id).or_default();
+        if joined {
+            map.record_after_join(text.len(), anchor);
+        } else {
+            map.record(text.len(), anchor);
         }
     }
 
@@ -1700,21 +1785,131 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         }
     }
 
-    /// The cursor's remaining line as owned text, for callers that need a
-    /// `String` regardless.
-    fn line_rest_string(&self, cursor: &Cursor<'_>, line_offset: usize) -> String {
-        self.line_rest(cursor, line_offset).into_owned()
-    }
-
     /// The cursor's remaining line as bytes, for byte-oriented checks.
     fn line_rest_bytes(&self, cursor: &Cursor<'_>) -> Vec<u8> {
         cursor.rest()
     }
 
-    /// Appends the cursor's remaining line to the open paragraph's text.
-    fn append_paragraph_rest(&mut self, id: NodeId, cursor: &Cursor<'_>, line_offset: usize) {
+    /// The cursor's remaining line with the anchor that maps its buffer
+    /// bytes back to the source. `line_stop` is the line's own end and
+    /// `next_line_start` the offset just past its ending.
+    fn anchored_rest(
+        &self,
+        cursor: &Cursor<'_>,
+        line_offset: usize,
+        line_stop: usize,
+        next_line_start: usize,
+    ) -> (std::borrow::Cow<'a, str>, LineAnchor) {
         let text = self.line_rest(cursor, line_offset);
-        self.append_paragraph_text(id, &text);
+        let anchor = if self.line_is_src && cursor.rest_is_slice() {
+            LineAnchor::whole_line(0, line_offset + cursor.pos(), next_line_start)
+        } else if self.line_is_src {
+            // A partially consumed tab: the rest starts with synthetic
+            // spaces standing for the tab's remaining columns, then the
+            // bytes after the tab byte itself.
+            let tab = cursor.partial_tab();
+            LineAnchor {
+                buf_start: 0,
+                src_start: line_offset + cursor.pos(),
+                lin_start: line_offset + cursor.pos() + 1,
+                tab_span: tab as u16,
+                src_end: next_line_start,
+                nul_map: None,
+            }
+        } else {
+            let nul_map = self.replacement_map(cursor, line_offset, line_stop);
+            let src_start = nul_map.first().copied().unwrap_or(next_line_start);
+            LineAnchor {
+                buf_start: 0,
+                src_start,
+                lin_start: src_start,
+                tab_span: cursor.partial_tab() as u16,
+                src_end: next_line_start,
+                nul_map: Some(nul_map),
+            }
+        };
+        (text, anchor)
+    }
+
+    /// The per-buffer-byte source offsets of the cursor's remaining line
+    /// when the line was replaced before processing: each NUL byte became
+    /// a three-byte U+FFFD, so the rest is no longer a linear slice. The
+    /// cursor's position counts replaced bytes, so it is translated back
+    /// through the expansions before the source walk starts.
+    fn replacement_map(
+        &self,
+        cursor: &Cursor<'_>,
+        line_offset: usize,
+        line_stop: usize,
+    ) -> Box<[usize]> {
+        let line = &self.src.as_bytes()[line_offset..line_stop];
+        let mut map = Vec::with_capacity(cursor.rest_len() + cursor.partial_tab());
+        // Walk the original line to the original position of the cursor's
+        // replaced position.
+        let mut replaced = 0usize;
+        let mut i = 0usize;
+        while i < line.len() && replaced < cursor.pos() {
+            replaced += usize::from(line[i] == 0) * 2 + 1;
+            i += 1;
+        }
+        for _ in 0..cursor.partial_tab() {
+            map.push(line_offset + i);
+        }
+        if cursor.partial_tab() > 0 {
+            i += 1;
+        }
+        while i < line.len() {
+            if line[i] == 0 {
+                map.extend(std::iter::repeat_n(line_offset + i, 3));
+            } else {
+                map.push(line_offset + i);
+            }
+            i += 1;
+        }
+        map.into_boxed_slice()
+    }
+
+    /// The per-byte source offsets for `len` buffer bytes of a replaced
+    /// line's content starting at replaced-line position `start_pos`:
+    /// walks the source line, counting the NUL expansions, until the
+    /// replaced position reaches the region's end.
+    fn replacement_range_map(
+        &self,
+        line_offset: usize,
+        line_stop: usize,
+        start_pos: usize,
+        len: usize,
+    ) -> Box<[usize]> {
+        let line = &self.src.as_bytes()[line_offset..line_stop];
+        let mut map = Vec::with_capacity(len);
+        let mut replaced = 0usize;
+        let mut i = 0usize;
+        while i < line.len() && replaced < start_pos {
+            replaced += usize::from(line[i] == 0) * 2 + 1;
+            i += 1;
+        }
+        while i < line.len() && map.len() < len {
+            if line[i] == 0 {
+                map.extend(std::iter::repeat_n(line_offset + i, 3));
+            } else {
+                map.push(line_offset + i);
+            }
+            i += 1;
+        }
+        map.into_boxed_slice()
+    }
+
+    /// Appends the cursor's remaining line to the open paragraph's text.
+    fn append_paragraph_rest(
+        &mut self,
+        id: NodeId,
+        cursor: &Cursor<'_>,
+        line_offset: usize,
+        line_stop: usize,
+        next_line_start: usize,
+    ) {
+        let (text, anchor) = self.anchored_rest(cursor, line_offset, line_stop, next_line_start);
+        self.append_paragraph_text(id, &text, anchor);
     }
 
     /// Appends the cursor's remaining line to a code block's literal.
@@ -1813,12 +2008,22 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 let consumed = self.extract_link_defs(&text);
                 let remainder = &text[consumed..];
                 if remainder.is_empty() {
+                    self.text_maps.remove(&frame.id);
                     self.remove_last_child_of_parent(frame.id);
                 } else {
-                    let text_id = self.arena.alloc(
-                        Node::Text(Cow::Owned(remainder.to_string())),
-                        Span::empty(frame.start_offset),
+                    // The map shifts so it covers exactly the bytes the
+                    // remaining text child holds, which is what the
+                    // inline phase's cell offsets index into.
+                    let text_span = self.text_maps.get_mut(&frame.id).map_or_else(
+                        || Span::empty(frame.start_offset),
+                        |map| {
+                            map.shift(consumed);
+                            map.map_span(0, remainder.len(), frame.start_offset)
+                        },
                     );
+                    let text_id = self
+                        .arena
+                        .alloc(Node::Text(Cow::Owned(remainder.to_string())), text_span);
                     self.arena.push_child(frame.id, text_id);
                 }
             }

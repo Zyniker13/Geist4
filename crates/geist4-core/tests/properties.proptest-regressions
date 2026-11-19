@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 8ab3defc0eccf4ea09e0388178739abd57c0ea5dbf5a9f8fddfd9bb55da29e69 # shrinks to src = "<AA:>"
+cc 20f44630845f21a1fc1d117acb4c043edc8415edb4e27a034ed8a0d0ff935f51 # shrinks to src = "*𑙠*\u{b55}**"

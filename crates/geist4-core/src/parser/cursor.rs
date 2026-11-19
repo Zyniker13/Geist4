@@ -179,6 +179,12 @@ impl<'t> Cursor<'t> {
         self.partial_tab == 0
     }
 
+    /// How many columns of a partially consumed tab remain, and thus how
+    /// many spaces the rest of the line is prefixed with.
+    pub(super) fn partial_tab(&self) -> usize {
+        self.partial_tab
+    }
+
     /// Moves the cursor to byte `pos` at virtual column `col`, clearing any
     /// partially consumed tab.
     pub(super) fn set_pos_col(&mut self, pos: usize, col: usize) {
