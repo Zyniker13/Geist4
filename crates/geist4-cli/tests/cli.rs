@@ -401,8 +401,7 @@ fn render_json_carries_the_format_tag() {
     let output = run_cli(["render", file.to_str().unwrap(), "--format", "json"]);
     assert_eq!(output.status.code(), Some(0));
     let stdout = stdout_of(&output);
-    let value: serde_json::Value =
-        serde_json::from_str(&stdout).expect("the tree output is JSON");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("the tree output is JSON");
     assert_eq!(value["format"], "geist4/tree@1");
     assert_eq!(value["root"]["children"][0]["type"], "paragraph");
     assert!(value["linkDefs"].as_array().expect("defs").len() == 1);
@@ -438,8 +437,7 @@ fn render_mdast_exports_the_unist_shape() {
     let output = run_cli(["render", file.to_str().unwrap(), "--format", "mdast"]);
     assert_eq!(output.status.code(), Some(0));
     let stdout = stdout_of(&output);
-    let value: serde_json::Value =
-        serde_json::from_str(&stdout).expect("the mdast output is JSON");
+    let value: serde_json::Value = serde_json::from_str(&stdout).expect("the mdast output is JSON");
     assert_eq!(value["type"], "root");
     assert_eq!(value["children"][0]["type"], "heading");
     assert_eq!(value["children"][0]["depth"], 1);
