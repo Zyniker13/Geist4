@@ -29,7 +29,7 @@ rust-version = "1.85.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
-missing_docs = "warn"
+missing_docs = "deny"
 
 # Release artifacts (the .wasm, the C static library, the Python wheel)
 # build with fat LTO and one codegen unit: smaller code, better inlining.
