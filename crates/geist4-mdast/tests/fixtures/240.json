@@ -1,0 +1,1 @@
+{"number":240,"section":"Block quotes","input":">\n>  \n> ","expected":{"type":"root","children":[{"type":"blockquote","children":[],"position":{"start":{"line":1,"column":1,"offset":0},"end":{"line":3,"column":3,"offset":8}}}],"position":{"start":{"line":1,"column":1,"offset":0},"end":{"line":3,"column":3,"offset":8}}}}

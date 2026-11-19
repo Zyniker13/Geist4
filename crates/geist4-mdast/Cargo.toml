@@ -1,0 +1,18 @@
+[package]
+name = "geist4-mdast"
+description = "mdast (unist) export for the Geist4 document tree, with positions mapped from source spans"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+geist4-core = { path = "../geist4-core" }
+serde = { version = "1", default-features = false, features = ["derive", "std"] }
+
+[dev-dependencies]
+serde_json = { version = "1", features = ["raw_value"] }

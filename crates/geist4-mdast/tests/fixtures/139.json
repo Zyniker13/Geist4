@@ -1,0 +1,1 @@
+{"number":139,"section":"Fenced code blocks","input":"~~~~~~\naaa\n~~~ ~~","expected":{"type":"root","children":[{"type":"code","lang":null,"meta":null,"value":"aaa\n~~~ ~~","position":{"start":{"line":1,"column":1,"offset":0},"end":{"line":3,"column":7,"offset":17}}}],"position":{"start":{"line":1,"column":1,"offset":0},"end":{"line":3,"column":7,"offset":17}}}}

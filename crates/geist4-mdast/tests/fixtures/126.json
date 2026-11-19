@@ -1,0 +1,1 @@
+{"number":126,"section":"Fenced code blocks","input":"```","expected":{"type":"root","children":[{"type":"code","lang":null,"meta":null,"value":"","position":{"start":{"line":1,"column":1,"offset":0},"end":{"line":1,"column":4,"offset":3}}}],"position":{"start":{"line":1,"column":1,"offset":0},"end":{"line":1,"column":4,"offset":3}}}}

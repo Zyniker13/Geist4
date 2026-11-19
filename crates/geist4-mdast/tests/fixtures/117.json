@@ -1,0 +1,1 @@
+{"number":117,"section":"Indented code blocks","input":"\n    \n    foo\n    \n","expected":{"type":"root","children":[{"type":"code","lang":null,"meta":null,"value":"foo","position":{"start":{"line":3,"column":1,"offset":6},"end":{"line":4,"column":5,"offset":18}}}],"position":{"start":{"line":1,"column":1,"offset":0},"end":{"line":5,"column":1,"offset":19}}}}

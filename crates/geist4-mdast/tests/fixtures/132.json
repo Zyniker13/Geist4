@@ -1,0 +1,1 @@
+{"number":132,"section":"Fenced code blocks","input":"  ```\naaa\n  aaa\naaa\n  ```","expected":{"type":"root","children":[{"type":"code","lang":null,"meta":null,"value":"aaa\naaa\naaa","position":{"start":{"line":1,"column":3,"offset":2},"end":{"line":5,"column":6,"offset":25}}}],"position":{"start":{"line":1,"column":1,"offset":0},"end":{"line":5,"column":6,"offset":25}}}}

@@ -744,6 +744,15 @@ name = "geist4-html"
 version = "0.1.0-dev"
 
 [[package]]
+name = "geist4-mdast"
+version = "0.1.0-dev"
+dependencies = [
+ "geist4-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "geist4-python"
 version = "0.1.0-dev"
 dependencies = [

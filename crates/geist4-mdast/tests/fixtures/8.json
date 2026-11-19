@@ -1,0 +1,1 @@
+{"number":8,"section":"Tabs","input":"    foo\n    bar","expected":{"type":"root","children":[{"type":"code","lang":null,"meta":null,"value":"foo\nbar","position":{"start":{"line":1,"column":1,"offset":0},"end":{"line":2,"column":8,"offset":15}}}],"position":{"start":{"line":1,"column":1,"offset":0},"end":{"line":2,"column":8,"offset":15}}}}

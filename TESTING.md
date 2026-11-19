@@ -29,6 +29,7 @@ Each suite below says where it lives and how it runs. Paths and commands are the
 | Wasm binding | The checked-in JS glue and TypeScript types are current with the Rust source, the .wasm stays inside the size budget, and the real WebAssembly build gives JavaScript the same byte-exact contract as the C ABI | `crates/geist4-wasm/node-tests/` | every CI run |
 | Swift binding | The Swift wrapper over the C ABI gives the same byte-exact contract (HTML, problem reporting, error behavior) as the C test, and the XCFramework assembles for macOS and iOS | `bindings/swift/` | every CI run (macOS runner) |
 | Python binding | The wheel `pip` installs gives the same byte-exact contract (HTML, problem reporting, error behavior) as the C test | `crates/geist4-python/tests/` | every CI run |
+| mdast export | The mdast tree equals the reference JavaScript implementation's tree byte for byte on every spec example and boundary probe | `crates/geist4-mdast/tests/` | every CI run |
 | Host extensions from the bindings | The Rust battery, and its mirrors in Python, JavaScript and Swift, exercise the same host-extension contract (fenced blocks, claim+override, inline triggers, latched errors, validation) through each binding's callback surface | `crates/geist4-ffi/tests/host_extension.rs`, `crates/geist4-python/tests/test_host_extensions.py`, `crates/geist4-wasm/node-tests/run.mjs`, `bindings/swift` (`Geist4Contract`) | every CI run |
 | Extension tiers | An extension's `spec.md` passes whichever tier implements it | `tests/ext-conformance/` | every CI run |
 | Round trip | `format` is idempotent and keeps the rendered HTML the same | `tests/roundtrip/` | every CI run |
@@ -190,6 +191,36 @@ Unicode, so the C-only cases (null input, invalid UTF-8) are
 unreachable from Python, as from Swift. `scripts/check.sh` builds the
 wheel, installs it into a throwaway venv, and runs the suite on every
 platform CI runs the gate on.
+
+### The mdast export fixtures
+
+`crates/geist4-mdast` exports the Geist tree as an mdast (unist) tree
+(decision 0037). Its test parses every fixture's input, exports,
+serializes with `serde_json`, and requires the bytes to equal the
+reference implementation's tree:
+
+```sh
+cargo test -p geist4-mdast
+```
+
+The fixtures under `tests/fixtures/` cover every CommonMark 0.31.2
+spec example plus boundary probes (667 files), and their expected
+trees were generated from `mdast-util-from-markdown@2.1.0` by the
+checked-in generator:
+
+```sh
+cd crates/geist4-mdast/tools && npm ci && node gen-mdast-fixtures.mjs
+```
+
+The generator runs the reference over the spec examples and over the
+probe inputs in `tools/probes/`, writing one JSON file per case; the
+reference version is pinned in `tools/package.json` and bumped
+together with the fixtures. A legitimate, understood difference must
+be recorded in `tests/differences.json` with a reason — the test
+asserts both directions (a differing fixture must be listed there, and
+every listed fixture must actually differ), so the list can neither
+hide drift nor survive drift that is gone. The suite is empty today:
+the export matches the reference byte for byte on every fixture.
 
 ## Host extensions from each binding (m7-5)
 

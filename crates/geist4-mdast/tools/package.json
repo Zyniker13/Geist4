@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "Dev-only fixture generator: mdast-util-from-markdown over the spec examples and probe inputs. Regenerate with `npm install && node gen-mdast-fixtures.mjs` and bump the pinned version together with the fixtures it produces.",
+  "dependencies": {
+    "mdast-util-from-markdown": "2.1.0"
+  }
+}

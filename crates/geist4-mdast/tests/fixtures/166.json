@@ -1,0 +1,1 @@
+{"number":166,"section":"HTML blocks","input":"<del>\n*foo*\n</del>","expected":{"type":"root","children":[{"type":"html","value":"<del>\n*foo*\n</del>","position":{"start":{"line":1,"column":1,"offset":0},"end":{"line":3,"column":7,"offset":18}}}],"position":{"start":{"line":1,"column":1,"offset":0},"end":{"line":3,"column":7,"offset":18}}}}

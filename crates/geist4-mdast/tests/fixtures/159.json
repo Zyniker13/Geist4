@@ -1,0 +1,1 @@
+{"number":159,"section":"HTML blocks","input":"<div><a href=\"bar\">*foo*</a></div>","expected":{"type":"root","children":[{"type":"html","value":"<div><a href=\"bar\">*foo*</a></div>","position":{"start":{"line":1,"column":1,"offset":0},"end":{"line":1,"column":35,"offset":34}}}],"position":{"start":{"line":1,"column":1,"offset":0},"end":{"line":1,"column":35,"offset":34}}}}

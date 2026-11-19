@@ -1,0 +1,1 @@
+{"number":163,"section":"HTML blocks","input":"<Warning>\n*bar*\n</Warning>","expected":{"type":"root","children":[{"type":"html","value":"<Warning>\n*bar*\n</Warning>","position":{"start":{"line":1,"column":1,"offset":0},"end":{"line":3,"column":11,"offset":26}}}],"position":{"start":{"line":1,"column":1,"offset":0},"end":{"line":3,"column":11,"offset":26}}}}
