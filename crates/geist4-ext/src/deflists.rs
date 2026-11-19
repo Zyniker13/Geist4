@@ -19,6 +19,7 @@
 //! `dd`, then joins the `dl` that ends just before it, creating that
 //! `dl` when the item starts a list.
 
+use geist4_core::arena::NodeId;
 use geist4_core::extension::{
     BlockContinueCtx, BlockStartCtx, CloseCtx, ContinueOutcome, ExtNode, Extension, KindDecl,
     LookCtx, RenderedChild, StartContainer,
@@ -293,6 +294,7 @@ impl Extension for DescriptionLists {
                 Some(arena.children(parent)[index - 1])
             }
         });
+        let mut term_source: Option<(NodeId, NodeId)> = None;
         let term = match prev {
             Some(prev) => match arena.kind(prev) {
                 Node::Paragraph => {
@@ -317,6 +319,11 @@ impl Extension for DescriptionLists {
                             arena.remove_child(parent, index);
                         }
                     }
+                    // The moved text carries the paragraph's inline
+                    // source map: the term is the leaf the inline phase
+                    // parses now, and without the map it would place
+                    // every inline at the term's own empty span.
+                    term_source = Some((prev, term));
                     Some(term)
                 }
                 _ => None,
@@ -380,6 +387,11 @@ impl Extension for DescriptionLists {
             arena.insert_child(parent, index, list);
             arena.remove_child(parent, index + 1);
             arena.push_child(list, item);
+        }
+        if let Some((source, term)) = term_source {
+            if let Some(map) = ctx.take_text_map(source) {
+                ctx.set_text_map(term, map);
+            }
         }
     }
 

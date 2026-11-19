@@ -55,8 +55,14 @@ impl LineAnchor {
 }
 
 /// The buffer-to-source map of one leaf block's inline text.
+///
+/// The type is public so a close hook can move it between nodes, but
+/// it is opaque: its fields and operations are internal to the parser.
+/// A hook takes the map of the node whose text children it moves and
+/// stores it on the node that receives them, so the inline phase maps
+/// the moved text through the same source offsets.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct TextMap {
+pub struct TextMap {
     anchors: Vec<LineAnchor>,
     /// The buffer length the anchors cover, joins included.
     next: usize,

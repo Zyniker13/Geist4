@@ -472,12 +472,41 @@ pub struct BlockContinueCtx<'c, 's, 'l> {
 pub struct CloseCtx<'ctx, 'doc> {
     /// The document's arena; the hook builds its nodes through it.
     pub arena: &'ctx mut crate::arena::Arena<'doc>,
+    /// The parse's inline source maps, so a hook that moves text
+    /// children between nodes can move the mapping with them.
+    pub(crate) text_maps: &'ctx mut Vec<Option<crate::parser::TextMap>>,
     /// The extension block's node, to build children under.
     pub node: crate::arena::NodeId,
     /// The byte offset where the block's first line began.
     pub start_offset: usize,
     /// The byte offset just past the block's last line.
     pub end_offset: usize,
+}
+
+impl<'ctx, 'doc> CloseCtx<'ctx, 'doc> {
+    /// Takes the inline source map stored for `node`, leaving none.
+    ///
+    /// A map records how one leaf block's buffered inline text maps
+    /// back to the source. When a hook moves a leaf's text children
+    /// under another node — a definition term built out of the
+    /// paragraph before it, say — it must move the map too, or the
+    /// inline phase maps the moved text against the wrong offsets.
+    pub fn take_text_map(&mut self, node: crate::arena::NodeId) -> Option<crate::parser::TextMap> {
+        let index = node.index();
+        if self.text_maps.len() <= index {
+            return None;
+        }
+        self.text_maps[index].take()
+    }
+
+    /// Stores an inline source map for `node`, replacing any it had.
+    pub fn set_text_map(&mut self, node: crate::arena::NodeId, map: crate::parser::TextMap) {
+        let index = node.index();
+        if self.text_maps.len() <= index {
+            self.text_maps.resize(index + 1, None);
+        }
+        self.text_maps[index] = Some(map);
+    }
 }
 
 impl<'p, 'a, 'l, 'ext> BlockStartCtx<'p, 'a, 'l, 'ext> {

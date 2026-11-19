@@ -279,4 +279,11 @@ impl<'a> Arena<'a> {
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
+
+    /// Iterates every allocated node in allocation order, including
+    /// nodes that are not reachable from the root. Exporters that must
+    /// check an invariant over the whole tree use this.
+    pub fn iter(&self) -> impl Iterator<Item = NodeId> + '_ {
+        (0..self.nodes.len()).map(NodeId)
+    }
 }

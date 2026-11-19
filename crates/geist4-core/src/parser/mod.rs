@@ -13,7 +13,7 @@
 
 mod cursor;
 mod leaf;
-mod textmap;
+pub mod textmap;
 
 use crate::arena::{Arena, NodeId};
 use crate::node::{
@@ -24,7 +24,7 @@ pub(crate) use cursor::Cursor;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use textmap::LineAnchor;
-pub(crate) use textmap::TextMap;
+pub use textmap::TextMap;
 
 /// The mutable state of one open block while parsing.
 enum OpenKind {
@@ -2264,6 +2264,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 let extensions = self.extensions.unwrap();
                 let mut ctx = crate::extension::CloseCtx {
                     arena: &mut self.arena,
+                    text_maps: &mut self.text_maps,
                     node: frame.id,
                     start_offset: frame.start_offset,
                     end_offset: end,
