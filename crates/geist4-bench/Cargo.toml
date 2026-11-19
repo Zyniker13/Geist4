@@ -14,7 +14,7 @@ workspace = true
 [dependencies]
 geist4-core = { path = "../geist4-core" }
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
-comrak = { version = "0.39", default-features = false }
+comrak = { version = "0.55", default-features = false }
 
 [dev-dependencies]
 criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
