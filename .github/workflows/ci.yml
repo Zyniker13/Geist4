@@ -75,31 +75,61 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/binaryen"
-          tar -xzf binaryen.tar.gz -C "$RUNNER_TEMP/binaryen" --strip-components=1
+          # Only bin/ is needed (wasm-opt.exe). The tarball also carries a
+          # ~470 MB lib/binaryen.lib that nothing here uses; extracting only
+          # bin/ keeps the extract small and fast.
+          tar -xzf binaryen.tar.gz -C "$RUNNER_TEMP/binaryen" --strip-components=1 binaryen-version_133/bin
           ls "$RUNNER_TEMP/binaryen/bin"
-      - name: Diagnose the binaryen extract (temporary)
+      - name: Diagnose the binaryen environment (temporary)
+        # Annotations are the one diagnostic channel readable without a
+        # token; GitHub caps them at 10 per step, so keep each diagnostic
+        # step at or below that.
         if: always() && runner.os == 'Windows'
         shell: bash
         run: |
-          {
-            echo "tar: $(command -v tar)"
-            tar --version 2>&1 | head -1
-            echo "RUNNER_TEMP=$RUNNER_TEMP"
-            echo "CWD=$(pwd)"
-            echo "--- retry ---"
-            mkdir -p "$RUNNER_TEMP/binaryen"
-            tar -xzf binaryen.tar.gz -C "$RUNNER_TEMP/binaryen" --strip-components=1
-            echo "tar exit=$?"
-            ls "$RUNNER_TEMP/binaryen/bin"
-            echo "ls exit=$?"
-          } > extract-diag.log 2>&1
-          cat extract-diag.log
-      - name: Upload the extract diagnostic (temporary)
+          set +e
+          echo "::warning::tar=$(command -v tar)"
+          echo "::warning::tar-version=$(tar --version 2>&1 | head -1)"
+          echo "::warning::gzip=$(command -v gzip)"
+          echo "::warning::gzip-version=$(gzip --version 2>&1 | head -1)"
+          echo "::warning::runner-temp=$RUNNER_TEMP"
+          echo "::warning::temp-free-kib=$(df -Pk "$RUNNER_TEMP" | awk 'NR==2{print $4}')"
+          echo "::warning::archive-bytes=$(wc -c < binaryen.tar.gz)"
+          echo "::warning::bash=$BASH_VERSION"
+      - name: Diagnose the full binaryen extract (temporary)
         if: always() && runner.os == 'Windows'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: extract-diag
-          path: extract-diag.log
+        shell: bash
+        run: |
+          set +e
+          tar -tzf binaryen.tar.gz > /dev/null 2>&1
+          echo "::warning::list-only-exit=$?"
+          rm -rf "$RUNNER_TEMP/binaryen-diag"
+          mkdir -p "$RUNNER_TEMP/binaryen-diag"
+          tar -xzf binaryen.tar.gz -C "$RUNNER_TEMP/binaryen-diag" --strip-components=1 > "$RUNNER_TEMP/full-diag.txt" 2>&1
+          echo "::warning::full-extract-exit=$?"
+          n=0
+          while IFS= read -r line; do
+            n=$((n+1))
+            if [ "$n" -le 5 ]; then echo "::warning::stderr$n=$line"; fi
+          done < "$RUNNER_TEMP/full-diag.txt"
+          echo "::warning::full-files=$(find "$RUNNER_TEMP/binaryen-diag" -type f 2>/dev/null | wc -l)"
+          echo "::warning::full-bin-exes=$(ls "$RUNNER_TEMP/binaryen-diag/bin" 2>/dev/null | wc -l)"
+      - name: Diagnose the targeted binaryen extract (temporary)
+        if: always() && runner.os == 'Windows'
+        shell: bash
+        run: |
+          set +e
+          rm -rf "$RUNNER_TEMP/binaryen-tgt-diag"
+          mkdir -p "$RUNNER_TEMP/binaryen-tgt-diag"
+          tar -xzf binaryen.tar.gz -C "$RUNNER_TEMP/binaryen-tgt-diag" --strip-components=1 binaryen-version_133/bin > "$RUNNER_TEMP/tgt-diag.txt" 2>&1
+          echo "::warning::targeted-extract-exit=$?"
+          n=0
+          while IFS= read -r line; do
+            n=$((n+1))
+            if [ "$n" -le 5 ]; then echo "::warning::tgt-stderr$n=$line"; fi
+          done < "$RUNNER_TEMP/tgt-diag.txt"
+          echo "::warning::targeted-files=$(find "$RUNNER_TEMP/binaryen-tgt-diag" -type f 2>/dev/null | wc -l)"
+          echo "::warning::targeted-bin-exes=$(ls "$RUNNER_TEMP/binaryen-tgt-diag/bin" 2>/dev/null | wc -l)"
       - name: Put wasm-opt on PATH (Windows)
         if: runner.os == 'Windows'
         shell: bash
