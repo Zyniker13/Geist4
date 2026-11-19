@@ -80,9 +80,10 @@ impl TextMap {
         self.record(text_len, anchor);
     }
 
-    /// The source span of the buffer range `[start, end)`. With no
-    /// anchors — a block whose bytes came straight from one source
-    /// region — offsets shift by `fallback_start`.
+    /// The source span of the buffer range `[start, end)`: the source
+    /// offset of the range's first byte through the offset past its last
+    /// byte. With no anchors — a block whose bytes came straight from one
+    /// source region — offsets shift by `fallback_start`.
     pub(crate) fn map_span(
         &self,
         start: usize,
@@ -95,7 +96,10 @@ impl TextMap {
         if end <= start {
             return crate::span::Span::empty(self.byte_before(start));
         }
-        crate::span::Span::new(self.byte_before(start), self.map_byte(end - 1) + 1)
+        // The span starts at the range's first byte's own offset, which at
+        // a line join sits past the whitespace the join dropped, exactly
+        // where the reference puts the node.
+        crate::span::Span::new(self.map_byte(start), self.map_byte(end - 1) + 1)
     }
 
     /// The source offset of the byte just before buffer offset `o`,
@@ -120,7 +124,9 @@ impl TextMap {
         }
         // Line lengths before the cut, since rebasing an anchor must not
         // disturb the neighbour positions the lengths read from.
-        let lens: Vec<usize> = self.anchors.iter().map(|a| self.line_len(a)).collect();
+        let lens: Vec<usize> = (0..self.anchors.len())
+            .map(|index| self.line_len_at(index))
+            .collect();
         let mut index = 0usize;
         self.anchors.retain_mut(|anchor| {
             let line_len = lens[index];
@@ -154,17 +160,13 @@ impl TextMap {
         self.next -= consumed;
     }
 
-    /// The line's buffer length, joins excluded.
-    fn line_len(&self, anchor: &LineAnchor) -> usize {
-        match self
-            .anchors
-            .iter()
-            .position(|a| a.buf_start == anchor.buf_start)
-        {
-            Some(i) if i + 1 < self.anchors.len() => {
-                self.anchors[i + 1].buf_start - anchor.buf_start - 1
-            }
-            _ => self.next - anchor.buf_start,
+    /// The line's buffer length, joins excluded, for the anchor at
+    /// `index`: the next anchor's start minus this one's, minus the join
+    /// byte; the last line runs to the buffer's end.
+    fn line_len_at(&self, index: usize) -> usize {
+        match self.anchors.get(index + 1) {
+            Some(next) => next.buf_start - self.anchors[index].buf_start - 1,
+            None => self.next - self.anchors[index].buf_start,
         }
     }
 
@@ -179,7 +181,7 @@ impl TextMap {
         };
         let anchor = &self.anchors[index];
         let within = o - anchor.buf_start;
-        let line_len = self.line_len(anchor);
+        let line_len = self.line_len_at(index);
         if within >= line_len {
             // The newline joining this line to the next: the ending's
             // last byte.

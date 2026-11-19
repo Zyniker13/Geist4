@@ -145,6 +145,27 @@ fn emphasis_families_scale_linearly() {
     );
 }
 
+/// One paragraph of many lines, each with its own inline node, maps
+/// every node's span through the paragraph's per-line anchors. A
+/// line-length lookup that scanned the anchor list per call showed as
+/// quadratic here (the regression behind the corpus instruction-count
+/// jump); the anchor lookup is binary now, so this scales linearly.
+#[test]
+fn multiline_paragraph_span_mapping_scales_linearly() {
+    check_family(
+        "multiline paragraph spans",
+        &|n| {
+            let mut text = String::with_capacity(n * 16);
+            for i in 0..n {
+                text.push_str(&format!("word *x{i}* tail\n"));
+            }
+            text
+        },
+        &|out| out.matches("<em>").count(),
+        10_000,
+    );
+}
+
 /// Deeply nested containers must render without overflowing the stack:
 /// the parser's inline post-pass and the renderer are iterative.
 #[test]

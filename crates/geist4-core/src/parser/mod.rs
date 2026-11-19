@@ -264,7 +264,10 @@ struct Parser<'a, 'ext> {
     /// Per-leaf-block maps from text-buffer offsets back to source
     /// offsets, keyed by the paragraph or heading node. The inline phase
     /// consumes them to place inline nodes' spans in the source.
-    text_maps: HashMap<NodeId, TextMap>,
+    /// Per-leaf-block buffer maps, indexed by the arena slot the block
+    /// allocated. The slot index is dense, so a side table beats hashing
+    /// on the per-line record path; only leaf blocks hold a map.
+    text_maps: Vec<Option<TextMap>>,
     /// The registered extensions, or `None` on the plain path; passed
     /// through to the inline phase's hook sites.
     extensions: Option<&'ext [std::sync::Arc<dyn crate::extension::Extension>]>,
@@ -594,7 +597,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             last_line_blank: vec![false],
             adding_lazy: false,
             line_is_src: true,
-            text_maps: HashMap::new(),
+            text_maps: Vec::new(),
             extensions: None,
             visited_paragraphs: Vec::new(),
             problems: Vec::new(),
@@ -1573,9 +1576,8 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 },
             )
         };
-        self.text_maps
-            .entry(id)
-            .or_default()
+        self.text_map_slot(id)
+            .get_or_insert_with(Default::default)
             .record(text.len(), anchor);
         let text_id = self.arena.alloc(Node::Text(Cow::Owned(text)), text_span);
         self.arena.push_child(id, text_id);
@@ -1623,7 +1625,7 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 }
                 self.arena.entry_mut(id).children.clear();
                 let block_span = self.arena.span(id);
-                let span_map = self.text_maps.remove(&id);
+                let span_map = self.text_map_slot(id).take();
                 crate::inline::parse_inlines_into(
                     &mut session,
                     &text,
@@ -1653,15 +1655,15 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             }) => (std::mem::take(text), *id, *start_offset),
             _ => return SetextOutcome::NotSetext,
         };
-        let consumed = {
-            let map = self.text_maps.get(&id).cloned();
-            self.extract_link_defs(&frame_text, map.as_ref(), frame_start)
-        };
+        // The map leaves its slot for the extraction (the call needs
+        // `&mut self`) and returns below: the heading keeps it.
+        let mut map = self.text_map_slot(id).take();
+        let consumed = self.extract_link_defs(&frame_text, map.as_ref(), frame_start);
         let remainder = frame_text[consumed..].to_string();
         if remainder.is_empty() {
-            // The paragraph was nothing but definitions; it stays open with
-            // empty text and the line continues it.
-            self.text_maps.remove(&id);
+            // The paragraph was nothing but definitions; it stays open
+            // with empty text and the line continues it. The map stays
+            // taken: nothing holds a text child for it.
             return SetextOutcome::Dissolved;
         }
         self.arena.set_kind(
@@ -1671,22 +1673,26 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 setext: true,
             }),
         );
-        // The map stays for the inline phase, but shifts: the parsed text
-        // is the remainder only, so the consumed definitions' bytes leave
-        // the buffer the cells index into.
-        let text_span = self.text_maps.get_mut(&id).map_or_else(
+        // The map shifts so it covers exactly the bytes the remaining
+        // text child holds, which is what the inline phase's cell
+        // offsets index into.
+        let text_span = map.as_mut().map_or_else(
             || Span::empty(frame_start),
             |map| {
                 map.shift(consumed);
                 map.map_span(0, remainder.len(), frame_start)
             },
         );
+        if let Some(map) = map {
+            *self.text_map_slot(id) = Some(map);
+        }
         let text_id = self
             .arena
             .alloc(Node::Text(Cow::Owned(remainder)), text_span);
         self.arena.push_child(id, text_id);
-        // The frame now only carries the span; the node itself is finished,
-        // so the closing step must not treat it as an empty paragraph.
+        // The frame now only carries the span; the node itself is
+        // finished, so the closing step must not treat it as an empty
+        // paragraph.
         if let Some(Frame { kind, .. }) = self.open.last_mut() {
             if matches!(kind, OpenKind::Paragraph { .. }) {
                 *kind = OpenKind::Heading;
@@ -1829,9 +1835,8 @@ impl<'a, 'ext> Parser<'a, 'ext> {
             start_offset: content_start,
             end_offset: line_stop,
         });
-        self.text_maps
-            .entry(id)
-            .or_default()
+        self.text_map_slot(id)
+            .get_or_insert_with(Default::default)
             .record(text.len(), anchor);
         id
     }
@@ -1852,12 +1857,21 @@ impl<'a, 'ext> Parser<'a, 'ext> {
                 }
             }
         }
-        let map = self.text_maps.entry(id).or_default();
+        let map = self.text_map_slot(id).get_or_insert_with(Default::default);
         if joined {
             map.record_after_join(text.len(), anchor);
         } else {
             map.record(text.len(), anchor);
         }
+    }
+
+    /// The map slot for `id`, grown to cover the arena's allocations.
+    fn text_map_slot(&mut self, id: NodeId) -> &mut Option<TextMap> {
+        let index = id.index();
+        if self.text_maps.len() <= index {
+            self.text_maps.resize(index + 1, None);
+        }
+        &mut self.text_maps[index]
     }
 
     /// The `len` source bytes at `offset` as a `&str`, borrowed when the
@@ -2142,23 +2156,28 @@ impl<'a, 'ext> Parser<'a, 'ext> {
         match &mut frame.kind {
             OpenKind::Paragraph { text } => {
                 let text = std::mem::take(text);
-                let map = self.text_maps.get(&frame.id).cloned();
+                // The map leaves its slot for the extraction (the call
+                // needs `&mut self`) and returns only when a text child
+                // keeps needing it.
+                let mut map = self.text_map_slot(frame.id).take();
                 let consumed = self.extract_link_defs(&text, map.as_ref(), frame.start_offset);
                 let remainder = &text[consumed..];
                 if remainder.is_empty() {
-                    self.text_maps.remove(&frame.id);
                     self.remove_last_child_of_parent(frame.id);
                 } else {
                     // The map shifts so it covers exactly the bytes the
                     // remaining text child holds, which is what the
                     // inline phase's cell offsets index into.
-                    let text_span = self.text_maps.get_mut(&frame.id).map_or_else(
+                    let text_span = map.as_mut().map_or_else(
                         || Span::empty(frame.start_offset),
                         |map| {
                             map.shift(consumed);
                             map.map_span(0, remainder.len(), frame.start_offset)
                         },
                     );
+                    if let Some(map) = map {
+                        *self.text_map_slot(frame.id) = Some(map);
+                    }
                     let text_id = self
                         .arena
                         .alloc(Node::Text(Cow::Owned(remainder.to_string())), text_span);
