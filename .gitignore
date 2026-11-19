@@ -12,3 +12,4 @@ bindings/swift/CGeist4.xcframework/
 bindings/swift/.build/
 target-writer/
 mutants-out*/
+crates/geist4-ffi/c-tests/test_ffi
