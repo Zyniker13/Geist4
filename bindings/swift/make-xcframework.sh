@@ -53,7 +53,7 @@ arch_of() {
 # the iOS triples, only the rustup std for each target.
 for triple in $targets; do
     rustup target add "$triple" >/dev/null 2>&1 || true
-    (cd "$root" && cargo rustc -p geist4-ffi --release --target "$triple" \
+    (cd "$root" && cargo rustc -p geist4-ffi --lib --release --target "$triple" \
         --crate-type staticlib)
 done
 

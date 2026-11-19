@@ -148,6 +148,26 @@ fi
 "$venv_python" -m pip install --quiet --no-index --find-links target/wheels geist4
 "$venv_python" -m unittest discover -s crates/geist4-python/tests
 
+echo '== cross-binding =='
+# Every binding renders the checked-in case list (the spec's 652
+# examples and every built-in extension's spec, `tools/gen_cross_cases.py`)
+# through its own surface, and the outputs must match the core's byte
+# for byte (TESTING.md, "Cross-binding").
+"$PYTHON" tools/gen_cross_cases.py --check
+cargo build --release -p geist4-ffi --bin cross_reference
+ref_bin=target/release/cross_reference
+[ -f "$ref_bin" ] || ref_bin=target/release/cross_reference.exe
+cross_args="--reference $ref_bin --node node --python $venv_python"
+case "$(uname -s)" in
+Darwin)
+    # The Swift binding's gate above built the package, the cross runner
+    # with it.
+    cross_args="$cross_args --swift bindings/swift/.build/debug/Geist4Cross"
+    ;;
+esac
+# shellcheck disable=SC2086
+"$PYTHON" tools/cross_binding.py $cross_args
+
 echo '== conformance kit =='
 sh conformance/run.sh
 

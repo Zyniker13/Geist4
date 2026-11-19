@@ -24,7 +24,7 @@ Each suite below says where it lives and how it runs. Paths and commands are the
 | Pathological inputs | Linear time on hostile input; limits behave as documented | `tests/pathological/` | every CI run |
 | Differential tests | Same output as the reference C implementation on generated input, except documented differences | `tests/differential/` | every CI run |
 | Fuzzing | No crash, hang or limit breach on mutated input | `fuzz/` (`cargo-fuzz`) | a few minutes per target in CI; an hour per target locally per milestone |
-| Cross-binding | JavaScript, Swift, Python and C give byte-identical output to the core on every spec | `tests/bindings/` | every CI run |
+| Cross-binding | JavaScript, Swift and Python render every case byte for byte as the core does; Swift drives the same C ABI the C contract test pins | `tools/cross_binding.py`, `tests/bindings/cases.jsonl` | every CI run |
 | C ABI | The generated header matches the Rust ABI, and a C program linking the shared library gets the same contract (nulls, UTF-8, ownership, byte-exact HTML) as `tests/ffi.rs` | `crates/geist4-ffi/c-tests/` | every CI run |
 | Wasm binding | The checked-in JS glue and TypeScript types are current with the Rust source, the .wasm stays inside the size budget, and the real WebAssembly build gives JavaScript the same byte-exact contract as the C ABI | `crates/geist4-wasm/node-tests/` | every CI run |
 | Swift binding | The Swift wrapper over the C ABI gives the same byte-exact contract (HTML, problem reporting, error behavior) as the C test, and the XCFramework assembles for macOS and iOS | `bindings/swift/` | every CI run (macOS runner) |
@@ -221,6 +221,42 @@ asserts both directions (a differing fixture must be listed there, and
 every listed fixture must actually differ), so the list can neither
 hide drift nor survive drift that is gone. The suite is empty today:
 the export matches the reference byte for byte on every fixture.
+
+### Cross-binding
+
+Every binding must render the same documents byte for byte as the Rust
+core. The case list (`tests/bindings/cases.jsonl`) holds the CommonMark
+spec's 652 examples rendered plain and every built-in extension's spec
+file rendered with that one extension enabled — 1158 cases, generated
+from the checked-in spec files by `tools/gen_cross_cases.py` (the gate
+regenerates in memory and requires the checked-in list to match, so a
+spec change cannot leave stale cases).
+
+The reference is `geist4-ffi`'s `cross_reference` binary, which renders
+each case through the same safe surface every binding calls. Each
+binding's runner reads the cases and writes one JSON line per case,
+and `tools/cross_binding.py` requires every binding's html for every
+case to equal the reference's:
+
+```sh
+cargo build --release -p geist4-ffi --bin cross_reference
+python3 tools/cross_binding.py \
+    --reference target/release/cross_reference \
+    --node node \
+    --python target/py-venv/bin/python \
+    --swift bindings/swift/.build/debug/Geist4Cross
+```
+
+The runners are `crates/geist4-wasm/node-tests/cross.mjs` (the checked-in
+WebAssembly build), `crates/geist4-python/tests/cross_binding.py` (the
+installed wheel, the same venv the contract suite uses) and the Swift
+`Geist4Cross` executable (built with the package the Swift binding gate
+builds). `scripts/check.sh` runs the whole loop on every platform:
+JavaScript and Python everywhere, Swift on macOS. The C ABI itself is
+pinned by the C contract test's byte-exact cases, and the Swift runner
+exercises that same ABI directly, so the native path is covered without
+a second C driver; the reference binary is also the ABI's own render
+path.
 
 ## Host extensions from each binding (m7-5)
 
