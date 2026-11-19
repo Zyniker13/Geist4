@@ -77,6 +77,29 @@ jobs:
           mkdir -p "$RUNNER_TEMP/binaryen"
           tar -xzf binaryen.tar.gz -C "$RUNNER_TEMP/binaryen" --strip-components=1
           ls "$RUNNER_TEMP/binaryen/bin"
+      - name: Diagnose the binaryen extract (temporary)
+        if: always() && runner.os == 'Windows'
+        shell: bash
+        run: |
+          {
+            echo "tar: $(command -v tar)"
+            tar --version 2>&1 | head -1
+            echo "RUNNER_TEMP=$RUNNER_TEMP"
+            echo "CWD=$(pwd)"
+            echo "--- retry ---"
+            mkdir -p "$RUNNER_TEMP/binaryen"
+            tar -xzf binaryen.tar.gz -C "$RUNNER_TEMP/binaryen" --strip-components=1
+            echo "tar exit=$?"
+            ls "$RUNNER_TEMP/binaryen/bin"
+            echo "ls exit=$?"
+          } > extract-diag.log 2>&1
+          cat extract-diag.log
+      - name: Upload the extract diagnostic (temporary)
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: extract-diag
+          path: extract-diag.log
       - name: Put wasm-opt on PATH (Windows)
         if: runner.os == 'Windows'
         shell: bash
