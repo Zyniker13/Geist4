@@ -53,10 +53,20 @@ Size budget, enforced by `scripts/check.sh` on every run and in CI: the
 checked-in `geist4_bg.wasm` stays under 512 KiB raw and 176 KiB after
 `gzip -9`. The artifact measured by the budget is post-processed with
 `wasm-opt -Oz --enable-bulk-memory --strip-debug` (binaryen, installed
-with `brew install binaryen` or `apt-get install binaryen`; `check.sh`
-requires it): `-Oz` optimizes the module and `--strip-debug` drops the
-wasm name section, which was 97 KiB of function names that only aid
-stack traces. The m7-2 baseline measured 418,381 bytes raw and 146,525
+with `brew install binaryen` or `apt-get install binaryen` on macOS and
+Linux; `check.sh` requires it): `-Oz` optimizes the module and
+`--strip-debug` drops the wasm name section, which was 97 KiB of function
+names that only aid stack traces. Windows CI has no package-manager
+binaryen, so it downloads the official per-platform release tarball
+(`binaryen-version_133-x86_64-windows.tar.gz`) pinned to the checksum the
+project publishes for it, version and checksum bumped together, and
+extracts only `binaryen-version_133/bin` — the tarball also carries a
+~470 MB `lib/binaryen.lib` nothing here uses. Git Bash's GNU tar cannot
+chdir to a backslash drive path (`D:\a\_temp/...` fails with "Cannot
+open: No such file or directory" even after the directory is created),
+so the extract step resolves `$RUNNER_TEMP` and `$GITHUB_WORKSPACE` to
+POSIX form with `cygpath -u` and falls back to the cd form and then the
+System32 bsdtar. The m7-2 baseline measured 418,381 bytes raw and 146,525
 gzipped. In m7-5 the host-extension callback surface (the shared
 `geist4-ffi` host machinery plus the wasm crate's JS interop for
 closures, decision 0035) pushed the unoptimized build to ~530 KiB raw /
