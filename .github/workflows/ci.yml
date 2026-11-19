@@ -194,6 +194,26 @@ jobs:
           code=$?
           tail -40 iai.log
           exit "$code"
+      # TEMPORARY diagnosis aid: surface the measured counts as annotations
+      # so the rebaseline numbers can be read without an authenticated
+      # artifact download. Remove with the rebaseline commit.
+      - name: Surface the counts as annotations (temporary)
+        run: |
+          python3 - <<'PY'
+          import re
+          text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", open("iai.log", encoding="utf-8").read())
+          seen = {}
+          current = None
+          for line in text.splitlines():
+              if line and not line[0].isspace():
+                  current = line.strip()
+              elif current is not None:
+                  m = re.match(r"^\s+Instructions:\s+([0-9,]+)", line)
+                  if m and current not in seen:
+                      seen[current] = m.group(1).replace(",", "")
+          for name, count in seen.items():
+              print(f"::warning::IAI-COUNT {name} = {count}")
+          PY
       - name: Check the counts against the baseline
         run: python3 tools/check_iai.py iai.log bench/iai-baseline.txt
       - name: Upload the instruction-count log
