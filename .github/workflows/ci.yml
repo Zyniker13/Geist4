@@ -71,71 +71,74 @@ jobs:
         shell: bash
         run: echo "17a2cbeac6b5693c5fbafab3838d3c65fd9c1eb38b05f5baec6c657e8c84995b  binaryen.tar.gz" | sha256sum -c -
       - name: Extract binaryen (Windows)
+        # Only bin/ is needed (wasm-opt.exe). The tarball also carries a
+        # ~470 MB lib/binaryen.lib that nothing here uses; extracting only
+        # bin/ keeps the extract small and fast.
+        #
+        # GNU tar in Git Bash fails to chdir to a backslash drive path
+        # (D:\a\_temp/x: Cannot open: No such file or directory), so every
+        # path is resolved to POSIX form with cygpath before tar sees it.
+        # Fallbacks, in order: tar with cd instead of -C, then the
+        # System32 bsdtar with native paths. Annotations keep a failure
+        # diagnosable without a token; GitHub caps them at 10 per step.
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          mkdir -p "$RUNNER_TEMP/binaryen"
-          # Only bin/ is needed (wasm-opt.exe). The tarball also carries a
-          # ~470 MB lib/binaryen.lib that nothing here uses; extracting only
-          # bin/ keeps the extract small and fast.
-          tar -xzf binaryen.tar.gz -C "$RUNNER_TEMP/binaryen" --strip-components=1 binaryen-version_133/bin
-          ls "$RUNNER_TEMP/binaryen/bin"
-      - name: Diagnose the binaryen environment (temporary)
-        # Annotations are the one diagnostic channel readable without a
-        # token; GitHub caps them at 10 per step, so keep each diagnostic
-        # step at or below that.
-        if: always() && runner.os == 'Windows'
-        shell: bash
-        run: |
+          TEMP_POSIX="$(cygpath -u "$RUNNER_TEMP")"
+          WS_POSIX="$(cygpath -u "$GITHUB_WORKSPACE")"
+          BINARYEN_DIR="$TEMP_POSIX/binaryen"
+          ARCHIVE="$WS_POSIX/binaryen.tar.gz"
+          echo "::warning::temp-posix=$TEMP_POSIX archive-bytes=$(wc -c < binaryen.tar.gz)"
+
+          rm -rf "$BINARYEN_DIR"
+          mkdir -p "$BINARYEN_DIR"
+          test -d "$BINARYEN_DIR" && dir_ok=yes || dir_ok=no
+          echo "::warning::mkdir-dir-ok=$dir_ok"
+
+          ok=0
           set +e
-          echo "::warning::tar=$(command -v tar)"
-          echo "::warning::tar-version=$(tar --version 2>&1 | head -1)"
-          echo "::warning::gzip=$(command -v gzip)"
-          echo "::warning::gzip-version=$(gzip --version 2>&1 | head -1)"
-          echo "::warning::runner-temp=$RUNNER_TEMP"
-          echo "::warning::temp-free-kib=$(df -Pk "$RUNNER_TEMP" | awk 'NR==2{print $4}')"
-          echo "::warning::archive-bytes=$(wc -c < binaryen.tar.gz)"
-          echo "::warning::bash=$BASH_VERSION"
-      - name: Diagnose the full binaryen extract (temporary)
-        if: always() && runner.os == 'Windows'
-        shell: bash
-        run: |
-          set +e
-          tar -tzf binaryen.tar.gz > /dev/null 2>&1
-          echo "::warning::list-only-exit=$?"
-          rm -rf "$RUNNER_TEMP/binaryen-diag"
-          mkdir -p "$RUNNER_TEMP/binaryen-diag"
-          tar -xzf binaryen.tar.gz -C "$RUNNER_TEMP/binaryen-diag" --strip-components=1 > "$RUNNER_TEMP/full-diag.txt" 2>&1
-          echo "::warning::full-extract-exit=$?"
-          n=0
-          while IFS= read -r line; do
-            n=$((n+1))
-            if [ "$n" -le 5 ]; then echo "::warning::stderr$n=$line"; fi
-          done < "$RUNNER_TEMP/full-diag.txt"
-          echo "::warning::full-files=$(find "$RUNNER_TEMP/binaryen-diag" -type f 2>/dev/null | wc -l)"
-          echo "::warning::full-bin-exes=$(ls "$RUNNER_TEMP/binaryen-diag/bin" 2>/dev/null | wc -l)"
-      - name: Diagnose the targeted binaryen extract (temporary)
-        if: always() && runner.os == 'Windows'
-        shell: bash
-        run: |
-          set +e
-          rm -rf "$RUNNER_TEMP/binaryen-tgt-diag"
-          mkdir -p "$RUNNER_TEMP/binaryen-tgt-diag"
-          tar -xzf binaryen.tar.gz -C "$RUNNER_TEMP/binaryen-tgt-diag" --strip-components=1 binaryen-version_133/bin > "$RUNNER_TEMP/tgt-diag.txt" 2>&1
-          echo "::warning::targeted-extract-exit=$?"
-          n=0
-          while IFS= read -r line; do
-            n=$((n+1))
-            if [ "$n" -le 5 ]; then echo "::warning::tgt-stderr$n=$line"; fi
-          done < "$RUNNER_TEMP/tgt-diag.txt"
-          echo "::warning::targeted-files=$(find "$RUNNER_TEMP/binaryen-tgt-diag" -type f 2>/dev/null | wc -l)"
-          echo "::warning::targeted-bin-exes=$(ls "$RUNNER_TEMP/binaryen-tgt-diag/bin" 2>/dev/null | wc -l)"
+          tar -xzf "$ARCHIVE" -C "$BINARYEN_DIR" --strip-components=1 binaryen-version_133/bin > "$TEMP_POSIX/extract.log" 2>&1
+          rc=$?
+          if [ "$rc" -eq 0 ]; then ok=1; fi
+          echo "::warning::extract-posix-C-exit=$rc"
+          if [ "$ok" -ne 1 ]; then
+            (
+              cd "$BINARYEN_DIR" &&
+              tar -xzf "$ARCHIVE" --strip-components=1 binaryen-version_133/bin
+            ) > "$TEMP_POSIX/extract-cd.log" 2>&1
+            rc=$?
+            if [ "$rc" -eq 0 ]; then ok=1; fi
+            echo "::warning::extract-cd-exit=$rc"
+          fi
+          if [ "$ok" -ne 1 ]; then
+            (
+              cd "$BINARYEN_DIR" &&
+              MSYS2_ARG_CONV_EXCL='*' /c/Windows/System32/tar.exe -xzf "$RUNNER_TEMP/binaryen.tar.gz" --strip-components=1 binaryen-version_133/bin
+            ) > "$TEMP_POSIX/extract-bsdtar.log" 2>&1
+            rc=$?
+            if [ "$rc" -eq 0 ]; then ok=1; fi
+            echo "::warning::extract-system32-bsdtar-exit=$rc"
+          fi
+          set -e
+          if [ "$ok" -ne 1 ]; then
+            n=0
+            while IFS= read -r line; do
+              n=$((n+1))
+              if [ "$n" -le 4 ]; then echo "::warning::extract-error$n=$line"; fi
+            done < "$TEMP_POSIX/extract.log"
+            echo "::warning::system32-tar-present=$(command -v /c/Windows/System32/tar.exe >/dev/null 2>&1 && echo yes || echo no)"
+            exit 1
+          fi
+          ls "$BINARYEN_DIR/bin"
+          test -f "$BINARYEN_DIR/bin/wasm-opt.exe"
       - name: Put wasm-opt on PATH (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
+          BIN="$(cygpath -u "$RUNNER_TEMP")/binaryen/bin"
+          ls "$BIN"
           echo "$RUNNER_TEMP/binaryen/bin" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/binaryen/bin/wasm-opt.exe" --version
+          "$BIN/wasm-opt.exe" --version
       - name: Install maturin
         # The version the Python wheel build is pinned to; the Python
         # contract suite runs against the wheel it produces (decision 0034).
