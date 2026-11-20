@@ -1608,13 +1608,15 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                     self.pos = initial_pos;
                     let ext_id = self.alloc(Kind::Ext { kind, attrs });
                     // The node covers the bracket group up to the
-                    // content bytes the hook consumed.
+                    // content bytes the hook consumed. A claim's real
+                    // end arrives from the walk below; this stays
+                    // zero-width until then.
                     {
                         let cell = &mut self.pool[ext_id as usize];
                         cell.start = opener_position as u32;
                         cell.end = match end {
                             None => initial_pos as u32,
-                            Some(e) => (opener_position + 1 + e) as u32,
+                            Some(_) => opener_position as u32,
                         };
                     }
                     self.insert_before(ext_id, opener_node);
@@ -1712,23 +1714,51 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                                     literal_first = Some(rest_id);
                                 }
                             }
+                            // The opener dies before the rewiring below:
+                            // killing it splices it out of the root
+                            // chain, which would otherwise overwrite
+                            // the `ext.next` the adoption sets.
+                            self.kill(opener_node);
                             if let Some(&first_kept) = kept.first() {
                                 let last_kept = kept[kept.len() - 1];
                                 self.pool[ext_id as usize].first_child = Some(first_kept);
                                 self.pool[ext_id as usize].last_child = Some(last_kept);
                                 self.pool[first_kept as usize].prev = None;
+                                self.pool[last_kept as usize].next = None;
                                 for &cell in &kept {
                                     self.pool[cell as usize].parent = Some(ext_id);
                                 }
-                                self.pool[last_kept as usize].next = literal_first;
+                                // The claimed cells leave the root chain
+                                // with the node: the literal remainder
+                                // follows it instead. Left in the root
+                                // chain as well, the cells would stay
+                                // reachable twice and the tree walk
+                                // would visit them a second time as
+                                // empty husks under the paragraph.
                                 match literal_first {
-                                    Some(l) => self.pool[l as usize].prev = Some(ext_id),
-                                    None => self.tail = Some(ext_id),
+                                    Some(l) => {
+                                        self.pool[ext_id as usize].next = Some(l);
+                                        self.pool[l as usize].prev = Some(ext_id);
+                                    }
+                                    None => {
+                                        self.pool[ext_id as usize].next = None;
+                                        self.tail = Some(ext_id);
+                                    }
                                 }
                             }
+                            // The node spans exactly the bytes its hook
+                            // kept: the last kept cell's end, or zero
+                            // width at the content start when nothing
+                            // was kept. The `end` the hook named is the
+                            // cut it asked for, not the byte the walk
+                            // actually reached.
+                            let kept_end = match kept.last() {
+                                Some(&last) => self.pool[last as usize].end,
+                                None => opener_position as u32,
+                            };
+                            self.pool[ext_id as usize].end = kept_end;
                         }
                     }
-                    self.kill(opener_node);
                     self.remove_delimiters_since(opener_position);
                     self.brackets.pop();
                 } else {
