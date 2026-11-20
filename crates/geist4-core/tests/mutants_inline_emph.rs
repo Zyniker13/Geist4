@@ -196,11 +196,12 @@ fn registered_triggers_do_not_make_every_byte_transparent() {
 
 #[test]
 fn claimed_node_span_covers_the_claimed_bytes() {
-    // The claimed node spans exactly the bytes its hook kept: for
-    // `[abcdef]` with end 2 that is bytes 1..3, ending on the
-    // boundary between `b` and `c` in the source. An arithmetic slip
-    // in the node's end formula pushes the span past the boundary,
-    // into the bytes the hook refused.
+    // The claimed node covers the bracket group, with its end on the
+    // boundary between kept and refused bytes: for `[abcdef]` with end
+    // 2 that is bytes 0..3, starting at the `[` and ending between `b`
+    // and `c` in the source. An arithmetic slip in the node's end
+    // formula pushes the span past the boundary, into the bytes the
+    // hook refused; a start slip loses the opener bracket.
     let mut options = Options::new();
     options.extension(Arc::new(Claimer {
         prefix: b"ab",
@@ -213,7 +214,7 @@ fn claimed_node_span_covers_the_claimed_bytes() {
     assert_eq!(kind, "claimed");
     assert_eq!(children, vec!["ab".to_owned()]);
     let (_, ext_span) = span_of(src, &doc, ext);
-    assert_eq!(ext_span, (1, 3));
+    assert_eq!(ext_span, (0, 3));
 }
 
 #[test]
@@ -251,7 +252,7 @@ fn claim_split_keeps_the_head_and_hands_the_rest_back() {
     assert_eq!(kind, "claimed");
     assert_eq!(texts, vec!["ab".to_owned()]);
     let (_, ext_span) = span_of(src, &doc, ext);
-    assert_eq!(ext_span, (1, 3));
+    assert_eq!(ext_span, (0, 3));
     let (rest, rest_span) = span_of(src, &doc, children[1]);
     assert_eq!(rest, "cdef");
     assert_eq!(rest_span, (3, 7));
@@ -283,7 +284,7 @@ fn claim_split_in_a_later_cell_cuts_where_the_end_names() {
     assert_eq!(kind, "claimed");
     assert_eq!(texts, vec!["ab".to_owned(), "%cd".to_owned()]);
     let (_, ext_span) = span_of(src, &doc, ext);
-    assert_eq!(ext_span, (1, 6));
+    assert_eq!(ext_span, (0, 6));
     let (rest, rest_span) = span_of(src, &doc, children[1]);
     assert_eq!(rest, "ef");
     assert_eq!(rest_span, (6, 8));
@@ -311,11 +312,13 @@ fn claim_split_rounds_a_cut_down_to_a_character_boundary() {
     let (kind, ext, texts) = ext_under(&doc, para);
     assert_eq!(kind, "claimed");
     assert_eq!(texts, vec!["é".to_owned()]);
-    let (_, ext_span) = span_of(src, &doc, ext);
-    assert_eq!(ext_span, (1, 3));
     let (rest, rest_span) = span_of(src, &doc, children[1]);
     assert_eq!(rest, "éé");
     assert_eq!(rest_span, (3, 7));
+    // The claimed group starts at the opener bracket (byte 0) and its
+    // end lands on the rounded cut (byte 3).
+    let (_, ext_span) = span_of(src, &doc, ext);
+    assert_eq!(ext_span, (0, 3));
 }
 
 #[test]

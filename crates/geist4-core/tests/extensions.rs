@@ -6,7 +6,7 @@
 use geist4_core::arena::NodeId;
 use geist4_core::basic_html::{render, render_with};
 use geist4_core::extension::{
-    AttrValue, ExtNode, Extension, KindDecl, Options, RenderedChild, TreeCtx,
+    AttrValue, ExtNode, Extension, InlineBracketCtx, KindDecl, Options, RenderedChild, TreeCtx,
 };
 use geist4_core::node::Node;
 use geist4_core::parser::parse_with;
@@ -177,4 +177,59 @@ fn a_block_start_that_never_advances_is_capped() {
     assert_eq!(extensions, 16);
     // The document still renders without panicking.
     let _ = render_with(&doc, &options);
+}
+
+/// Claims every `[`…`]` group that matched nothing else as one marker
+/// node: the group's bytes are consumed, nothing stays literal.
+struct Taker;
+
+impl Extension for Taker {
+    fn name(&self) -> &str {
+        "taker"
+    }
+
+    fn kinds(&self) -> Vec<KindDecl> {
+        vec![KindDecl {
+            kind: "taken".to_owned(),
+            container: false,
+            inline_text: false,
+            attrs: vec![],
+        }]
+    }
+
+    fn inline_bracket(&self, ctx: &mut InlineBracketCtx<'_, '_, '_, '_>) {
+        ctx.claim("taken".to_owned(), vec![]);
+    }
+
+    fn render(&self, node: &ExtNode, _children: &[RenderedChild<'_>], out: &mut String) {
+        if node.kind == "taken" {
+            out.push_str("<taken/>");
+        }
+    }
+}
+
+#[test]
+fn a_marker_claim_consumes_the_opener_bracket() {
+    // Regression: the marker-claim path killed the group's content
+    // cells but left the `[` opener alive in the root chain, so
+    // `text[^1]` rendered an extra literal `[` after the node. The
+    // opener dies with the claim; none of the group's bytes survive.
+    let mut options = Options::new();
+    options.extension(Arc::new(Taker));
+    let doc = parse_with("text [^1] more\n", &options);
+    assert_eq!(
+        render_with(&doc, &options),
+        "<p>text <taken/> more</p>\n",
+        "the claimed group leaves no literal bracket behind"
+    );
+    // The node spans the whole group, opener bracket included: the
+    // `[` sits at byte 5 and the `]` closes the group at byte 8, so
+    // the span runs to byte 9.
+    let para = doc.arena.children(doc.root)[0];
+    let ext_id = doc.arena.children(para)[1];
+    assert_eq!(
+        doc.arena.span(ext_id),
+        geist4_core::span::Span::new(5, 9),
+        "the marker node spans the whole claimed group"
+    );
 }

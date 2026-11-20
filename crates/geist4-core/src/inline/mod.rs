@@ -1607,13 +1607,20 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                 if let Some((kind, attrs, end)) = claimed {
                     self.pos = initial_pos;
                     let ext_id = self.alloc(Kind::Ext { kind, attrs });
-                    // The node covers the bracket group up to the
-                    // content bytes the hook consumed. A claim's real
-                    // end arrives from the walk below; this stays
-                    // zero-width until then.
+                    // The node covers the bracket group like a link
+                    // does: from the `[` (or `![`) through the bytes
+                    // the claim kept. The bracket stack records the
+                    // position just past the `[`. A content claim's
+                    // real end arrives from the walk below; this
+                    // stays zero-width until then.
                     {
+                        let group_start = if self.brackets[opener_index].image {
+                            opener_position.saturating_sub(2)
+                        } else {
+                            opener_position.saturating_sub(1)
+                        };
                         let cell = &mut self.pool[ext_id as usize];
-                        cell.start = opener_position as u32;
+                        cell.start = group_start as u32;
                         cell.end = match end {
                             None => initial_pos as u32,
                             Some(_) => opener_position as u32,
@@ -1630,6 +1637,14 @@ impl<'defs, 'a, 'ext> Parser<'defs, 'a, 'ext> {
                                 self.kill(cur);
                                 id = next;
                             }
+                            // The opener dies here too: a marker claim
+                            // consumes the group's bytes, so its `[`
+                            // must not survive as literal text. The
+                            // Some arm kills it in its own rewiring
+                            // below; this arm has no rewiring to
+                            // protect, only the node it claims in
+                            // front of.
+                            self.kill(opener_node);
                             self.tail = Some(ext_id);
                         }
                         // The world's inline-bracket decision: the
