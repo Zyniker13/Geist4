@@ -1,11 +1,13 @@
 # Status
 
 - **Current milestone:** M8 (Tools and 0.1.0) — JSON tree format + schema, CLI `render`/`ast`, the CommonMark writer, migration guide, CHANGELOG and the security-model rewrite are all landed and pushed. In flight: mutation testing, workspace coverage, TESTING.md pass. Then: v0.1.0.
-- **Last done:** three more mutant-kill test files committed and pushed (`7185c77a`) — `mutants_parser.rs` (7 tests, 34 kills: front-matter offset arithmetic, table-cell unescaping, start-hook context accessors), `mutants_ext.rs` (5 tests, registry Options is_empty/clone/Debug + hook contexts + absorb_line + continuation column), `mutants_misc.rs` (8 tests, arena attrs/parent/extension/span/len/is_empty; unreachable textmap-`shift`/`map_byte` and arena capacity mutants documented as equivalent survivors). All verified locally: fmt, clippy `-D warnings`, full `geist4-core` suite green.
-- **Next step:** scoped cargo-mutants runs to confirm the kills — inline/mod.rs (1221 mutants, 6 jobs, running now; note: cargo-mutants 27.1.0 has no output-dir flag, so runs go to `<repo>/mutants.out/` and must be serialized), then leaf.rs, parser/mod.rs, extension.rs, arena/textmap/node; then workspace coverage >95%, record both in TESTING.md, tag v0.1.0 once CI is green on the final state.
+- **Last done:** CI regression on main fixed and pushed (`13f3f936`) — the 589ed55e claim reorder left marker-claim (footnote) brackets alive in the root chain (stray literal `[`); the kill now runs in both arms, with a core-level regression test (`Taker` in extensions.rs). While fixing spans, corrected a pre-existing off-by-one: claimed bracket nodes now span from the `[` (or `![`) like links do; four content-claim span assertions updated. Full `scripts/check.sh` green locally.
+- **Next step:** confirm CI green on `13f3f936`, then scoped cargo-mutants confirmation runs (serialized; cargo-mutants 27.1.0 has no output-dir flag, runs go to `<repo>/mutants.out/`), then workspace coverage >95%, record both in TESTING.md, tag v0.1.0.
 - **Blocked on:** nothing.
 
 ## Log
+
+- 2026-11-20: Fixed the CI regression on main (`13f3f936`): marker bracket claims (footnotes) now kill the opener bracket in both claim arms — the 589ed55e reorder had left it alive, rendering a stray `[`; core regression test added via a marker-claiming extension. Also fixed a pre-existing span off-by-one: claimed bracket-group nodes start at the `[` (or `![`), matching link span semantics; four span assertions updated. Full check.sh green locally.
 
 - 2026-11-12: Repository created.
 - 2026-11-12: M0 scaffold — root Cargo.toml, rust-toolchain.toml, rustfmt.toml, clippy.toml, deny.toml, 8 crate shells.
