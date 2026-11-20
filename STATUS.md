@@ -1,11 +1,13 @@
 # Status
 
 - **Current milestone:** M8 (Tools and 0.1.0) — JSON tree format + schema, CLI `render`/`ast`, the CommonMark writer, migration guide, CHANGELOG and the security-model rewrite are all landed and pushed. In flight: mutation testing, workspace coverage, TESTING.md pass. Then: v0.1.0.
-- **Last done:** CI regression on main fixed and pushed (`13f3f936`) — the 589ed55e claim reorder left marker-claim (footnote) brackets alive in the root chain (stray literal `[`); the kill now runs in both arms, with a core-level regression test (`Taker` in extensions.rs). While fixing spans, corrected a pre-existing off-by-one: claimed bracket nodes now span from the `[` (or `![`) like links do; four content-claim span assertions updated. Full `scripts/check.sh` green locally.
-- **Next step:** confirm CI green on `13f3f936`, then scoped cargo-mutants confirmation runs (serialized; cargo-mutants 27.1.0 has no output-dir flag, runs go to `<repo>/mutants.out/`), then workspace coverage >95%, record both in TESTING.md, tag v0.1.0.
-- **Blocked on:** nothing.
+- **Last done:** The inline mutation run rebuilt on machine-safe limits: `.cargo/mutants.toml` committed (`8e324ae0`) with `minimum_test_timeout = 20` and 101 `exclude_re` patterns covering the hang class observed across the two crashed runs (102 timeouts unioned from both runs' `timeout.txt` data; the seven the last scoped run actually hit were each verified absent from the filtered list — 1221 → 1168 mutants). cargo-mutants 27.1.0 has no `jobs` config key, so the 2-job cap is enforced by the guard wrapper on the build machine (verified: it injects `--jobs 2 --timeout 60 --minimum-test-timeout 20` and kills any test process over 6 GB). Run 6 relaunched under the guard.
+- **Next step:** wait out run 6 (2 jobs ≈ 6–7 h for 1168 mutants), then the queued scoped runs (leaf, parser, extension, arena/textmap/node, serialized — output dir resolves from `-d`), survivor analysis + kill tests, coverage >95%, TESTING.md, tag v0.1.0.
+- **Blocked on:** nothing (mutation run in background).
 
 ## Log
+
+- 2026-11-20: The 6-job inline mutation run exhausted the machine's memory twice (13–58 GB per blocks-test mutant; kernel panic, then a WindowServer hang). Machine-safe limits adopted: `.cargo/mutants.toml` (`8e324ae0`) sets `minimum_test_timeout = 20` plus 101 `exclude_re` patterns built from the union of both crashed runs' timeout data — the parser-loop hang class (main-loop reprocessing and handler no-op mutants), which cargo-mutants would otherwise only log as timeouts, so the kill score loses nothing. cargo-mutants 27.1.0 has no `jobs` config key (verified against its config schema), so the 2-job cap stays with the guard wrapper, which also clamps the timeout to 60 s and kills any test process over 6 GB. Run 6 relaunched under the guard: 1168 mutants, all seven timeouts the last scoped run observed verified excluded.
 
 - 2026-11-20: Fixed the CI regression on main (`13f3f936`): marker bracket claims (footnotes) now kill the opener bracket in both claim arms — the 589ed55e reorder had left it alive, rendering a stray `[`; core regression test added via a marker-claiming extension. Also fixed a pre-existing span off-by-one: claimed bracket-group nodes start at the `[` (or `![`), matching link span semantics; four span assertions updated. Full check.sh green locally.
 
