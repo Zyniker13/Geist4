@@ -7,6 +7,18 @@ use geist4_core::basic_html::render;
 use geist4_core::node::Node;
 use geist4_core::parser::{Document, parse_document};
 use proptest::prelude::*;
+use proptest::test_runner::RngSeed;
+
+/// Fixed proptest seed so the property battery is reproducible across
+/// runs (CI, local, and mutation testing). Pinned in code because the
+/// `proptest!` macro's default config uses an OS-random seed: with a
+/// random seed, a mutant caught by one run's 512 random cases could be
+/// missed by another run's, which made mutation-testing classifications
+/// churn between runs (a "caught" mutant flipping to "missed" with no
+/// code change). The deterministic batteries (spec, differential,
+/// corpus) carry the real coverage; the seed only stabilizes the
+/// property safety-net. See docs/decisions/0041.
+const PROPTEST_SEED: u64 = 2026_1121;
 
 /// Renders and returns the output, panicking on none.
 fn parse_and_render(src: &str) -> String {
@@ -28,7 +40,11 @@ fn contains_raw_html(doc: &Document<'_>) -> bool {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(512))]
+    #![proptest_config(ProptestConfig {
+        cases: 512,
+        rng_seed: RngSeed::Fixed(PROPTEST_SEED),
+        ..ProptestConfig::default()
+    })]
 
     #[test]
     fn no_input_panics(src in any::<String>()) {
