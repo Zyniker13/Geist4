@@ -555,3 +555,220 @@ fn repeated_marker_line_absorbs_into_the_open_block() {
     let kids = doc.arena.children(exts[0].0);
     assert_eq!(kids.len(), 0, "absorbed line must add nothing: {kids:?}");
 }
+
+// ---------------------------------------------------------------------------
+// Span accuracy: node spans must pin to the source bytes each node was parsed
+// from, and list re-entry must keep consecutive same-marker items in one list.
+// ---------------------------------------------------------------------------
+
+/// The first direct child of `id` matching `want`.
+fn child_of_kind(
+    doc: &geist4_core::Document<'_>,
+    id: NodeId,
+    want: impl Fn(&Node<'_>) -> bool,
+) -> Option<NodeId> {
+    doc.arena
+        .children(id)
+        .iter()
+        .copied()
+        .find(|child| want(&doc.arena.kind(*child)))
+}
+
+/// Slices `src` at the span of `id`.
+fn span_slice<'a>(src: &'a str, doc: &geist4_core::Document<'_>, id: NodeId) -> &'a str {
+    let span = doc.arena.span(id);
+    &src[span.start..span.end]
+}
+
+#[test]
+fn html_block_span_starts_at_its_opening_bracket() {
+    // kills: crates/geist4-core/src/parser/mod.rs:1104:75: replace + with * in Parser<'a, 'ext>::open_new_blocks
+    let src = "x\n<!-- a\n-->\n";
+    let doc = parse_with(src, &Options::new());
+    let html = child_of_kind(&doc, doc.root, |n| matches!(n, Node::HtmlBlock(_)))
+        .expect("html block under root");
+    assert_eq!(
+        span_slice(src, &doc, html),
+        "<!-- a\n-->",
+        "the html block span must start at its '<', not earlier"
+    );
+}
+
+#[test]
+fn container_spans_cover_their_last_child() {
+    // kills: crates/geist4-core/src/parser/mod.rs:1297:9: replace Parser<'a, 'ext>::raise_ancestor_ends with ()
+    let src = "- # h\n";
+    let doc = parse_with(src, &Options::new());
+    let list =
+        child_of_kind(&doc, doc.root, |n| matches!(n, Node::List(_))).expect("list under root");
+    assert_eq!(
+        span_slice(src, &doc, list),
+        "- # h",
+        "the list span must cover its heading child to the end of the line"
+    );
+    let item = child_of_kind(&doc, list, |n| matches!(n, Node::Item(_))).expect("item in list");
+    assert_eq!(
+        span_slice(src, &doc, item),
+        "- # h",
+        "the item span must cover the whole list line"
+    );
+}
+
+#[test]
+fn list_items_start_at_their_own_marker() {
+    // kills: crates/geist4-core/src/parser/mod.rs:1316:37: replace + with * in Parser<'a, 'ext>::open_list_item
+    let src = "x\n- a\n- b\n";
+    let doc = parse_with(src, &Options::new());
+    let list =
+        child_of_kind(&doc, doc.root, |n| matches!(n, Node::List(_))).expect("list under root");
+    assert_eq!(
+        span_slice(src, &doc, list),
+        "- a\n- b",
+        "the list span must start at the first item's marker"
+    );
+    let items = doc.arena.children(list);
+    assert_eq!(items.len(), 2, "two items in one list");
+    assert_eq!(
+        span_slice(src, &doc, items[0]),
+        "- a",
+        "first item must start at its own marker byte"
+    );
+    assert_eq!(
+        span_slice(src, &doc, items[1]),
+        "- b",
+        "second item must start at its own marker byte"
+    );
+}
+
+#[test]
+fn consecutive_same_marker_items_share_one_list() {
+    // kills: crates/geist4-core/src/parser/mod.rs:1375:12: delete ! in Parser<'a, 'ext>::open_list_item
+    let doc = parse_with("x\n- a\n- b\n", &Options::new());
+    assert_eq!(
+        geist4_core::basic_html::render(&doc),
+        "<p>x</p>\n<ul>\n<li>a</li>\n<li>b</li>\n</ul>\n",
+        "consecutive items with the same marker belong to a single list"
+    );
+}
+
+#[test]
+fn empty_item_span_covers_marker_and_padding() {
+    // kills: crates/geist4-core/src/parser/mod.rs:1398:50: replace + with * in Parser<'a, 'ext>::open_list_item
+    let src = "- \n";
+    let doc = parse_with(src, &Options::new());
+    let list =
+        child_of_kind(&doc, doc.root, |n| matches!(n, Node::List(_))).expect("list under root");
+    assert_eq!(
+        span_slice(src, &doc, list),
+        "- ",
+        "an empty item's list span must cover the marker plus its padding space"
+    );
+    let item = child_of_kind(&doc, list, |n| matches!(n, Node::Item(_))).expect("item in list");
+    assert_eq!(
+        span_slice(src, &doc, item),
+        "- ",
+        "an empty item's span must cover the marker plus its padding space"
+    );
+}
+
+#[test]
+fn lazy_continuation_text_starts_after_the_tab() {
+    // kills: crates/geist4-core/src/parser/mod.rs:1925:40 and :1925:55: replace + with * in Parser<'a, 'ext>::anchored_rest
+    let src = "> 1. item\n>\tzz\n";
+    let doc = parse_with(src, &Options::new());
+    let quote = child_of_kind(&doc, doc.root, |n| matches!(n, Node::BlockQuote))
+        .expect("block quote under root");
+    let list = child_of_kind(&doc, quote, |n| matches!(n, Node::List(_))).expect("list in quote");
+    let item = child_of_kind(&doc, list, |n| matches!(n, Node::Item(_))).expect("item in list");
+    let para =
+        child_of_kind(&doc, item, |n| matches!(n, Node::Paragraph)).expect("paragraph in item");
+    let text = doc
+        .arena
+        .children(para)
+        .iter()
+        .copied()
+        .find(|id| matches!(doc.arena.kind(*id), Node::Text(t) if t.starts_with("zz")))
+        .expect("lazy text node in paragraph");
+    assert_eq!(
+        span_slice(src, &doc, text),
+        "zz",
+        "the lazy continuation's text span must point past the tab, not at it"
+    );
+}
+
+#[test]
+fn replacement_map_offsets_skip_the_consumed_prefix() {
+    // kills: crates/geist4-core/src/parser/mod.rs:1962:17 (< with ==), :1962:42 (< with >), :1963:55 (+ with *)
+    let src = "> \u{0}x\n";
+    let doc = parse_with(src, &Options::new());
+    let quote = child_of_kind(&doc, doc.root, |n| matches!(n, Node::BlockQuote))
+        .expect("block quote under root");
+    assert_eq!(
+        span_slice(src, &doc, quote),
+        "> \u{0}x",
+        "the quote's span must start at its '>' marker"
+    );
+    let para =
+        child_of_kind(&doc, quote, |n| matches!(n, Node::Paragraph)).expect("paragraph in quote");
+    assert_eq!(
+        span_slice(src, &doc, para),
+        "\u{0}x",
+        "the paragraph span must skip the consumed '> ' prefix"
+    );
+    let text =
+        child_of_kind(&doc, para, |n| matches!(n, Node::Text(_))).expect("text in paragraph");
+    assert_eq!(
+        span_slice(src, &doc, text),
+        "\u{0}x",
+        "the text span must include the NUL at its first content byte"
+    );
+}
+
+#[test]
+fn paragraph_span_starts_after_the_quote_prefix() {
+    // kills: crates/geist4-core/src/parser/mod.rs:1964:15: replace += with *= in Parser<'a, 'ext>::replacement_map
+    let src = "> x\u{0}y\n";
+    let doc = parse_with(src, &Options::new());
+    let quote = child_of_kind(&doc, doc.root, |n| matches!(n, Node::BlockQuote))
+        .expect("block quote under root");
+    let para =
+        child_of_kind(&doc, quote, |n| matches!(n, Node::Paragraph)).expect("paragraph in quote");
+    assert_eq!(
+        span_slice(src, &doc, para),
+        "x\u{0}y",
+        "the paragraph span must start at the first content byte after '> '"
+    );
+}
+
+#[test]
+fn inline_span_after_nul_maps_to_real_source_bytes() {
+    // kills: crates/geist4-core/src/parser/mod.rs:1973:24: replace == with != in Parser<'a, 'ext>::replacement_map
+    let src = "> x\u{0}y *em*\n";
+    let doc = parse_with(src, &Options::new());
+    let quote = child_of_kind(&doc, doc.root, |n| matches!(n, Node::BlockQuote))
+        .expect("block quote under root");
+    let para =
+        child_of_kind(&doc, quote, |n| matches!(n, Node::Paragraph)).expect("paragraph in quote");
+    let em = child_of_kind(&doc, para, |n| matches!(n, Node::Emphasis)).expect("emphasis");
+    assert_eq!(
+        span_slice(src, &doc, em),
+        "*em*",
+        "inline spans after a NUL replacement must map to the real source bytes"
+    );
+}
+
+#[test]
+fn heading_text_span_starts_at_the_first_content_byte() {
+    // kills: crates/geist4-core/src/parser/mod.rs:1998:17 (< with ==), :1998:42 (< with >),
+    // :1999:22 (+= with *=), :1999:45 (== with !=), :1999:51 (* with +) in replacement_range_map
+    let src = "# x\u{0}y\n";
+    let doc = parse_with(src, &Options::new());
+    let heading =
+        child_of_kind(&doc, doc.root, |n| matches!(n, Node::Heading(_))).expect("heading at root");
+    let text = child_of_kind(&doc, heading, |n| matches!(n, Node::Text(_))).expect("heading text");
+    assert_eq!(
+        span_slice(src, &doc, text),
+        "x\u{0}y",
+        "the heading text span must start at the first content byte and cover the whole text"
+    );
+}
