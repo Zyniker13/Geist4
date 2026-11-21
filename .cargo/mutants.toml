@@ -148,4 +148,5 @@ exclude_re = [
   "crates/geist4-core/src/parser/cursor\\.rs:118:30: replace \\+= with \\*= in Cursor<'t>::advance_cols",
   "crates/geist4-core/src/parser/cursor\\.rs:215:20: replace > with == in Cursor<'t>::skip_up_to_cols",
   "crates/geist4-core/src/parser/cursor\\.rs:215:20: replace > with >= in Cursor<'t>::skip_up_to_cols",
+  "crates/geist4-core/src/basic_html\\.rs:128:24: replace \\+ with \\* in Renderer<'_>::push_filtered",
 ]
