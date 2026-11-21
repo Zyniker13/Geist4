@@ -123,6 +123,69 @@ fn is_empty_reflects_allocation() {
     assert!(!arena.is_empty());
 }
 
+// ---------------------------------------------------------------------------
+// Span boundary arithmetic and the debug printer's indentation.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn span_len_and_is_empty_at_the_boundaries() {
+    // kills: crates/geist4-core/src/span.rs:31:9: replace Span::len -> usize with 0 / with 1
+    // kills: crates/geist4-core/src/span.rs:37:9: replace Span::is_empty -> bool with true / with false
+    // kills: crates/geist4-core/src/span.rs:37:18: replace <= with > in Span::is_empty
+    let full = Span::new(1, 4);
+    assert_eq!(full.len(), 3);
+    assert!(!full.is_empty());
+    let empty = Span::empty(2);
+    assert_eq!(empty.len(), 0);
+    assert!(empty.is_empty());
+}
+
+#[test]
+fn debug_print_indents_children_one_stop_deeper() {
+    // kills: crates/geist4-core/src/debug.rs:34:41: replace + with - in write_node
+    // kills: crates/geist4-core/src/debug.rs:34:41: replace + with * in write_node
+    let mut arena = Arena::new();
+    let root = arena.alloc(Node::Document, Span::empty(0));
+    let child = arena.alloc(Node::Paragraph, Span::new(0, 1));
+    arena.push_child(root, child);
+    let out = geist4_core::debug::print(&arena, root);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.len(), 2, "one line per node: {out:?}");
+    assert!(
+        lines[1].starts_with("  "),
+        "the child must be indented one stop deeper than the root: {out:?}"
+    );
+}
+
+#[test]
+fn remove_child_clears_the_parent_of_a_mid_tree_node() {
+    // kills: crates/geist4-core/src/arena.rs:229:28: replace < with <= in Arena<'a>::remove_child
+    // (the clear_parent guard mutants are additionally pinned here: a
+    // removed mid-tree node must report no parent afterwards)
+    let mut arena = Arena::new();
+    let root = arena.alloc(Node::Document, Span::empty(0));
+    let mut kids = Vec::new();
+    for index in 0..3 {
+        let kid = arena.alloc(Node::Paragraph, Span::new(index, index + 1));
+        arena.push_child(root, kid);
+        kids.push(kid);
+    }
+    // Remove the first child: its node id is not the last allocation, so
+    // the parent-table bounds check must still fire.
+    let removed = arena.remove_child(root, 0);
+    assert_eq!(removed, Some(kids[0]));
+    assert_eq!(arena.children(root).len(), 2);
+    assert_eq!(
+        arena.parent(kids[0]),
+        None,
+        "a removed child must lose its parent record"
+    );
+    // An index at the end of the (now shorter) list removes nothing, and
+    // must not panic.
+    let len = arena.children(root).len();
+    assert_eq!(arena.remove_child(root, len), None);
+}
+
 // Equivalent survivors (genuinely equivalent: no observable difference
 // through any public API, so no test can kill them):
 //

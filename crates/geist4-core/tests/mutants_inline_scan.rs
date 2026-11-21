@@ -215,6 +215,35 @@ fn hard_break_backwalk_stops_at_zero() {
 
 // ==== escaped_char_in_link_label_keeps_link_span ====
 #[test]
+fn numeric_entity_decodes_decimal_references() {
+    // kills: crates/geist4-core/src/inline/entities.rs:44:17: replace < with == in scan_numeric_entity
+    assert_eq!(html_of("&#65;\n"), "<p>A</p>\n");
+}
+
+#[test]
+fn a_leading_tab_makes_an_indented_code_block() {
+    // kills: crates/geist4-core/src/parser/cursor.rs:65:38: replace + with * in Cursor<'t>::bump
+    // kills: crates/geist4-core/src/parser/cursor.rs:65:43: replace * with / in Cursor<'t>::bump
+    assert_eq!(
+        html_of("\tfoo\n"),
+        "<pre><code>foo\n</code></pre>\n",
+        "one tab expands to four columns, which is an indented code block"
+    );
+}
+
+#[test]
+fn list_item_tab_padding_continues_at_its_tab_stop() {
+    // kills: crates/geist4-core/src/parser/cursor.rs:65:43: replace * with + in Cursor<'t>::bump
+    // The item's content column is the tab stop after the marker; a
+    // continuation line indented by one tab must reach it exactly.
+    assert_eq!(
+        html_of("-\tfoo\n\tbar\n"),
+        "<ul>\n<li>foo\nbar</li>\n</ul>\n",
+        "the tab-continuation must join the item, not fall out into an indented code block"
+    );
+}
+
+#[test]
 fn escaped_char_in_link_label_keeps_link_span() {
     // kills: crates/geist4-core/src/inline/mod.rs:1172:44: replace - with / in Parser<'defs, 'a, 'ext>::handle_backslash
     // The escaped-character wrapper's span must start at its backslash.
