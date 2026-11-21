@@ -342,3 +342,54 @@ fn continuation_column_counts_the_container_prefixes() {
         doc.arena.kind(doc.arena.children(tail)[0])
     ));
 }
+// ==== a_pre_paragraphs_inlines_span_through_the_block_start ====
+/// Converts an open paragraph into a `split` block when the next line
+/// is `%%split`; the whole paragraph text becomes the pre-paragraph in
+/// front of the new block.
+struct Splitter;
+
+impl Extension for Splitter {
+    fn name(&self) -> &str {
+        "splitter"
+    }
+
+    fn kinds(&self) -> Vec<KindDecl> {
+        vec![KindDecl {
+            kind: "split".to_owned(),
+            container: true,
+            inline_text: false,
+            attrs: Vec::new(),
+        }]
+    }
+
+    fn try_start(&self, ctx: &mut BlockStartCtx<'_, '_, '_, '_>) {
+        if ctx.line() != b"%%split" {
+            return;
+        }
+        if let Some(text) = ctx.paragraph_text() {
+            // The current line is not in the buffer yet: the whole
+            // buffer becomes the pre-paragraph and the line itself the
+            // new block's first line.
+            ctx.convert_paragraph("split".to_owned(), text.len(), Box::new(0usize));
+        }
+    }
+}
+
+#[test]
+fn a_pre_paragraphs_inlines_span_through_the_block_start() {
+    // kills: crates/geist4-core/src/inline/mod.rs:464:36: replace + with * in attach_pool
+    // kills: crates/geist4-core/src/inline/mod.rs:465:36: replace + with * in attach_pool
+    // A paragraph an extension converts out of keeps no text map — its
+    // pre text was unescaped and trimmed — so its inline spans come
+    // from the fallback `fallback_start + cell` arithmetic in
+    // `attach_pool`. For the pre paragraph `intro *b*` starting at
+    // byte 0 that is 6..9 for the emphasis. With `*` for `+` the
+    // fallback collapses to a product, which the pinned span rejects.
+    let mut options = Options::new();
+    options.extension(Arc::new(Splitter));
+    let src = "intro *b*\n%%split\n";
+    let doc = parse_with(src, &options);
+    let pre = find_child(&doc, doc.root, &is_paragraph);
+    let emph = find_child(&doc, pre, &|node| matches!(node, Node::Emphasis));
+    assert_eq!(doc.arena.span(emph), Span::new(6, 9));
+}

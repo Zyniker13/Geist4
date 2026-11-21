@@ -369,3 +369,434 @@ fn nested_emphasis_leftovers_nest_by_position() {
     assert_eq!(text_span, (3, 4));
     assert_eq!(html_of(src), "<p><em><strong>a</strong></em></p>\n");
 }
+// ==== content_reports_the_groups_text_or_none ====
+/// Claims every `[`…`]` group whose content is exactly "foo" as a
+/// marker node of kind `foo`, discarding the content.
+struct ContentClaimer;
+
+impl Extension for ContentClaimer {
+    fn name(&self) -> &str {
+        "content-claimer"
+    }
+
+    fn kinds(&self) -> Vec<KindDecl> {
+        vec![KindDecl {
+            kind: "foo".to_owned(),
+            container: true,
+            inline_text: true,
+            attrs: Vec::new(),
+        }]
+    }
+
+    fn inline_bracket(&self, ctx: &mut InlineBracketCtx<'_, '_, '_, '_>) {
+        if ctx.content() == Some("foo") {
+            ctx.claim("foo".to_owned(), Vec::new());
+        }
+    }
+}
+
+#[test]
+fn content_reports_the_groups_text_or_none() {
+    // kills: crates/geist4-core/src/inline/mod.rs:551:9: replace BracketInner<'p, 'defs, 'a, 'ext>::build_content -> Option<String> with None
+    // kills: crates/geist4-core/src/inline/mod.rs:551:9: replace BracketInner<'p, 'defs, 'a, 'ext>::build_content -> Option<String> with Some(String::new())
+    // kills: crates/geist4-core/src/inline/mod.rs:551:9: replace BracketInner<'p, 'defs, 'a, 'ext>::build_content -> Option<String> with Some("xyzzy".into())
+    // kills: crates/geist4-core/src/inline/mod.rs:559:17: delete match arm crate::inline::Kind::Text(t) | crate::inline::Kind::Html(t) in BracketInner<'p, 'defs, 'a, 'ext>::build_content
+    // kills: crates/geist4-core/src/inline/mod.rs:590:9: replace crate::extension::InlineBracketCtx<'p, 'defs, 'a, 'ext>::content -> Option<&str> with None
+    // kills: crates/geist4-core/src/inline/mod.rs:590:9: replace crate::extension::InlineBracketCtx<'p, 'defs, 'a, 'ext>::content -> Option<&str> with Some("")
+    // kills: crates/geist4-core/src/inline/mod.rs:590:9: replace crate::extension::InlineBracketCtx<'p, 'defs, 'a, 'ext>::content -> Option<&str> with Some("xyzzy")
+    // The content hook hands the hook the bracket group's text: `foo`
+    // for `[foo]`, and `None` when a non-text node sits inside the
+    // brackets. The extension claims only when the content is exactly
+    // `foo`, so a build that never assembles the text — a constant
+    // return, a dropped Text/Html match arm — or a content() pinned to
+    // a constant leaves `[foo]` literal, which the pinned output
+    // rejects. The code-span case pins the None half of the contract.
+    let mut options = Options::new();
+    options.extension(Arc::new(ContentClaimer));
+    assert_eq!(html_of_with("[foo]\n", &options), "<p></p>\n");
+    let doc = parse_with("[foo]\n", &options);
+    let para = paragraph(&doc);
+    let children = doc.arena.children(para);
+    assert_eq!(children.len(), 1, "the claimed marker replaces the group");
+    assert!(
+        matches!(doc.arena.kind(children[0]), Node::Extension(ext) if ext.kind == "foo"),
+        "the claimed marker node holds the group"
+    );
+    // A code span inside the brackets is a non-text node: the content
+    // is None and the group stays literal.
+    assert_eq!(
+        html_of_with("[`b`]\n", &options),
+        "<p>[<code>b</code>]</p>\n"
+    );
+}
+
+// ==== the_bracket_hook_sees_the_openers_position ====
+/// Claims the bracket group only when the hook reports the opener
+/// three bytes into the subject (a `[` sitting at byte 2).
+struct PositionClaimer;
+
+impl Extension for PositionClaimer {
+    fn name(&self) -> &str {
+        "position-claimer"
+    }
+
+    fn kinds(&self) -> Vec<KindDecl> {
+        vec![KindDecl {
+            kind: "placed".to_owned(),
+            container: true,
+            inline_text: true,
+            attrs: Vec::new(),
+        }]
+    }
+
+    fn inline_bracket(&self, ctx: &mut InlineBracketCtx<'_, '_, '_, '_>) {
+        if ctx.opener_position() == 3 {
+            ctx.claim("placed".to_owned(), Vec::new());
+        }
+    }
+}
+
+#[test]
+fn the_bracket_hook_sees_the_openers_position() {
+    // kills: crates/geist4-core/src/inline/mod.rs:597:9: replace crate::extension::InlineBracketCtx<'p, 'defs, 'a, 'ext>::opener_position -> usize with 0
+    // kills: crates/geist4-core/src/inline/mod.rs:597:9: replace crate::extension::InlineBracketCtx<'p, 'defs, 'a, 'ext>::opener_position -> usize with 1
+    // The bracket stack records the position just past the `[` — the
+    // link span's `opener_position - 1` start depends on it — so for
+    // `x [foo]`, with the `[` at byte 2, the hook sees 3. A constant 0
+    // or 1 misreports it, the gate stays shut, and the group stays
+    // literal text, which the pinned HTML rejects.
+    let mut options = Options::new();
+    options.extension(Arc::new(PositionClaimer));
+    assert_eq!(html_of_with("x [foo]\n", &options), "<p>x </p>\n");
+}
+
+// ==== the_trigger_hook_sees_its_own_byte ====
+/// Links its trigger byte, colored by which byte it was: `~` links to
+/// `/t`, `^` to `/c`.
+struct BytePairLinker;
+
+impl Extension for BytePairLinker {
+    fn name(&self) -> &str {
+        "byte-pair-linker"
+    }
+
+    fn inline_triggers(&self) -> &[u8] {
+        b"~^"
+    }
+
+    fn inline_trigger(&self, ctx: &mut InlineTriggerCtx<'_, '_, '_, '_>) {
+        match ctx.byte() {
+            b'~' => ctx.emit_link(0, 1, "/t".to_owned()),
+            b'^' => ctx.emit_link(0, 1, "/c".to_owned()),
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn the_trigger_hook_sees_its_own_byte() {
+    // kills: crates/geist4-core/src/inline/mod.rs:643:9: replace crate::extension::InlineTriggerCtx<'p, 'defs, 'a, 'ext>::byte -> u8 with 0
+    // byte() is the trigger byte the hook was called for. One hook
+    // registered for both `~` and `^` must link each byte with its own
+    // destination; with byte() pinned to 0 neither arm matches, the
+    // hook consumes nothing, and both bytes stay literal text.
+    let mut options = Options::new();
+    options.extension(Arc::new(BytePairLinker));
+    assert_eq!(
+        html_of_with("x ~y ^z\n", &options),
+        "<p>x <a href=\"/t\">~</a>y <a href=\"/c\">^</a>z</p>\n"
+    );
+}
+
+// ==== the_hook_sees_its_own_trigger_byte ====
+/// Branches on the trigger byte it was called for: `@` becomes an
+/// `at` link, `#` a `hash` link. Any other byte the hook could see
+/// (there is none in correct code) links nothing.
+struct PairLinker;
+
+impl Extension for PairLinker {
+    fn name(&self) -> &str {
+        "pair-linker"
+    }
+
+    fn inline_triggers(&self) -> &[u8] {
+        b"@#"
+    }
+
+    fn inline_trigger(&self, ctx: &mut InlineTriggerCtx<'_, '_, '_, '_>) {
+        match ctx.byte() {
+            b'@' => ctx.emit_link(0, 1, "/at".to_owned()),
+            b'#' => ctx.emit_link(0, 1, "/hash".to_owned()),
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn the_hook_sees_its_own_trigger_byte() {
+    // kills: crates/geist4-core/src/inline/mod.rs:643:9: replace crate::extension::InlineTriggerCtx<'p, 'defs, 'a, 'ext>::byte -> u8 with 1
+    // The byte the hook was called for is the trigger byte itself. With
+    // one hook registered for both `@` and `#`, `@` must link as `at`
+    // and `#` as `hash`; a byte() pinned to 1 matches neither arm, the
+    // hook takes nothing, and both bytes stay literal text.
+    let mut options = Options::new();
+    options.extension(Arc::new(PairLinker));
+    assert_eq!(
+        html_of_with("x@y#z\n", &options),
+        "<p>x<a href=\"/at\">@</a>y<a href=\"/hash\">#</a>z</p>\n"
+    );
+}
+
+// ==== the_hook_sees_the_trigger_bytes_position ====
+/// Emits a link whose destination records the byte position the hook
+/// was called at.
+struct PositionLinker;
+
+impl Extension for PositionLinker {
+    fn name(&self) -> &str {
+        "position-linker"
+    }
+
+    fn inline_triggers(&self) -> &[u8] {
+        b"@"
+    }
+
+    fn inline_trigger(&self, ctx: &mut InlineTriggerCtx<'_, '_, '_, '_>) {
+        ctx.emit_link(0, 1, format!("/p{}", ctx.position()));
+    }
+}
+
+#[test]
+fn the_hook_sees_the_trigger_bytes_position() {
+    // kills: crates/geist4-core/src/inline/mod.rs:649:9: replace crate::extension::InlineTriggerCtx<'p, 'defs, 'a, 'ext>::position -> usize with 0
+    // kills: crates/geist4-core/src/inline/mod.rs:649:9: replace crate::extension::InlineTriggerCtx<'p, 'defs, 'a, 'ext>::position -> usize with 1
+    // The cursor's position is the byte offset of the trigger byte in
+    // the inline subject: for `ab@c` that is 2, which the hook records
+    // in its link destination. A constant 0 or 1 misstates it and the
+    // destination shows the wrong offset.
+    let mut options = Options::new();
+    options.extension(Arc::new(PositionLinker));
+    assert_eq!(
+        html_of_with("ab@c\n", &options),
+        "<p>ab<a href=\"/p2\">@</a>c</p>\n"
+    );
+}
+
+// ==== a_scanned_runs_text_node_spans_the_run ====
+/// Scans a `~` run and leaves it pending: the run stays literal text
+/// whose text node carries the run's byte range.
+struct TildeScan;
+
+impl Extension for TildeScan {
+    fn name(&self) -> &str {
+        "tilde-scan"
+    }
+
+    fn inline_triggers(&self) -> &[u8] {
+        b"~"
+    }
+
+    fn inline_trigger(&self, ctx: &mut InlineTriggerCtx<'_, '_, '_, '_>) {
+        let _ = ctx.scan_run();
+    }
+}
+
+#[test]
+fn a_scanned_runs_text_node_spans_the_run() {
+    // kills: crates/geist4-core/src/inline/mod.rs:664:35: replace - with + in crate::extension::InlineTriggerCtx<'p, 'defs, 'a, 'ext>::scan_run
+    // kills: crates/geist4-core/src/inline/mod.rs:664:35: replace - with / in crate::extension::InlineTriggerCtx<'p, 'defs, 'a, 'ext>::scan_run
+    // The text node a scan_run pushes covers exactly the run's bytes:
+    // for the two-tilde run of `abc~~c` that is 3..5. With `+` the
+    // start lands past the run (an inverted range that maps to an
+    // empty span), with `/` it starts two bytes early and the node
+    // covers `c~~`.
+    let src = "abc~~c\n";
+    let mut options = Options::new();
+    options.extension(Arc::new(TildeScan));
+    let doc = parse_with(src, &options);
+    let para = paragraph(&doc);
+    for &child in doc.arena.children(para) {
+        if let Node::Text(text) = doc.arena.kind(child) {
+            if text.as_ref() == "~~" {
+                let (slice, span) = span_of(src, &doc, child);
+                assert_eq!(slice, "~~");
+                assert_eq!(span, (3, 5));
+                return;
+            }
+        }
+    }
+    panic!("no run text node under the paragraph");
+}
+
+// ==== rest_of_line_runs_to_the_line_end ====
+/// An autolink-ish extension: at `u` it eats the rest of the line as a
+/// URL and emits a link whose destination records what rest_of_line
+/// handed it, framed with `v`s so an empty slice shows up.
+struct LineSitter;
+
+impl Extension for LineSitter {
+    fn name(&self) -> &str {
+        "line-sitter"
+    }
+
+    fn inline_triggers(&self) -> &[u8] {
+        b"u"
+    }
+
+    fn inline_trigger(&self, ctx: &mut InlineTriggerCtx<'_, '_, '_, '_>) {
+        let rest = ctx.rest_of_line();
+        let seen = String::from_utf8_lossy(rest).into_owned();
+        ctx.emit_link(0, rest.len(), format!("v{seen}v"));
+    }
+}
+
+#[test]
+fn rest_of_line_runs_to_the_line_end() {
+    // kills: crates/geist4-core/src/inline/mod.rs:709:9: replace crate::extension::InlineTriggerCtx<'p, 'defs, 'a, 'ext>::rest_of_line -> &'a[u8] with Vec::leak(Vec::new())
+    // kills: crates/geist4-core/src/inline/mod.rs:709:9: replace crate::extension::InlineTriggerCtx<'p, 'defs, 'a, 'ext>::rest_of_line -> &'a[u8] with Vec::leak(vec![0])
+    // kills: crates/geist4-core/src/inline/mod.rs:709:9: replace crate::extension::InlineTriggerCtx<'p, 'defs, 'a, 'ext>::rest_of_line -> &'a[u8] with Vec::leak(vec![1])
+    // kills: crates/geist4-core/src/inline/mod.rs:761:9: replace TriggerInner<'p, 'defs, 'a, 'ext>::rest_of_line -> &'a[u8] with Vec::leak(Vec::new())
+    // kills: crates/geist4-core/src/inline/mod.rs:761:9: replace TriggerInner<'p, 'defs, 'a, 'ext>::rest_of_line -> &'a[u8] with Vec::leak(vec![0])
+    // kills: crates/geist4-core/src/inline/mod.rs:761:9: replace TriggerInner<'p, 'defs, 'a, 'ext>::rest_of_line -> &'a[u8] with Vec::leak(vec![1])
+    // kills: crates/geist4-core/src/inline/mod.rs:766:49: replace + with - in TriggerInner<'p, 'defs, 'a, 'ext>::rest_of_line
+    // kills: crates/geist4-core/src/inline/mod.rs:766:49: replace + with * in TriggerInner<'p, 'defs, 'a, 'ext>::rest_of_line
+    // rest_of_line spans the trigger byte through the bytes before the
+    // newline: for `see u://x` at the `u` that is `u://x`, five bytes,
+    // which the link swallows and records in its destination. An empty
+    // slice, a one-byte NUL or SOH slice, or an end computed as
+    // `start - offset` (which underflows) or `start * offset` (which
+    // runs past the buffer) cannot reproduce it.
+    let mut options = Options::new();
+    options.extension(Arc::new(LineSitter));
+    assert_eq!(
+        html_of_with("see u://x\nafter\n", &options),
+        "<p>see <a href=\"vu://xv\">u://x</a>\nafter</p>\n"
+    );
+}
+
+// ==== preceding_reports_the_byte_before_the_cursor ====
+/// Emits a link at `@` whose destination records the byte before the
+/// cursor, with `?` standing in for `None`.
+struct PrecedingLinker;
+
+impl Extension for PrecedingLinker {
+    fn name(&self) -> &str {
+        "preceding-linker"
+    }
+
+    fn inline_triggers(&self) -> &[u8] {
+        b"@"
+    }
+
+    fn inline_trigger(&self, ctx: &mut InlineTriggerCtx<'_, '_, '_, '_>) {
+        let seen = match ctx.preceding() {
+            Some(byte) => byte as char,
+            None => '?',
+        };
+        ctx.emit_link(0, 1, format!("v{seen}v"));
+    }
+}
+
+#[test]
+fn preceding_reports_the_byte_before_the_cursor() {
+    // kills: crates/geist4-core/src/inline/mod.rs:724:9: replace crate::extension::InlineTriggerCtx<'p, 'defs, 'a, 'ext>::preceding -> Option<u8> with None
+    // kills: crates/geist4-core/src/inline/mod.rs:724:9: replace crate::extension::InlineTriggerCtx<'p, 'defs, 'a, 'ext>::preceding -> Option<u8> with Some(0)
+    // kills: crates/geist4-core/src/inline/mod.rs:724:9: replace crate::extension::InlineTriggerCtx<'p, 'defs, 'a, 'ext>::preceding -> Option<u8> with Some(1)
+    // kills: crates/geist4-core/src/inline/mod.rs:772:9: replace TriggerInner<'p, 'defs, 'a, 'ext>::preceding -> Option<u8> with None
+    // The byte before the cursor is `a` for `a@b`, which the
+    // destination records. `None`, NUL, or SOH record something else.
+    let mut options = Options::new();
+    options.extension(Arc::new(PrecedingLinker));
+    assert_eq!(
+        html_of_with("a@b\n", &options),
+        "<p>a<a href=\"vav\">@</a>b</p>\n"
+    );
+}
+
+// ==== a_claim_takes_the_groups_delimiters_off_the_stack ====
+#[test]
+fn a_claim_takes_the_groups_delimiters_off_the_stack() {
+    // kills: crates/geist4-core/src/inline/mod.rs:1051:9: replace Parser<'defs, 'a, 'ext>::remove_delimiters_since with ()
+    // kills: crates/geist4-core/src/inline/mod.rs:1057:30: replace <= with > in Parser<'defs, 'a, 'ext>::remove_delimiters_since
+    // The `~` run inside the claimed group ends after the opener's
+    // position, so the claim must drop it; the run before the group ends
+    // before the opener's position and must stay. With the removal dead
+    // — or the boundary flipped, which stops at the first inside run and
+    // never removes anything — the final `~` pairs with the inside run
+    // instead of the leading one and the strike wraps the wrong bytes.
+    struct ClaimStrike;
+    impl Extension for ClaimStrike {
+        fn name(&self) -> &str {
+            "claim-strike"
+        }
+
+        fn kinds(&self) -> Vec<KindDecl> {
+            vec![
+                KindDecl {
+                    kind: "s".to_owned(),
+                    container: true,
+                    inline_text: true,
+                    attrs: Vec::new(),
+                },
+                KindDecl {
+                    kind: "claimed".to_owned(),
+                    container: true,
+                    inline_text: true,
+                    attrs: Vec::new(),
+                },
+            ]
+        }
+
+        fn inline_triggers(&self) -> &[u8] {
+            b"~"
+        }
+
+        fn inline_trigger(
+            &self,
+            ctx: &mut geist4_core::extension::InlineTriggerCtx<'_, '_, '_, '_>,
+        ) {
+            let run = ctx.scan_run();
+            ctx.push_delim(&run, "s");
+        }
+
+        fn inline_bracket(
+            &self,
+            ctx: &mut geist4_core::extension::InlineBracketCtx<'_, '_, '_, '_>,
+        ) {
+            ctx.claim_with_content("claimed".to_owned(), Vec::new(), 64);
+        }
+    }
+    let mut options = Options::new();
+    options.extension(Arc::new(ClaimStrike));
+    let src = "~x[~a]b~\n";
+    let doc = parse_with(src, &options);
+    let para = paragraph(&doc);
+    let kids = doc.arena.children(para);
+    assert_eq!(kids.len(), 1, "the strike takes the whole line");
+    let kind = match doc.arena.kind(kids[0]) {
+        Node::Extension(ext) => ext.kind.clone(),
+        other => panic!("expected the s node, got {other:?}"),
+    };
+    assert_eq!(kind, "s");
+    let s_kids = doc.arena.children(kids[0]);
+    assert_eq!(s_kids.len(), 3, "x, the claimed node, b");
+    let (head, _) = span_of(src, &doc, s_kids[0]);
+    assert_eq!(head, "x");
+    let claimed_kind = match doc.arena.kind(s_kids[1]) {
+        Node::Extension(ext) => ext.kind.clone(),
+        other => panic!("expected the claimed node, got {other:?}"),
+    };
+    assert_eq!(claimed_kind, "claimed");
+    let claimed_texts: Vec<String> = doc
+        .arena
+        .children(s_kids[1])
+        .iter()
+        .map(|&c| match doc.arena.kind(c) {
+            Node::Text(t) => t.to_string(),
+            other => panic!("unexpected claimed child {other:?}"),
+        })
+        .collect();
+    assert_eq!(claimed_texts, vec!["~".to_owned(), "a".to_owned()]);
+    let (tail, _) = span_of(src, &doc, s_kids[2]);
+    assert_eq!(tail, "b");
+}

@@ -170,3 +170,223 @@ fn broken_reference_label_is_trimmed_on_both_sides() {
     );
     assert_eq!(html_of(src), "<p>[t][ x ]</p>\n");
 }
+// ==== hard_break_span_covers_dropped_trailing_spaces ====
+#[test]
+fn hard_break_span_covers_dropped_trailing_spaces() {
+    // kills: crates/geist4-core/src/inline/mod.rs:1140:26: replace > with == in Parser<'defs, 'a, 'ext>::handle_newline
+    // A hard break's cell must cover the trailing whitespace the
+    // preceding text run dropped plus the line ending. With `==` the
+    // backwalk never runs and the cell starts at the line ending.
+    let src = "a  \nb\n";
+    let doc = parse_with(src, &Options::new());
+    let para = paragraph(&doc);
+    for &child in doc.arena.children(para) {
+        if matches!(doc.arena.kind(child), Node::HardBreak) {
+            let (slice, span) = span_of(src, &doc, child);
+            assert_eq!(slice, "  \n");
+            assert_eq!(span, (1, 4));
+            return;
+        }
+    }
+    panic!("no hard break under the paragraph");
+}
+
+// ==== hard_break_backwalk_stops_at_zero ====
+#[test]
+fn hard_break_backwalk_stops_at_zero() {
+    // kills: crates/geist4-core/src/inline/mod.rs:1140:26: replace > with >= in Parser<'defs, 'a, 'ext>::handle_newline
+    // The backwalk must stop at byte 0: `\x0B` counts as break-adjacent
+    // whitespace here, so the cell legitimately starts at 0. With `>=`
+    // the usize guard is always true and the walk indexes byte -1,
+    // panicking instead of parsing.
+    let src = "\u{0b}  \nb\n";
+    let doc = parse_with(src, &Options::new());
+    let para = paragraph(&doc);
+    for &child in doc.arena.children(para) {
+        if matches!(doc.arena.kind(child), Node::HardBreak) {
+            let (slice, span) = span_of(src, &doc, child);
+            assert_eq!(slice, "\u{0b}  \n");
+            assert_eq!(span, (0, 4));
+            return;
+        }
+    }
+    panic!("no hard break under the paragraph");
+}
+
+// ==== escaped_char_in_link_label_keeps_link_span ====
+#[test]
+fn escaped_char_in_link_label_keeps_link_span() {
+    // kills: crates/geist4-core/src/inline/mod.rs:1172:44: replace - with / in Parser<'defs, 'a, 'ext>::handle_backslash
+    // The escaped-character wrapper's span must start at its backslash.
+    // A wrapper inside a link label is a live child when the link cell's
+    // span is folded from its children, so a wrapper start computed by
+    // other means (here pos/2) drags the link's span start to that
+    // value; a link opener is never later than its first child.
+    let src = "abcdefghij[\\*x](u)\n";
+    let doc = parse_with(src, &Options::new());
+    let para = paragraph(&doc);
+    for &child in doc.arena.children(para) {
+        if let Node::Link(_) = doc.arena.kind(child) {
+            let (slice, span) = span_of(src, &doc, child);
+            assert_eq!(slice, "[\\*x](u)");
+            assert_eq!(span, (10, 18));
+            return;
+        }
+    }
+    panic!("no link node under the paragraph");
+}
+
+// ==== escaped_char_at_line_start_covers_both_bytes ====
+#[test]
+fn escaped_char_at_line_start_covers_both_bytes() {
+    // kills: crates/geist4-core/src/inline/mod.rs:1181:44: replace - with / in Parser<'defs, 'a, 'ext>::handle_backslash
+    // The wrapper dissolves, so the surviving text node must carry the
+    // whole escape's span: backslash plus character. A start computed
+    // by other means (here pos/2) hides the backslash's position.
+    let src = "\\*a\n";
+    let doc = parse_with(src, &Options::new());
+    let para = paragraph(&doc);
+    for &child in doc.arena.children(para) {
+        if let Node::Text(text) = doc.arena.kind(child) {
+            if text == "*" {
+                let (slice, span) = span_of(src, &doc, child);
+                assert_eq!(slice, "\\*");
+                assert_eq!(span, (0, 2));
+                return;
+            }
+        }
+    }
+    panic!("no escaped text node under the paragraph");
+}
+
+// ==== literal_backslash_span_covers_one_byte ====
+#[test]
+fn literal_backslash_span_covers_one_byte() {
+    // kills: crates/geist4-core/src/inline/mod.rs:1195:74: replace - with / in Parser<'defs, 'a, 'ext>::handle_backslash
+    // A backslash that escapes nothing is literal text covering exactly
+    // its own byte. A start computed by other means (here pos/1, i.e.
+    // the cursor) yields an empty span that hides the backslash.
+    let src = "a\\ b\n";
+    let doc = parse_with(src, &Options::new());
+    let para = paragraph(&doc);
+    for &child in doc.arena.children(para) {
+        if let Node::Text(text) = doc.arena.kind(child) {
+            if text == "\\" {
+                let (slice, span) = span_of(src, &doc, child);
+                assert_eq!(slice, "\\");
+                assert_eq!(span, (1, 2));
+                return;
+            }
+        }
+    }
+    panic!("no backslash text node under the paragraph");
+}
+
+// ==== run_of_1001_backticks_is_literal_text ====
+#[test]
+fn run_of_1001_backticks_is_literal_text() {
+    // kills: crates/geist4-core/src/inline/mod.rs:1243:21: replace > with == in Parser<'defs, 'a, 'ext>::handle_backticks
+    // Runs longer than MAXBACKTICKS are literal text even when a closer
+    // exists. With `==` a 1001-tick opener passes the guard (a closer
+    // exists, so optimistic_fail is false) and pairs up as a code span.
+    let ticks = "`".repeat(1001);
+    let src = format!("{ticks}x{ticks}\n");
+    assert_eq!(html_of(&src), format!("<p>{ticks}x{ticks}</p>\n"));
+}
+
+// ==== long_backtick_run_span_starts_at_run_start ====
+#[test]
+fn long_backtick_run_span_starts_at_run_start() {
+    // kills: crates/geist4-core/src/inline/mod.rs:1244:35: replace - with / in Parser<'defs, 'a, 'ext>::handle_backticks
+    // A literal over-cap run's text node must start at the run's first
+    // backtick (pos - numticks), not at a value computed by other means
+    // (here pos/numticks), which points into the prefix and mis-frames
+    // the run.
+    let ticks = "`".repeat(1001);
+    let src = format!("abc{ticks}\n");
+    let doc = parse_with(&src, &Options::new());
+    let para = paragraph(&doc);
+    for &child in doc.arena.children(para) {
+        if let Node::Text(text) = doc.arena.kind(child) {
+            if *text == ticks {
+                let (slice, span) = span_of(&src, &doc, child);
+                assert_eq!(slice, ticks);
+                assert_eq!(span, (3, 1004));
+                return;
+            }
+        }
+    }
+    panic!("no backtick run text node under the paragraph");
+}
+
+// ==== unmatched_backtick_run_span_covers_the_ticks ====
+#[test]
+fn unmatched_backtick_run_span_covers_the_ticks() {
+    // kills: crates/geist4-core/src/inline/mod.rs:1263:30: replace - with / in Parser<'defs, 'a, 'ext>::handle_backticks
+    // When the remembered opener run is emitted as literal text its node
+    // must cover exactly the ticks (startpos - numticks). Dividing
+    // instead of subtracting shifts the start into the following text.
+    let src = "``x\n";
+    let doc = parse_with(src, &Options::new());
+    let para = paragraph(&doc);
+    for &child in doc.arena.children(para) {
+        if let Node::Text(text) = doc.arena.kind(child) {
+            if text == "``" {
+                let (slice, span) = span_of(src, &doc, child);
+                assert_eq!(slice, "``");
+                assert_eq!(span, (0, 2));
+                return;
+            }
+        }
+    }
+    panic!("no backtick run text node under the paragraph");
+}
+
+// ==== entity_span_covers_the_reference ====
+#[test]
+fn entity_span_covers_the_reference() {
+    // kills: crates/geist4-core/src/inline/mod.rs:1304:28: replace - with / in Parser<'defs, 'a, 'ext>::handle_entity
+    // The entity's text node must start at the `&` (amp = pos - 1 after
+    // the cursor stepped past it). pos/1 is the cursor itself, so the
+    // span would start after the ampersand and stop covering it.
+    let src = "a&amp;b\n";
+    let doc = parse_with(src, &Options::new());
+    let para = paragraph(&doc);
+    for &child in doc.arena.children(para) {
+        if let Node::Text(text) = doc.arena.kind(child) {
+            if text == "&" {
+                let (slice, span) = span_of(src, &doc, child);
+                assert_eq!(slice, "&amp;");
+                assert_eq!(span, (1, 6));
+                return;
+            }
+        }
+    }
+    panic!("no entity text node under the paragraph");
+}
+
+// ==== disabled_link_close_bracket_text_covers_one_byte ====
+#[test]
+fn disabled_link_close_bracket_text_covers_one_byte() {
+    // kills: crates/geist4-core/src/inline/mod.rs:1442:72: replace - with + in Parser<'defs, 'a, 'ext>::handle_close_bracket
+    // kills: crates/geist4-core/src/inline/mod.rs:1442:72: replace - with / in Parser<'defs, 'a, 'ext>::handle_close_bracket
+    // Inside a disabled link, the unmatched outer `]` is literal text
+    // covering exactly its own byte. `+` and `/` both move the span off
+    // the bracket, hiding where the disabled link ended.
+    let src = "[a [b](c) d]\n";
+    assert_eq!(html_of(src), "<p>[a <a href=\"c\">b</a> d]</p>\n");
+    let doc = parse_with(src, &Options::new());
+    let para = paragraph(&doc);
+    let mut found: Option<NodeId> = None;
+    for &child in doc.arena.children(para) {
+        if let Node::Text(text) = doc.arena.kind(child) {
+            if text == "]" {
+                found = Some(child);
+            }
+        }
+    }
+    let id = found.expect("no stray close bracket text under the paragraph");
+    let (slice, span) = span_of(src, &doc, id);
+    assert_eq!(slice, "]");
+    assert_eq!(span, (11, 12));
+}

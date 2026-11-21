@@ -19,7 +19,7 @@ use geist4_core::node::Node;
 use geist4_core::parser::{TextMap, parse_with};
 use geist4_core::span::Span;
 use std::borrow::Cow;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// Every extension node in the document, in allocation order.
 fn extension_nodes(doc: &geist4_core::Document<'_>) -> Vec<(NodeId, String)> {
@@ -578,4 +578,796 @@ fn empty_map_fallback_offsets_shift_by_the_block_start() {
     assert_eq!(span(kids[1]), (8, 10), "second cell");
     assert!(is_text_of("cd")(doc.arena.kind(kids[2])));
     assert_eq!(span(kids[2]), (10, 12), "third cell");
+}
+// ==== preceding_reports_the_byte_before_the_trigger ====
+#[test]
+fn preceding_reports_the_byte_before_the_trigger() {
+    // kills: crates/geist4-core/src/inline/mod.rs:772:9: replace TriggerInner<'p, 'defs, 'a, 'ext>::preceding -> Option<u8> with Some(0)
+    // kills: crates/geist4-core/src/inline/mod.rs:772:9: replace TriggerInner<'p, 'defs, 'a, 'ext>::preceding -> Option<u8> with Some(1)
+    // The hook links a `www` run only where the documented contract
+    // allows a match to start: with no byte before the cursor, or after
+    // a space. A constant `Some` reports a byte at the subject's start
+    // (where `None` is due) and the wrong byte after a space, so the
+    // hook declines and the link disappears.
+    struct Www;
+    impl Extension for Www {
+        fn name(&self) -> &str {
+            "www"
+        }
+
+        fn inline_triggers(&self) -> &[u8] {
+            b"w"
+        }
+
+        fn inline_trigger(
+            &self,
+            ctx: &mut geist4_core::extension::InlineTriggerCtx<'_, '_, '_, '_>,
+        ) {
+            match ctx.preceding() {
+                None | Some(b' ') => ctx.emit_link(0, 3, "u".to_owned()),
+                _ => {}
+            }
+        }
+    }
+    let mut options = Options::new();
+    options.extension(Arc::new(Www));
+    assert_eq!(
+        render_with(&parse_with("www x\n", &options), &options),
+        "<p><a href=\"u\">www</a> x</p>\n"
+    );
+    assert_eq!(
+        render_with(&parse_with(" www x\n", &options), &options),
+        "<p><a href=\"u\">www</a> x</p>\n"
+    );
+    assert_eq!(
+        render_with(&parse_with("awww x\n", &options), &options),
+        "<p>awww x</p>\n"
+    );
+}
+
+// ==== line_prefix_spans_from_the_line_start_to_the_cursor ====
+#[test]
+fn line_prefix_spans_from_the_line_start_to_the_cursor() {
+    // kills: crates/geist4-core/src/inline/mod.rs:783:9: replace TriggerInner<'p, 'defs, 'a, 'ext>::line_prefix -> &'a[u8] with Vec::leak(Vec::new())
+    // kills: crates/geist4-core/src/inline/mod.rs:783:9: replace TriggerInner<'p, 'defs, 'a, 'ext>::line_prefix -> &'a[u8] with Vec::leak(vec![0])
+    // kills: crates/geist4-core/src/inline/mod.rs:783:9: replace TriggerInner<'p, 'defs, 'a, 'ext>::line_prefix -> &'a[u8] with Vec::leak(vec![1])
+    // kills: crates/geist4-core/src/inline/mod.rs:788:40: replace + with - in TriggerInner<'p, 'defs, 'a, 'ext>::line_prefix
+    // kills: crates/geist4-core/src/inline/mod.rs:788:40: replace + with * in TriggerInner<'p, 'defs, 'a, 'ext>::line_prefix
+    // The hook emits a link whose destination is the line prefix it was
+    // handed, so the slice reads straight off the link's url. The prefix
+    // must run from the start of the cursor's line — across a soft break
+    // too, and empty on the line's first byte — not from a neighbouring
+    // byte, and not a leaked constant.
+    struct Prefix;
+    impl Extension for Prefix {
+        fn name(&self) -> &str {
+            "prefix"
+        }
+
+        fn inline_triggers(&self) -> &[u8] {
+            b":"
+        }
+
+        fn inline_trigger(
+            &self,
+            ctx: &mut geist4_core::extension::InlineTriggerCtx<'_, '_, '_, '_>,
+        ) {
+            let url = String::from_utf8_lossy(ctx.line_prefix()).into_owned();
+            ctx.emit_link(0, 1, url);
+        }
+    }
+    let mut options = Options::new();
+    options.extension(Arc::new(Prefix));
+    let url = |src: &str, options: &Options| {
+        let doc = parse_with(src, options);
+        for &block in doc.arena.children(doc.root) {
+            if !matches!(doc.arena.kind(block), Node::Paragraph) {
+                continue;
+            }
+            for &kid in doc.arena.children(block) {
+                if let Node::Link(data) = doc.arena.kind(kid) {
+                    return data.url.to_string();
+                }
+            }
+        }
+        panic!("no link in {src}");
+    };
+    assert_eq!(url("ab:cd\n", &options), "ab");
+    assert_eq!(url("ab\ncd:ef\n", &options), "cd");
+    assert_eq!(url("ab\n:cd\n", &options), "");
+}
+
+// ==== bracket_content_reports_the_groups_text ====
+/// An extension that claims a bracket group under a kind name derived
+/// from the group's text content: `got-ab` for content "ab", `got-zz`
+/// for content "zz", and nothing otherwise.
+struct ContentGate;
+
+impl Extension for ContentGate {
+    fn name(&self) -> &str {
+        "content-gate"
+    }
+
+    fn inline_bracket(&self, ctx: &mut geist4_core::extension::InlineBracketCtx<'_, '_, '_, '_>) {
+        match ctx.content() {
+            Some("ab") => ctx.claim("got-ab".to_owned(), Vec::new()),
+            Some("zz") => ctx.claim("got-zz".to_owned(), Vec::new()),
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn bracket_content_reports_the_groups_text() {
+    let mut options = Options::new();
+    options.extension(Arc::new(ContentGate));
+    let doc = parse_with("x [ab] y [zz]\n", &options);
+    let kinds: Vec<String> = extension_nodes(&doc)
+        .into_iter()
+        .map(|(_, kind)| kind)
+        .collect();
+    assert_eq!(kinds, ["got-ab", "got-zz"], "kinds: {kinds:?}");
+}
+
+// ==== content_starts_with_gates_on_the_first_text ====
+/// An extension that claims only groups whose content starts with
+/// "ab".
+struct StartsWithGate;
+
+impl Extension for StartsWithGate {
+    fn name(&self) -> &str {
+        "starts-with-gate"
+    }
+
+    fn inline_bracket(&self, ctx: &mut geist4_core::extension::InlineBracketCtx<'_, '_, '_, '_>) {
+        if ctx.content_starts_with(b"ab") {
+            ctx.claim("sw-ab".to_owned(), Vec::new());
+        }
+    }
+}
+
+#[test]
+fn content_starts_with_gates_on_the_first_text() {
+    let mut options = Options::new();
+    options.extension(Arc::new(StartsWithGate));
+    let doc = parse_with("[abq] and [zz]\n", &options);
+    let kinds: Vec<String> = extension_nodes(&doc)
+        .into_iter()
+        .map(|(_, kind)| kind)
+        .collect();
+    assert_eq!(kinds, ["sw-ab"], "kinds: {kinds:?}");
+}
+
+// ==== opener_position_sits_just_past_the_bracket ====
+/// An extension that claims every group under a kind name carrying
+/// the opener's input position.
+struct OpenerSpot;
+
+impl Extension for OpenerSpot {
+    fn name(&self) -> &str {
+        "opener-spot"
+    }
+
+    fn inline_bracket(&self, ctx: &mut geist4_core::extension::InlineBracketCtx<'_, '_, '_, '_>) {
+        ctx.claim(format!("op-{}", ctx.opener_position()), Vec::new());
+    }
+}
+
+#[test]
+fn opener_position_sits_just_past_the_bracket() {
+    // The accessor's value feeds the link-start math
+    // `opener_position - 1`, so it is the byte just past the `[`: for
+    // "ab [cd]" the bracket sits at byte 3 and the accessor returns 4.
+    let mut options = Options::new();
+    options.extension(Arc::new(OpenerSpot));
+    let doc = parse_with("ab [cd]\n", &options);
+    let kinds: Vec<String> = extension_nodes(&doc)
+        .into_iter()
+        .map(|(_, kind)| kind)
+        .collect();
+    assert_eq!(kinds, ["op-4"], "kinds: {kinds:?}");
+}
+
+// ==== rest_of_line_runs_from_the_trigger_to_the_line_end ====
+/// An inline trigger that emits a link over "QXY" exactly when the
+/// rest of the line from the trigger position reads "QXY".
+struct LineEnd;
+
+impl Extension for LineEnd {
+    fn name(&self) -> &str {
+        "line-end"
+    }
+
+    fn inline_triggers(&self) -> &[u8] {
+        b"Q"
+    }
+
+    fn inline_trigger(&self, ctx: &mut geist4_core::extension::InlineTriggerCtx<'_, '_, '_, '_>) {
+        if ctx.rest_of_line() == b"QXY".as_slice() {
+            ctx.emit_link(0, 3, "u".to_owned());
+        }
+    }
+}
+
+#[test]
+fn rest_of_line_runs_from_the_trigger_to_the_line_end() {
+    let mut options = Options::new();
+    options.extension(Arc::new(LineEnd));
+    let doc = parse_with("goQXY\n", &options);
+    let html = render_with(&doc, &options);
+    assert_eq!(html, "<p>go<a href=\"u\">QXY</a></p>\n");
+}
+
+// ==== line_prefix_runs_from_the_line_start_to_the_trigger ====
+/// An inline trigger that emits a link over the trigger byte and the
+/// two bytes before it exactly when the line prefix reads "ab".
+struct LineStart;
+
+impl Extension for LineStart {
+    fn name(&self) -> &str {
+        "line-start"
+    }
+
+    fn inline_triggers(&self) -> &[u8] {
+        b"Q"
+    }
+
+    fn inline_trigger(&self, ctx: &mut geist4_core::extension::InlineTriggerCtx<'_, '_, '_, '_>) {
+        if ctx.line_prefix() == b"ab".as_slice() {
+            ctx.emit_link(2, 1, "u".to_owned());
+        }
+    }
+}
+
+#[test]
+fn line_prefix_runs_from_the_line_start_to_the_trigger() {
+    let mut options = Options::new();
+    options.extension(Arc::new(LineStart));
+    let doc = parse_with("abQ cd\n", &options);
+    let html = render_with(&doc, &options);
+    assert_eq!(html, "<p><a href=\"u\">abQ</a> cd</p>\n");
+}
+
+// ==== trigger_line_prefix_rewinds_to_the_line_start ====
+// kills: crates/geist4-core/src/inline/mod.rs:718:9: replace InlineTriggerCtx::line_prefix -> &'a [u8] with Vec::leak(vec![0])
+// kills: crates/geist4-core/src/inline/mod.rs:718:9: replace InlineTriggerCtx::line_prefix -> &'a [u8] with Vec::leak(vec![1])
+#[test]
+fn trigger_line_prefix_rewinds_to_the_line_start() {
+    // A scheme-gated extension: a ":" fires and links only when the
+    // bytes from the line start up to the cursor spell "http".
+    struct SchemeLink;
+    impl Extension for SchemeLink {
+        fn name(&self) -> &str {
+            "scheme-link"
+        }
+        fn inline_triggers(&self) -> &[u8] {
+            b":"
+        }
+        fn inline_trigger(
+            &self,
+            ctx: &mut geist4_core::extension::InlineTriggerCtx<'_, '_, '_, '_>,
+        ) {
+            let before = ctx.line_prefix();
+            if before == b"http" {
+                // Unwrite the scheme so the link spans "http:"; the
+                // scheme bytes are trailing text, so the rewind is
+                // legal here.
+                ctx.emit_link(before.len(), 1, "s".to_owned());
+            }
+        }
+    }
+    let mut options = Options::new();
+    options.extension(Arc::new(SchemeLink));
+    // The prefix excludes the cursor byte and runs back to the line
+    // start, so the link spans exactly "http:".
+    assert_eq!(
+        render_with(&parse_with("http:\n", &options), &options),
+        "<p><a href=\"s\">http:</a></p>\n"
+    );
+    // The newline bounds the view on the left: on the second line the
+    // prefix is just "http", not the previous line's "x\nhttp".
+    assert_eq!(
+        render_with(&parse_with("x\nhttp:\n", &options), &options),
+        "<p>x\n<a href=\"s\">http:</a></p>\n"
+    );
+    // A different prefix leaves the trigger byte as literal text.
+    assert_eq!(
+        render_with(&parse_with("go:\n", &options), &options),
+        "<p>go:</p>\n"
+    );
+}
+
+// ==== trigger_preceding_reports_the_byte_before_the_cursor ====
+// kills: crates/geist4-core/src/inline/mod.rs:724:9: replace InlineTriggerCtx::preceding -> Option<u8> with None
+// kills: crates/geist4-core/src/inline/mod.rs:724:9: replace InlineTriggerCtx::preceding -> Option<u8> with Some(0)
+// kills: crates/geist4-core/src/inline/mod.rs:724:9: replace InlineTriggerCtx::preceding -> Option<u8> with Some(1)
+#[test]
+fn trigger_preceding_reports_the_byte_before_the_cursor() {
+    // A gate that links "Z" only when nothing precedes it on the line
+    // or a space does.
+    struct SpaceGate;
+    impl Extension for SpaceGate {
+        fn name(&self) -> &str {
+            "space-gate"
+        }
+        fn inline_triggers(&self) -> &[u8] {
+            b"Z"
+        }
+        fn inline_trigger(
+            &self,
+            ctx: &mut geist4_core::extension::InlineTriggerCtx<'_, '_, '_, '_>,
+        ) {
+            match ctx.preceding() {
+                None | Some(b' ') => ctx.emit_link(0, 1, "u".to_owned()),
+                _ => {}
+            }
+        }
+    }
+    let mut options = Options::new();
+    options.extension(Arc::new(SpaceGate));
+    // At the very start of the line there is no preceding byte.
+    assert_eq!(
+        render_with(&parse_with("Zz\n", &options), &options),
+        "<p><a href=\"u\">Z</a>z</p>\n"
+    );
+    // After a space the preceding byte is that space.
+    assert_eq!(
+        render_with(&parse_with("a Zz\n", &options), &options),
+        "<p>a <a href=\"u\">Z</a>z</p>\n"
+    );
+    // Any other byte closes the gate.
+    assert_eq!(
+        render_with(&parse_with("aZz\n", &options), &options),
+        "<p>aZz</p>\n"
+    );
+}
+
+// ==== trigger_matches_stay_out_of_brackets ====
+// kills: crates/geist4-core/src/inline/mod.rs:732:9: replace InlineTriggerCtx::in_bracket -> bool with true
+// kills: crates/geist4-core/src/inline/mod.rs:732:9: replace InlineTriggerCtx::in_bracket -> bool with false
+#[test]
+fn trigger_matches_stay_out_of_brackets() {
+    // A bare-link extension that declines inside link or image
+    // brackets, the way an autolink must.
+    struct BareLink;
+    impl Extension for BareLink {
+        fn name(&self) -> &str {
+            "bare-link"
+        }
+        fn inline_triggers(&self) -> &[u8] {
+            b"Z"
+        }
+        fn inline_trigger(
+            &self,
+            ctx: &mut geist4_core::extension::InlineTriggerCtx<'_, '_, '_, '_>,
+        ) {
+            if !ctx.in_bracket() {
+                ctx.emit_link(0, 1, "u".to_owned());
+            }
+        }
+    }
+    let mut options = Options::new();
+    options.extension(Arc::new(BareLink));
+    // Outside brackets the bare link fires.
+    assert_eq!(
+        render_with(&parse_with("go Z now\n", &options), &options),
+        "<p>go <a href=\"u\">Z</a> now</p>\n"
+    );
+    // Inside an inline link the trigger declines and the bracket pair
+    // resolves as the ordinary link.
+    assert_eq!(
+        render_with(&parse_with("[Z](/u)\n", &options), &options),
+        "<p><a href=\"/u\">Z</a></p>\n"
+    );
+    // Inside an unresolved bracket group the content stays literal.
+    assert_eq!(
+        render_with(&parse_with("[Z]\n", &options), &options),
+        "<p>[Z]</p>\n"
+    );
+}
+
+// ==== trigger_unput_unwrites_trailing_text ====
+// kills: crates/geist4-core/src/inline/mod.rs:741:9: replace InlineTriggerCtx::unput -> () with ()
+#[test]
+fn trigger_unput_unwrites_trailing_text() {
+    // An extension that unwrites trailing text before the trigger byte
+    // and takes nothing else; the bytes it unwrites vanish.
+    struct Chop(usize);
+    impl Extension for Chop {
+        fn name(&self) -> &str {
+            "chop"
+        }
+        fn inline_triggers(&self) -> &[u8] {
+            b"Z"
+        }
+        fn inline_trigger(
+            &self,
+            ctx: &mut geist4_core::extension::InlineTriggerCtx<'_, '_, '_, '_>,
+        ) {
+            ctx.unput(self.0);
+        }
+    }
+    let mut options = Options::new();
+    // Unwriting within one cell shortens that cell: "cd" loses both
+    // bytes and the "!" text stays.
+    options.extension(Arc::new(Chop(2)));
+    assert_eq!(
+        render_with(&parse_with("ab!cdZe\n", &options), &options),
+        "<p>ab!Ze</p>\n"
+    );
+    // Unwriting across cells walks back and truncates the previous
+    // cell: "cd" empties and the "!" cell loses its byte.
+    let mut options = Options::new();
+    options.extension(Arc::new(Chop(3)));
+    assert_eq!(
+        render_with(&parse_with("ab!cdZe\n", &options), &options),
+        "<p>abZe</p>\n"
+    );
+}
+
+// ==== trigger_rest_of_line_reaches_the_line_end ====
+// kills: crates/geist4-core/src/inline/mod.rs:761:9: replace TriggerInner::rest_of_line -> &'a [u8] with Vec::leak(Vec::new())
+// kills: crates/geist4-core/src/inline/mod.rs:761:9: replace TriggerInner::rest_of_line -> &'a [u8] with Vec::leak(vec![0])
+// kills: crates/geist4-core/src/inline/mod.rs:761:9: replace TriggerInner::rest_of_line -> &'a [u8] with Vec::leak(vec![1])
+#[test]
+fn trigger_rest_of_line_reaches_the_line_end() {
+    // A link-ish extension that links when the rest of the line after
+    // the cursor is exactly "Zgo".
+    struct RestLink;
+    impl Extension for RestLink {
+        fn name(&self) -> &str {
+            "rest-link"
+        }
+        fn inline_triggers(&self) -> &[u8] {
+            b"Z"
+        }
+        fn inline_trigger(
+            &self,
+            ctx: &mut geist4_core::extension::InlineTriggerCtx<'_, '_, '_, '_>,
+        ) {
+            let rest = ctx.rest_of_line();
+            if rest == b"Zgo" {
+                ctx.emit_link(0, rest.len(), "u".to_owned());
+            }
+        }
+    }
+    let mut options = Options::new();
+    options.extension(Arc::new(RestLink));
+    // The view starts at the cursor (so it includes the trigger byte
+    // here) and ends at the newline: the link takes exactly "Zgo" and
+    // the next line stays plain text.
+    assert_eq!(
+        render_with(&parse_with("Zgo\nmore\n", &options), &options),
+        "<p><a href=\"u\">Zgo</a>\nmore</p>\n"
+    );
+    // A later line bounds the view at its own newline, not the
+    // paragraph's start or end.
+    assert_eq!(
+        render_with(&parse_with("x\nZgo\n", &options), &options),
+        "<p>x\n<a href=\"u\">Zgo</a></p>\n"
+    );
+    // A different rest leaves the trigger byte as literal text.
+    assert_eq!(
+        render_with(&parse_with("Zstop\n", &options), &options),
+        "<p>Zstop</p>\n"
+    );
+}
+
+// ==== inline_trigger_rest_of_line_stops_at_the_next_newline ====
+#[test]
+fn inline_trigger_rest_of_line_stops_at_the_next_newline() {
+    use geist4_core::extension::{Extension, InlineTriggerCtx, Options};
+    use geist4_core::parser::parse_with;
+
+    struct RestProbe(Mutex<Vec<String>>);
+
+    impl Extension for RestProbe {
+        fn name(&self) -> &str {
+            "rest-of-line-probe"
+        }
+
+        fn inline_triggers(&self) -> &[u8] {
+            b":"
+        }
+
+        fn inline_trigger(&self, ctx: &mut InlineTriggerCtx<'_, '_, '_, '_>) {
+            let rest = ctx.rest_of_line();
+            self.0
+                .lock()
+                .unwrap()
+                .push(String::from_utf8_lossy(rest).into_owned());
+        }
+    }
+
+    // A two-line paragraph's inline subject contains a literal '\n'
+    // where the second line joined the first, so rest_of_line() at the
+    // ':' trigger must stop at that newline and must start at the
+    // cursor, i.e. include the trigger byte itself: ":cd".
+    let src = "para\n\nab:cd\nef\n";
+    let probe = Arc::new(RestProbe(Mutex::new(Vec::new())));
+    let mut options = Options::new();
+    options.extension(probe.clone());
+    let _doc = parse_with(src, &options);
+    assert_eq!(*probe.0.lock().unwrap(), [":cd".to_owned()]);
+}
+
+// ==== inline_trigger_line_prefix_excludes_the_preceding_newline ====
+#[test]
+fn inline_trigger_line_prefix_excludes_the_preceding_newline() {
+    use geist4_core::extension::{Extension, InlineTriggerCtx, Options};
+    use geist4_core::parser::parse_with;
+
+    struct PrefixProbe(Mutex<Vec<String>>);
+
+    impl Extension for PrefixProbe {
+        fn name(&self) -> &str {
+            "line-prefix-probe"
+        }
+
+        fn inline_triggers(&self) -> &[u8] {
+            b":"
+        }
+
+        fn inline_trigger(&self, ctx: &mut InlineTriggerCtx<'_, '_, '_, '_>) {
+            let prefix = ctx.line_prefix();
+            self.0
+                .lock()
+                .unwrap()
+                .push(String::from_utf8_lossy(prefix).into_owned());
+        }
+    }
+
+    // In subject "ab\ncd:ef" the prefix before the ':' trigger on the
+    // second line is "cd"; it must not begin with the '\n' that joined
+    // the paragraph lines.
+    let src = "para\n\nab\ncd:ef\n";
+    let probe = Arc::new(PrefixProbe(Mutex::new(Vec::new())));
+    let mut options = Options::new();
+    options.extension(probe.clone());
+    let _doc = parse_with(src, &options);
+    assert_eq!(*probe.0.lock().unwrap(), ["cd".to_owned()]);
+}
+
+// ==== inline_trigger_in_bracket_is_false_outside_brackets ====
+#[test]
+fn inline_trigger_in_bracket_is_false_outside_brackets() {
+    use geist4_core::extension::{Extension, InlineTriggerCtx, Options};
+    use geist4_core::parser::parse_with;
+
+    struct BracketProbe(Mutex<Vec<bool>>);
+
+    impl Extension for BracketProbe {
+        fn name(&self) -> &str {
+            "bracket-probe"
+        }
+
+        fn inline_triggers(&self) -> &[u8] {
+            b"w"
+        }
+
+        fn inline_trigger(&self, ctx: &mut InlineTriggerCtx<'_, '_, '_, '_>) {
+            self.0.lock().unwrap().push(ctx.in_bracket());
+        }
+    }
+
+    // A `w` trigger in an ordinary paragraph is not inside a bracket
+    // link, so in_bracket() must report false.
+    let src = "para\n\nw\n";
+    let probe = Arc::new(BracketProbe(Mutex::new(Vec::new())));
+    let mut options = Options::new();
+    options.extension(probe.clone());
+    let _doc = parse_with(src, &options);
+    assert_eq!(*probe.0.lock().unwrap(), [false]);
+}
+
+// ==== inline_trigger_in_bracket_is_true_inside_a_link_label ====
+#[test]
+fn inline_trigger_in_bracket_is_true_inside_a_link_label() {
+    use geist4_core::extension::{Extension, InlineTriggerCtx, Options};
+    use geist4_core::parser::parse_with;
+
+    struct BracketProbe(Mutex<Vec<bool>>);
+
+    impl Extension for BracketProbe {
+        fn name(&self) -> &str {
+            "bracket-probe"
+        }
+
+        fn inline_triggers(&self) -> &[u8] {
+            b"w"
+        }
+
+        fn inline_trigger(&self, ctx: &mut InlineTriggerCtx<'_, '_, '_, '_>) {
+            self.0.lock().unwrap().push(ctx.in_bracket());
+        }
+    }
+
+    // Inside "[a w](u)" the label is parsed while the '[' bracket is
+    // open, so a trigger inside the label must see in_bracket() == true.
+    let src = "para\n\n[a w](u)\n";
+    let probe = Arc::new(BracketProbe(Mutex::new(Vec::new())));
+    let mut options = Options::new();
+    options.extension(probe.clone());
+    let _doc = parse_with(src, &options);
+    assert_eq!(*probe.0.lock().unwrap(), [true]);
+}
+
+// ==== inline_trigger_unput_on_an_entity_cell_keeps_the_remaining_span ====
+#[test]
+fn inline_trigger_unput_on_an_entity_cell_keeps_the_remaining_span() {
+    use geist4_core::arena::NodeId;
+    use geist4_core::extension::{Extension, InlineTriggerCtx, Options};
+    use geist4_core::node::Node;
+    use geist4_core::parser::parse_with;
+
+    struct RewindOne;
+
+    impl Extension for RewindOne {
+        fn name(&self) -> &str {
+            "rewind-one"
+        }
+
+        fn inline_triggers(&self) -> &[u8] {
+            b"Z"
+        }
+
+        fn inline_trigger(&self, ctx: &mut InlineTriggerCtx<'_, '_, '_, '_>) {
+            ctx.unput(1);
+        }
+    }
+
+    // In subject "OK&amp;Zq" (paragraph starts at byte 6) the entity
+    // cell holds "&" over the 5-byte source span "&amp;" spanning
+    // [2,7). unput(1) at the Z trigger must take the equal-length
+    // branch of the walk: the emptied cell keeps a span with the
+    // remaining entity width [2,6), so following spans stay aligned.
+    let src = "para\n\nOK&amp;Zq\n";
+    let mut options = Options::new();
+    options.extension(Arc::new(RewindOne));
+    let doc = parse_with(src, &options);
+    let para = *doc
+        .arena
+        .children(doc.root)
+        .iter()
+        .rev()
+        .find(|&&id| matches!(doc.arena.kind(id), Node::Paragraph))
+        .expect("a paragraph");
+    let kids = doc.arena.children(para);
+    assert_eq!(kids.len(), 3, "paragraph children: {kids:?}");
+    let span = |id: NodeId| {
+        let s = doc.arena.span(id);
+        (s.start, s.end)
+    };
+    assert!(matches!(doc.arena.kind(kids[0]), Node::Text(t) if t.as_ref() == "OK"));
+    assert_eq!(span(kids[0]), (6, 8));
+    assert!(
+        matches!(doc.arena.kind(kids[1]), Node::Text(t) if t.is_empty()),
+        "the entity cell is emptied"
+    );
+    assert_eq!(
+        span(kids[1]),
+        (8, 12),
+        "the emptied entity cell keeps its remaining span width"
+    );
+    assert!(matches!(doc.arena.kind(kids[2]), Node::Text(t) if t.as_ref() == "Zq"));
+    assert_eq!(span(kids[2]), (13, 15));
+}
+
+// ==== inline_trigger_unput_walks_back_across_cells ====
+#[test]
+fn inline_trigger_unput_walks_back_across_cells() {
+    use geist4_core::arena::NodeId;
+    use geist4_core::extension::{Extension, InlineTriggerCtx, Options};
+    use geist4_core::node::Node;
+    use geist4_core::parser::parse_with;
+
+    struct RewindSeven;
+
+    impl Extension for RewindSeven {
+        fn name(&self) -> &str {
+            "rewind-seven"
+        }
+
+        fn inline_triggers(&self) -> &[u8] {
+            b"Z"
+        }
+
+        fn inline_trigger(&self, ctx: &mut InlineTriggerCtx<'_, '_, '_, '_>) {
+            ctx.unput(7);
+        }
+    }
+
+    // In subject "abcdef&amp;xyZq" (paragraph starts at byte 6) the
+    // cells at hook time are "abcdef" [0,6), the "&amp;" entity [6,11)
+    // and "xy" [11,13). unput(7) must empty "xy" and the entity and
+    // truncate "abcdef" to "ab" with span [0,2): the remaining-byte
+    // counter shrinks by each cell's text length as the walk moves
+    // back, and a cell shorter than the remainder is emptied with its
+    // span collapsed to its start.
+    let src = "para\n\nabcdef&amp;xyZq\n";
+    let mut options = Options::new();
+    options.extension(Arc::new(RewindSeven));
+    let doc = parse_with(src, &options);
+    let para = *doc
+        .arena
+        .children(doc.root)
+        .iter()
+        .rev()
+        .find(|&&id| matches!(doc.arena.kind(id), Node::Paragraph))
+        .expect("a paragraph");
+    let kids = doc.arena.children(para);
+    assert_eq!(kids.len(), 4, "paragraph children: {kids:?}");
+    let span = |id: NodeId| {
+        let s = doc.arena.span(id);
+        (s.start, s.end)
+    };
+    assert!(matches!(doc.arena.kind(kids[0]), Node::Text(t) if t.as_ref() == "ab"));
+    assert_eq!(span(kids[0]), (6, 8));
+    assert!(matches!(doc.arena.kind(kids[1]), Node::Text(t) if t.is_empty()));
+    assert_eq!(span(kids[1]), (12, 12), "emptied entity maps to its start");
+    assert!(matches!(doc.arena.kind(kids[2]), Node::Text(t) if t.is_empty()));
+    assert_eq!(span(kids[2]), (17, 17), "emptied run maps to its start");
+    assert!(matches!(doc.arena.kind(kids[3]), Node::Text(t) if t.as_ref() == "Zq"));
+    assert_eq!(span(kids[3]), (19, 21));
+}
+
+// ==== inline_trigger_emit_link_text_covers_the_span_from_rewind ====
+#[test]
+fn inline_trigger_emit_link_text_covers_the_span_from_rewind() {
+    use geist4_core::arena::NodeId;
+    use geist4_core::extension::{Extension, InlineTriggerCtx, Options};
+    use geist4_core::node::Node;
+    use geist4_core::parser::parse_with;
+
+    struct SpanLink;
+
+    impl Extension for SpanLink {
+        fn name(&self) -> &str {
+            "span-link"
+        }
+
+        fn inline_triggers(&self) -> &[u8] {
+            b"Z"
+        }
+
+        fn inline_trigger(&self, ctx: &mut InlineTriggerCtx<'_, '_, '_, '_>) {
+            ctx.emit_link(2, 1, "u".to_owned());
+        }
+    }
+
+    // In subject "abcdefgZq" (paragraph starts at byte 6) emit_link
+    // (rewind 2, take 1) at the Z trigger unwrites the two bytes
+    // before the cursor into a final "abcde" text cell [0,5) mapped to
+    // (6,11), then emits a link spanning [5,8) mapped to (11,14) whose
+    // child text is exactly the span's bytes "fgZ", leaving "q" [8,9)
+    // mapped to (14,15) as the tail.
+    let src = "para\n\nabcdefgZq\n";
+    let mut options = Options::new();
+    options.extension(Arc::new(SpanLink));
+    let doc = parse_with(src, &options);
+    let para = *doc
+        .arena
+        .children(doc.root)
+        .iter()
+        .rev()
+        .find(|&&id| matches!(doc.arena.kind(id), Node::Paragraph))
+        .expect("a paragraph");
+    let kids = doc.arena.children(para);
+    assert_eq!(kids.len(), 3, "paragraph children: {kids:?}");
+    let span = |id: NodeId| {
+        let s = doc.arena.span(id);
+        (s.start, s.end)
+    };
+    assert!(matches!(doc.arena.kind(kids[0]), Node::Text(t) if t.as_ref() == "abcde"));
+    assert_eq!(span(kids[0]), (6, 11));
+    assert!(matches!(doc.arena.kind(kids[1]), Node::Link(_)));
+    assert_eq!(span(kids[1]), (11, 14));
+    let link_kids = doc.arena.children(kids[1]);
+    assert_eq!(link_kids.len(), 1);
+    assert!(
+        matches!(doc.arena.kind(link_kids[0]), Node::Text(t) if t.as_ref() == "fgZ"),
+        "the link text is the emitted span's bytes"
+    );
+    assert!(matches!(doc.arena.kind(kids[2]), Node::Text(t) if t.as_ref() == "q"));
+    assert_eq!(span(kids[2]), (14, 15));
 }
