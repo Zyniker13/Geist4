@@ -120,4 +120,13 @@ fn every_dangerous_scheme_is_suppressed_in_links_and_images() {
         "<p><img src=\"data:image/gif;base64,AA\" alt=\"i\" /></p>\n",
         "the allow-listed image data schemes must keep their src"
     );
+
+    assert_eq!(
+        render_with(
+            &parse_with("[a](https://example.com/docs/page)\n", &options),
+            &options
+        ),
+        "<p><a href=\"https://example.com/docs/page\">a</a></p>\n",
+        "a safe url keeps its href"
+    );
 }
