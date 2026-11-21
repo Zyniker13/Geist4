@@ -296,3 +296,38 @@ fn self_closing_inline_tag_alone_starts_an_html_block() {
         "a self-closing tag alone on the line is a kind-7 HTML block"
     );
 }
+
+/// `<zz _x>`: `zz` is not on the block-tag list, so only kind 7 can claim
+/// the line, via `open_tag_len`'s attribute walk. An attribute name may
+/// start with `_` (or `:`); `attribute_len`'s first-character gate must
+/// accept the disjunction, not require both.
+#[test]
+// kills: crates/geist4-core/src/parser/leaf.rs:429:58: replace || with && in attribute_len
+fn underscore_leading_attribute_name_opens_kind7_block() {
+    // `attribute_len` sees `_x` at the position after `zz`; with the gate
+    // turned into a conjunction no byte is both `_` and `:`, so the walk
+    // stops before the attribute, the tag reads as incomplete, and the
+    // line degrades to an escaped paragraph.
+    assert_eq!(
+        html("<zz _x>"),
+        "<zz _x>",
+        "an underscore-leading attribute name makes `<zz _x>` a kind-7 raw-HTML block"
+    );
+}
+
+/// A backslash escape in the fence info string (`~~~a\!b`) must resolve:
+/// `unescape` copies `!` and steps past both the backslash and it.
+#[test]
+// kills: crates/geist4-core/src/parser/leaf.rs:895:15: replace += with -= in unescape
+fn backslash_escape_in_fence_info_string() {
+    // With the step walked backwards the info string collapses to
+    // `language-a!`: the escape pair is re-read after emitting `!`, the
+    // `b` never lands in the class, and the closing fence no longer
+    // matches the mutated opener. Debug builds panic on the underflow
+    // instead; either outcome fails the test.
+    assert_eq!(
+        html("~~~a\\!b\nx\n~~~"),
+        "<pre><code class=\"language-a!b\">x\n</code></pre>",
+        "backslash escapes in the info string must reach the class attribute"
+    );
+}
