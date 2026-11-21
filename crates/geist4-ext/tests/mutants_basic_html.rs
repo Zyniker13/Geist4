@@ -129,4 +129,28 @@ fn every_dangerous_scheme_is_suppressed_in_links_and_images() {
         "<p><a href=\"https://example.com/docs/page\">a</a></p>\n",
         "a safe url keeps its href"
     );
+    // kills: crates/geist4-core/src/basic_html.rs:560:40 (&& -> ||) and
+    // :560:61 (== -> !=) in is_dangerous_url: under 560:40 any data:image/
+    // suffix passes the extension check, under 560:61 a non-allowed
+    // extension flips the per-extension compare; both keep the svg src
+    // that pristine must suppress.
+    assert_eq!(
+        render_with(
+            &parse_with("![i](data:image/svg+xml;base64,AA)\n", &options),
+            &options
+        ),
+        "<p><img src=\"\" alt=\"i\" /></p>\n",
+        "svg image data urls are outside the allow-list and must be suppressed"
+    );
 }
+
+// Survivor rationale (equivalent mutants, verified by inspection):
+// - :116:21 `<` -> `<=` in push_filtered: the loop runs over an empty
+//   literal on the non-extension path, so the off-by-one cannot execute.
+// - :225:13 delete Node::Document arm / :247:13 delete Node::Item arm:
+//   the guards above the match make these arms unreachable in the block
+//   renderer (documents and items route through their own entry points).
+// - :318:13 delete Node::Text arm: the catch-all `_ => {}` below it is
+//   behaviorally identical for Text (block-level text renders nothing);
+//   a run-6 catch was a timing flake, converged reruns miss it.
+//   (caught-once flake; see TESTING.md convergence notes)
