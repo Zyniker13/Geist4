@@ -241,3 +241,58 @@ fn attribute_scan_convergence_shapes() {
     // A value-less `=` is still a value (empty unquoted).
     assert_eq!(html("<span a=b c=>"), "<span a=b c=>");
 }
+
+// ---------------------------------------------------------------------------
+// Kind guards: an HTML block must start only when the scanner's kind rules
+// accept the line — a false positive must not swallow following lines.
+// ---------------------------------------------------------------------------
+
+/// A tag-like name that merely *extends* a kind-1 name must not start a
+/// kind-1 HTML block: `<premature>` is not `<pre` followed by whitespace.
+#[test]
+fn premature_kind1_name_is_a_paragraph() {
+    // kills: crates/geist4-core/src/parser/leaf.rs:279:29: replace is_html_space(b) guard with true
+    assert_eq!(
+        html("<premature> x"),
+        "<p><premature> x</p>",
+        "only a real kind-1 tag plus whitespace, '>', or end-of-line starts the block"
+    );
+}
+
+/// `<div/>` is a kind-6 block tag start, and kind 6 may interrupt a
+/// paragraph; kind 7 (a tag alone on a line) may not.
+#[test]
+fn self_closing_block_tag_interrupts_a_paragraph() {
+    // kills: crates/geist4-core/src/parser/leaf.rs:334:23 (guard -> false),
+    // :334:41 (+ with -, + with *): the `/>` arm of block_tag_at must fire.
+    assert_eq!(
+        html("para\n<div/>"),
+        "<p>para</p>\n<div/>",
+        "a self-closing block tag after a paragraph starts a kind-6 HTML block"
+    );
+}
+
+/// `</span >` is a complete closing tag followed by spaces: span is not a
+/// block tag, so only kind 7 can claim it, via the closing-tag space walk.
+#[test]
+fn closing_tag_with_trailing_space_starts_an_html_block() {
+    // kills: crates/geist4-core/src/parser/leaf.rs:369:13: replace += with -= in closing_tag_len
+    assert_eq!(
+        html("</span >"),
+        "</span >",
+        "a complete closing tag plus trailing spaces alone on the line is kind 7"
+    );
+}
+
+/// `<br/>` is a complete self-closing open tag alone on the line: kind 7
+/// via the open-tag `/>` path.
+#[test]
+fn self_closing_inline_tag_alone_starts_an_html_block() {
+    // kills: crates/geist4-core/src/parser/leaf.rs:397:57 (+ with -) and
+    // :398:29 (+ with -) in open_tag_len
+    assert_eq!(
+        html("<br/>"),
+        "<br/>",
+        "a self-closing tag alone on the line is a kind-7 HTML block"
+    );
+}
