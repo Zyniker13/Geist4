@@ -571,7 +571,7 @@ fn child_of_kind(
         .children(id)
         .iter()
         .copied()
-        .find(|child| want(&doc.arena.kind(*child)))
+        .find(|child| want(doc.arena.kind(*child)))
 }
 
 /// Slices `src` at the span of `id`.
