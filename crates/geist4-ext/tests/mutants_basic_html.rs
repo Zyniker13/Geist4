@@ -23,3 +23,62 @@ fn tagfilter_escapes_disallowed_tag_starts() {
         "each disallowed tag start's '<' must become &lt;, in order, once"
     );
 }
+
+#[test]
+fn dangerous_link_urls_are_suppressed() {
+    // kills: crates/geist4-core/src/basic_html.rs:553:9 (is_dangerous_url -> false),
+    // the scheme-list || -> && mutants, the == -> != and && -> || in has_prefix,
+    // and the !is_empty && !is_dangerous_url && -> || pair in inline_child
+    let options = Options::new();
+    assert_eq!(
+        render_with(
+            &parse_with("[a](javascript:alert(1))\n", &options),
+            &options
+        ),
+        "<p><a href=\"\">a</a></p>\n",
+        "a javascript: destination must leave an empty href"
+    );
+}
+
+#[test]
+fn safe_data_image_urls_are_kept() {
+    // kills: crates/geist4-core/src/basic_html.rs:557:29: replace >= with < in is_dangerous_url
+    let options = Options::new();
+    assert_eq!(
+        render_with(
+            &parse_with("![i](data:image/png;base64,AAAA)\n", &options),
+            &options
+        ),
+        "<p><img src=\"data:image/png;base64,AAAA\" alt=\"i\" /></p>\n",
+        "the allow-listed image data schemes must keep their src"
+    );
+}
+
+#[test]
+fn short_and_plain_urls_render_normally() {
+    // kills: crates/geist4-core/src/basic_html.rs:554:66: replace == with != in is_dangerous_url
+    // and the && -> || in has_prefix (a short url must not panic).
+    let options = Options::new();
+    assert_eq!(
+        render_with(&parse_with("[a](x)\n", &options), &options),
+        "<p><a href=\"x\">a</a></p>\n"
+    );
+    assert_eq!(
+        render_with(
+            &parse_with("[a](https://example.com)\n", &options),
+            &options
+        ),
+        "<p><a href=\"https://example.com\">a</a></p>\n"
+    );
+}
+
+#[test]
+fn image_alt_text_includes_code_spans() {
+    // kills: crates/geist4-core/src/basic_html.rs:538:17: delete match arm Node::CodeSpan(text) in plain_text
+    let options = Options::new();
+    assert_eq!(
+        render_with(&parse_with("![a `b` c](x)\n", &options), &options),
+        "<p><img src=\"x\" alt=\"a b c\" /></p>\n",
+        "the alt text must include the code span's text"
+    );
+}
