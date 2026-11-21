@@ -68,7 +68,10 @@ fn table_frame_rows_build_a_full_table() {
 fn tasklist_marker_becomes_a_checkbox() {
     // kills: crates/geist4-core/src/parser/mod.rs:377:9 (consume -> ()), :384:9
     // (raw_line -> leak of [] / [0] / [1]): the hook must see the real line
-    // bytes and the marker must be consumed before the item text.
+    // bytes and the marker must be consumed before the item text. The same
+    // input also kills the same-shaped crates/geist4-core/src/extension.rs
+    // mutants: 586:9 (consume -> ()), 596:11 (raw_line -> leak of [] / [0] /
+    // [1]), and 603:11 (container_node -> None).
     let doc = parse_with("- [ ] foo\n", &options());
     assert_eq!(
         render_with(&doc, &options()),
