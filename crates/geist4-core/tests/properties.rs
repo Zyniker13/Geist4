@@ -56,9 +56,19 @@ proptest! {
             "p", "em", "strong", "li", "ul", "ol", "blockquote",
             "h1", "h2", "h3", "h4", "h5", "h6",
         ] {
-            let open = format!("<{tag}>");
+            // Any of these tags may carry attributes on its opening tag
+            // (ordered lists emit ` start="n"`), so openings are matched
+            // by name and boundary, like anchors below.
+            let pat = format!("<{tag}");
             let close = format!("</{tag}>");
-            let opens = out.matches(&open).count();
+            let opens = out
+                .match_indices(&pat)
+                .filter(|(i, _)| {
+                    let rest = &out[*i + pat.len()..];
+                    rest.starts_with('>')
+                        || rest.starts_with([' ', '\t', '\n', '\r'])
+                })
+                .count();
             let closes = out.matches(&close).count();
             let message = format!("unbalanced <{tag}> in {out}");
             prop_assert_eq!(opens, closes, "{}", message);
@@ -93,6 +103,19 @@ proptest! {
 fn autolink_anchor_tags_balance() {
     let out = parse_and_render("<AA:>");
     assert_eq!(out, "<p><a href=\"AA:\">AA:</a></p>\n");
+}
+
+/// The renderer emits ` start="n"` on ordered lists whose first number
+/// is not 1. The tag-balance property once counted only literal `<ol>`
+/// openings and failed on pristine output for such lists; openings are
+/// now matched by name and boundary.
+#[test]
+fn ordered_list_start_attribute_renders() {
+    assert_eq!(
+        parse_and_render("2."),
+        "<ol start=\"2\">\n<li></li>\n</ol>\n"
+    );
+    assert_eq!(parse_and_render("1. x"), "<ol>\n<li>x</li>\n</ol>\n");
 }
 
 /// Every node's span lies inside the input, and every non-empty child
