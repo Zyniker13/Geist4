@@ -82,3 +82,36 @@ fn image_alt_text_includes_code_spans() {
         "the alt text must include the code span's text"
     );
 }
+
+#[test]
+fn every_dangerous_scheme_is_suppressed_in_links_and_images() {
+    // kills: the remaining is_dangerous_url mutants: each scheme-list
+    // || -> && position is exposed by the scheme it guards (vbscript:,
+    // file:, data:), the == -> != in has_prefix by the https url, and the
+    // image-path && -> || in inline_child by the javascript image.
+    let options = Options::new();
+    for (url, kind) in [
+        ("vbscript:run", "link"),
+        ("file:///etc/hosts", "link"),
+        ("data:text/html,hi", "link"),
+        ("javascript:alert(1)", "image"),
+    ] {
+        let src = match kind {
+            "link" => format!("[a]({url})\n"),
+            _ => format!("![i]({url})\n"),
+        };
+        let html = render_with(&parse_with(&src, &options), &options);
+        assert!(
+            !html.contains(&url),
+            "{kind} destination {url} must be suppressed, got {html}"
+        );
+    }
+    assert_eq!(
+        render_with(
+            &parse_with("![i](data:image/gif;base64,AA)\n", &options),
+            &options
+        ),
+        "<p><img src=\"data:image/gif;base64,AA\" alt=\"i\" /></p>\n",
+        "the allow-listed image data schemes must keep their src"
+    );
+}
