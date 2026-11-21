@@ -271,3 +271,55 @@ fn remove_child_clears_the_parent_of_a_mid_tree_node() {
 // emphasis_families_scale_linearly's linearity ratio) flake under
 // mutation-run load. Those catches are timing artifacts, not behavioral
 // kills — in the run logs the only failing test is the timing one.
+//
+// Survivors from the 2026-11-20 small-file batch run (unicode, fold,
+// entities, arena, cursor, textmap, node, span, debug, problems), triaged
+// after the kill tests above landed. Equivalents first, then the
+// hard-to-observe tail.
+//
+// crates/geist4-core/src/arena.rs:217:28: replace == with != in Arena<'a>::insert_child
+//   Same capacity-heuristic gate as push_child's (135:28), on the insert
+//   path: flipping it only changes when the one-time reserve fires.
+//
+// crates/geist4-core/src/arena.rs:250:31: replace > with >= in Arena<'a>::clear_parent
+//   The guard `parents.len() > child.0` is always true when reached:
+//   `set_parent` sized the table past the child's id before it could be
+//   detached, and nothing truncates the table. `>` and `>=` agree on
+//   every reachable state.
+//
+// crates/geist4-core/src/inline/entities.rs:31:13: delete match arm b' ' in scan_entity
+//   The space arm is an early exit: a name scan that hits a space can
+//   only end in a lookup miss (no entity name contains a space), which
+//   is `None` either way.
+//
+// crates/geist4-core/src/inline/entities.rs:72:72: replace || with && in scan_numeric_entity
+//   The third remap clause (`codepoint >= 0x110_000`) is redundant: the
+//   scan loop clamps the code point at exactly 0x110_000, and
+//   `char::from_u32(0x110_000)` is `None`, which the `unwrap_or` maps to
+//   U+FFFD — the same character the clause would have produced.
+//
+// crates/geist4-core/src/parser/cursor.rs advance_bytes / skip_up_to_cols tail
+//   (153:36 == -> !=, 154:38 - -> /, 154:49 % -> +, 155:26 +12: 156:26,
+//   159:26, 160:26 += -> *=, 222:47 % -> /, 228:30 -= -> +=):
+//   `advance_bytes` runs only under hooks that consume a matched marker
+//   by byte length (`seek_content`); a tab can sit inside such a run
+//   only when an extension's own marker contains one — no built-in
+//   scanner's marker can, because they all stop at spaces and tabs. The
+//   mis-accounted column then only shifts column bookkeeping inside
+//   that same marker match. `skip_up_to_cols`'s two mutants need a tab
+//   landing at a deep container boundary (col >= 4 inside the skip),
+//   which no spec-suite input reaches. Killing these needs a custom
+//   extension with a tab inside its matched marker; documented as
+//   hard-to-observe rather than equivalent.
+//
+// crates/geist4-core/src/parser/textmap.rs shift/line_len_at tail
+//   (143:51 > -> ==, 145:36 - -> /, 147:37 -= -> +=, 149:40 - -> +,
+//   150:57 + -> -, 166:19 -= -> +=, 175:31 - -> +):
+//   `shift` runs when leading reference definitions are consumed. Its
+//   straddling-anchor repair branch (the cut falling inside a line,
+//   with tab and NUL remap arithmetic) needs a consumed prefix cutting
+//   through a joined line carrying a tab span or NUL map; every
+//   reference-definition cut in the suite lands on a line boundary, so
+//   the branch's arithmetic never evaluates. Documented as
+//   hard-to-observe; a kill would need a reference definition glued to
+//   a tab- or NUL-bearing line and a consumed prefix inside it.
