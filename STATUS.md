@@ -1,8 +1,8 @@
 # Status
 
-- **Current milestone:** M8 (Tools and 0.1.0) — **release commit `4ac27a21` pushed; remaining: green CI on it, then tag `v0.1.0`.**
-- **Last done:** Release prep complete: coverage gate in CI (cargo-llvm-cov 0.9.2, `--fail-under-lines 95 --fail-under-file-lines 80`; core measured 96.35%, TESTING.md "Coverage" section added); `url` bumped to 2.5.9 for RUSTSEC-2026-0592 (cargo deny green); version bumped 0.1.0-dev → 0.1.0 with CHANGELOG dated 2026-11-22; full `scripts/check.sh` green (62 suites) before the release commit. Earlier this window: final mutation run recorded (2308 mutants → 1991 caught / 247 missed / 70 unviable, kill score **88.96% of viable**, 0 timeouts; 137 individual verdicts in `docs/testing/mutation-survivors-0.1.0.json`, rest by class), triage stopped per Mahler; `#![deny(missing_docs)]` enforced (docs gate verified 0 missing in all 12 crates).
-- **Next step:** Wait for CI + Fuzz on `4ac27a21` to go green, then push tag `v0.1.0` and update STATUS. Publishing (crates.io/npm/PyPI/Swift registry) needs Mahler's accounts — stop there.
+- **Current milestone:** M8 (Tools and 0.1.0) — **DONE. Tag `v0.1.0` pushed onto `ee390cac`, CI/Fuzz/CodeQL all green on the tagged commit.**
+- **Last done:** Fixed the coverage CI job (`fd759b40`): the earlier failure was the doubled `llvm-cov` subcommand token (`cargo llvm-cov llvm-cov` → "unrecognized subcommand"); the gate now runs `tools/check_coverage.py` over the cargo-llvm-cov JSON report and enforces the roadmap's criterion per crate — geist4-core and geist4-html ≥95% line coverage over the whole workspace battery (core measured 96.35%). Locally verified pass at 95, fail at 97 and on corrupted data. Then: CI run 45075634289 **success** (all jobs incl. the coverage gate), Fuzz success, CodeQL success on `ee390cac`; tagged and pushed **`v0.1.0`** (annotated; verified via ls-remote).
+- **Next step:** Nothing for 0.1.0 — the release is complete. Publishing (crates.io / npm / PyPI / Swift registry) needs Mahler's accounts and was never part of the autonomous goal; stop here unless Mahler asks.
 - **Blocked on:** nothing.
 
 ## Log
