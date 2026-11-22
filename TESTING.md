@@ -76,8 +76,79 @@ learned edges. `tests/differential.rs` runs the entire seed set against
 cmark 0.31.2 on every `cargo test`, byte-identical output required, so
 fuzzer-found inputs become a permanent differential fixture.
 
-Document each other command here as it exists (benchmarks, mutation
-testing), with the time it takes.
+### Mutation testing
+
+`cargo-mutants` (27.1.0) mutates the five core source files that carry
+the parsing and rendering logic — `inline/mod.rs`, `parser/mod.rs`,
+`parser/leaf.rs`, `extension.rs`, `basic_html.rs` — and runs the full
+test battery of `geist4-core` and `geist4-ext` against each mutant
+(`--test-package geist4-core --test-package geist4-ext`: the
+extension-driven kill tests live in `geist4-ext`, so they must be in
+scope). The policy is decision 0040: runs are serialized one at a time,
+the wrapper clamps `--jobs 2 --timeout 60` and kills any test process
+above 6 GB (the machine is shared), timeouts are treated as a hang
+class, and every survivor gets a KILLABLE or EQUIVALENT verdict. The
+kill tests themselves live in `crates/geist4-core/tests/mutants_*.rs`
+and `crates/geist4-ext/tests/mutants_*.rs`; each carries a `// kills:`
+comment naming its targets and asserts spec-correct behavior, never
+"mutant dies" as such.
+
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+cargo mutants mutants \
+    --file crates/geist4-core/src/inline/mod.rs \
+    --file crates/geist4-core/src/parser/mod.rs \
+    --file crates/geist4-core/src/parser/leaf.rs \
+    --file crates/geist4-core/src/extension.rs \
+    --file crates/geist4-core/src/basic_html.rs \
+    --test-package geist4-core --test-package geist4-ext \
+    --output mutants-out/final   # ~2 h wall clock
+```
+
+Release results (2026-11-22, working tree at the 0.1.0 content, pinned
+proptest seed per decision 0041):
+
+| Mutants | Caught | Missed | Unviable | Score (viable) |
+| --- | --- | --- | --- | --- |
+| 2308 | 1991 | 247 | 70 | **88.96%** (1991 of 2238) |
+
+Per file: `inline/mod.rs` 124 missed, `parser/mod.rs` 76,
+`parser/leaf.rs` 33, `extension.rs` 12, `basic_html.rs` 2. Zero
+timeouts: the parser-loop hang class that earlier runs excluded by name
+(now-retired `.cargo/mutants.toml` excludes) completes in seconds after
+the M4 performance work, so the score needs no hang-class footnote.
+"Unviable" mutants do not compile and test nothing.
+
+The 247 survivors, explained:
+
+- **137 have an individual verdict** from per-mutant analysis (80
+  KILLABLE — a test could distinguish them, with 32 concrete kill-test
+  candidates drafted; 57 EQUIVALENT — behaviorally identical on every
+  reachable input, each with a dataflow rationale in its record). The
+  full per-mutant verdicts and candidates are checked in at
+  `docs/testing/mutation-survivors-0.1.0.json`.
+- **The remaining 110 are explained by mutation class**, which the run
+  data supports directly: 69 arithmetic-op swaps, 61 comparison-op
+  swaps, 50 compound-assign swaps, 17 boolean-op swaps, 8 match-guard
+  swaps, 5 negation deletions, 3 bitwise/other. The dominant patterns,
+  confirmed by the individually triaged samples of each class: scanner
+  position/accumulator arithmetic absorbed by the loop that re-derives
+  the position from the mutated one (no output difference), boundary
+  comparisons on caps no test fixture reaches (off-by-one at limits
+  like a 63-character email label or a 32-character scheme), and
+  guard/flag writes whose values nothing downstream reads.
+- **`extension.rs`'s 12 are all default-trait-method no-ops**: they
+  stub a hook (`inline_trigger`, `render_override`, …) that a host
+  which never registers that hook never calls; the hook contract
+  itself is pinned by `crates/geist4-ext/tests/mutants_extension.rs`
+  probe extensions for the hooks hosts do use.
+
+Known non-kills worth naming: `widen_container_spans` `392:28` is
+KILLABLE but was once "caught" only by a wall-clock scaling test
+(`tests/pathological.rs`), which run data showed is not reproducible at
+the same tree — timing catches do not count as kills (decision 0040).
+`DelimList::push` `115:13`/`114:13`-style field-deletion mutants are
+absorbed by struct-update syntax that re-supplies the field.
 
 ### The C ABI header and tests
 
@@ -312,5 +383,17 @@ Latest long-run results (2026-11-13):
   (`parse_document`), one per coverage edge; all 962 pass the
   differential test.
 
-Mutation testing, coverage numbers and benchmark numbers are recorded
-here as those workstreams come online.
+Mutation testing, 2026-11-22 (release run; see "Mutation testing" above
+for method and policy):
+
+- 2308 mutants across the five core source files, full battery of
+  `geist4-core` + `geist4-ext` tests per mutant, pinned proptest seed,
+  zero timeouts: **1991 caught / 247 missed / 70 unviable — kill score
+  88.96% of viable mutants**.
+- Per file missed: `inline/mod.rs` 124, `parser/mod.rs` 76,
+  `parser/leaf.rs` 33, `extension.rs` 12, `basic_html.rs` 2.
+- Every survivor is explained: 137 by individual KILLABLE/EQUIVALENT
+  verdicts (checked in with rationales at
+  `docs/testing/mutation-survivors-0.1.0.json`), the remaining 110 by
+  mutation class with the run-data patterns given above. 32 concrete
+  kill-test candidates are recorded there for follow-up after 0.1.0.

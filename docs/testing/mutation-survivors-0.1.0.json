@@ -1,0 +1,1021 @@
+{
+ "mutants": [
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2268:9: delete match arm 0x00..= 0x7F in utf8_len",
+   "verdict": "EQUIVALENT",
+   "rationale": "The deleted arm returns 1 and the catch-all it would fall through to also returns 1, so utf8_len maps every u8 input to the same value with or without the arm. Its only caller is char_at (inline/mod.rs:1417), which feeds it the lead byte of a character in valid UTF-8 source, so no reachable input distinguishes the mutant."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2481:5: replace decode_label -> String with String::new()",
+   "verdict": "KILLABLE",
+   "rationale": "decode_label feeds the mdast export's label fields (geist4-mdast/src/render.rs:418,691,710), which no test in the mutant phase reads; a direct call asserting decode_label(\"Foo\\*bar\\]\") == \"Foo*bar]\" fails against the empty string."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2481:5: replace decode_label -> String with \"xyzzy\".into()",
+   "verdict": "KILLABLE",
+   "rationale": "Same consumer gap as the String::new() mutant; a direct call asserting decode_label(\"Foo\\*bar\\]\") == \"Foo*bar]\" fails against \"xyzzy\"."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2484:13: replace < with == in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "With `while i == bytes.len()` the loop is false at i=0 for every non-empty label, so decode_label returns the empty string instead of the decoded label (e.g. \"Foo\\*bar\\]\" decodes to \"Foo*bar]\" per the doc contract and mdast fixture 194)."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2484:13: replace < with > in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "With `while i > bytes.len()` the loop never runs from i=0, so every non-empty label decodes to the empty string instead of its decoded form."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2484:13: replace < with <= in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "With `<=` the loop body runs one extra iteration at i == bytes.len(), where `match bytes[i]` indexes out of bounds, so every call panics instead of returning the decoded label."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2490:13: delete match arm b'&' in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "Without the b'&' arm the character falls to the default arm and is pushed literally, so entities in labels stay raw: decode_label(\"a&amp;b\") yields \"a&amp;b\" instead of \"a&b\", contradicting the doc comment and the mdast label fixtures."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2486:22: replace match guard bytes.get(i + 1).is_some_and(|b| b.is_ascii_punctuation()) with true in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "Every backslash now takes the escape arm, so a backslash before a non-punctuation byte loses the backslash: decode_label(\"\\G\") yields \"G\" instead of the literal \"\\G\" the function documents."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2486:22: replace match guard bytes.get(i + 1).is_some_and(|b| b.is_ascii_punctuation()) with false in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "The escape arm never fires, so backslash escapes stay raw: decode_label(\"Foo\\*bar\\]\") yields \"Foo\\*bar\\]\" instead of \"Foo*bar]\" (the decoded form mdast fixture 194 asserts)."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2486:34: replace + with - in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "bytes.get(i - 1) underflows at i=0, so any label starting with a backslash panics; for later backslashes the guard inspects the byte before the backslash instead of the escaped byte, changing which escapes decode."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2486:34: replace + with * in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "bytes.get(i * 1) is the backslash itself and backslash is_ascii_punctuation, so the guard is always true; decode_label(\"\\G\") yields \"G\" instead of the literal \"\\G\"."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2487:34: replace + with - in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "bytes[i - 1] underflows at i=0 for a label starting with an escape (\"\\!\"), and otherwise pushes the byte before the backslash (\"a\\!\" would emit \"aa\")."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2487:34: replace + with * in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "bytes[i * 1] is the backslash, so the escape arm emits a backslash instead of the escaped character: decode_label(\"\\!\") yields \"\\\" instead of \"!\"."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2488:19: replace += with -= in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "i -= 2 underflows at i=0 (\"\\!\") and otherwise moves the cursor backwards, so the walk panics or oscillates instead of advancing past the two-byte escape."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2488:19: replace += with *= in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "i *= 2 doubles the cursor at each escape: for \"abc\\!d\" the escape sits at byte 3, the cursor jumps to 6, and the trailing d is dropped, yielding \"abc!\" instead of \"abc!d\"."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2490:56: replace + with - in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "&raw[i - 1..] underflows at i=0 (any label starting with '&'), and otherwise starts the entity scan one byte before the '&', where scan_entity can never match, so references stay literal (\"a&amp;b\" vs \"a&b\")."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2490:56: replace + with * in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "&raw[i * 1..] starts the scan at the '&' itself; scan_entity never matches a slice beginning with '&' (its name lookup runs on the text after the '&'), so decode_label(\"a&amp;b\") yields \"a&amp;b\" instead of \"a&b\"."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2493:23: replace += with -= in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "i -= 1 + len underflows for every decoded entity (\"a&amp;b\": 1 - 5), panicking whenever a label contains a character reference."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2493:23: replace += with *= in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "i *= 1 + len misplaces the cursor: for \"a&amp;b\" the entity at i=1 lands the cursor at 5, the ';' is emitted literally and the result is \"a&;b\" instead of \"a&b\" (an entity at i=0 would spin forever)."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2493:28: replace + with - in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "i += 1 - len underflows because scan_entity's len is always at least 3, so any decodable entity in a label panics instead of decoding."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2493:28: replace + with * in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "i += 1 * len advances only past the entity, leaving the cursor on the ';' that the original consumed with the '&': \"a&amp;b\" yields \"a&;b\" instead of \"a&b\"."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2497:23: replace += with -= in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "In the no-entity arm i -= 1 underflows for a label starting with a bare '&' (\"&x\"), and otherwise walks backwards into an infinite push-'&' loop."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2497:23: replace += with *= in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "i *= 1 never advances, so any '&' without a valid entity spins forever pushing '&' until the memory guard kills the test; the run saw no label containing a bare ampersand."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2503:19: replace += with -= in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "In the default arm i -= ch.len_utf8() underflows on the first byte (\"a\": 0 - 1), panicking on every non-empty label."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2503:19: replace += with *= in decode_label",
+   "verdict": "KILLABLE",
+   "rationale": "i *= ch.len_utf8() pins the cursor at 0 for the first character (0 times any length), so every non-empty label loops forever pushing its first byte until the memory guard kills the test."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2705:29: replace match guard b != 0 with true in scan_html_comment",
+   "rationale": "Forcing the guard true makes '--' followed by NUL take the 'i += 3' step instead of the '_ => return None' arm on the next line, matching a comment the correct scanner rejects. The pair diverges only when a NUL byte sits at i+2 right after a '--' pair inside the body.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2708:31: replace + with - in scan_html_comment",
+   "rationale": "Branch 3 guards on the byte after a lone '-', but the mutant guards on bytes[i - 1], which at i == start is always the second '-' of the '<!--' opener; a body beginning '-x' (e.g. '<!---x-->', correct body '-x') is therefore rejected and rendered as literal text.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2708:63: replace && with || in scan_html_comment",
+   "rationale": "In branch 3 the lookahead byte is never '-' (branch 2 took that case), so the correct 'b != b'-' && b != 0' reduces to 'b != 0', while '||' is true for every byte value. Behavior diverges only when the byte after the lone '-' is NUL: the mutant advances i += 2, correct code returns None.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2732:15: replace += with *= in scan_html_pi",
+   "rationale": "With 'i *= 2', a '?' not followed by '>' doubles i past the real '?>' - in 'a<?b?c?>d' the scan lands on 'd', runs to end of input, and the caller's fits(total) check (1 + 10 > 9) rejects the PI, rendering literal text where correct code emits raw '<?b?c?>'. The mutant terminates monotonically, so it is not hang-class.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2739:12: replace - with + in scan_html_pi",
+   "rationale": "An unterminated PI exits the loop only with i >= len and start = pos+1, so the correct 'Some(i - start)' gives total = len - pos + 3 and fits fails (pos-1+total >= len+2 > len); the mutant's 'Some(i + start)' only makes total larger, so it fails fits too. Both paths set skip_pi and return None identically for every input, NUL cases included.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2748:11: replace += with -= in scan_html_declaration",
+   "rationale": "The mutated loop runs at most once: after 'i -= 1', bytes[start-1] is always the '!' of the '<!' opener (start = pos+1), which is not alphabetic, ending the loop with i = start-1 (never equal to start, so the None guard is not taken, same as correct code whose i advanced past the alpha run). The second while then walks from '!' through the identical byte span to the same terminating '>' or end of input, returning the same 'i - start'; no NUL can occur in the alpha run or at the '!', so even the None paths coincide. Not hang-class: the decrement happens exactly once.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2767:20: replace < with <= in scan_html_cdata",
+   "rationale": "The guards differ only when bytes.len() == start + 6, i.e. the input ends immediately after 'CDATA[': the mutant returns None directly, while correct code proceeds with i == len, skips the loop, and also returns None. For len > start+6 both proceed and for len < start+6 both return None, so every input yields the same result.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2770:23: replace + with - in scan_html_cdata",
+   "rationale": "i is initialized to 'start - PREFIX.len()' instead of start + PREFIX.len(); for an inline CDATA whose '<' sits before index 3 (start < 6, e.g. 'a<![CDATA[x]]>' with start = 4) the subtraction underflows and panics in the test build, while correct code matches the CDATA and emits it raw. Even without overflow checks the wrapped i skips the loop and returns None, so the output assertion kills it either way.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2772:13: replace < with <= in scan_html_cdata",
+   "rationale": "With 'i <= len' the outer loop body runs at i == len and 'bytes[i]' indexes one past the slice, which any unterminated inline CDATA such as 'a<![CDATA[x' reaches; correct code exits both loops and returns None, rendering the text literally.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2777:21: replace < with <= in scan_html_cdata",
+   "rationale": "With 'i <= len' the inner skip loop evaluates 'bytes[i] != b']'' at i == len and panics on the out-of-bounds index; the correct '<' stops the walk at end of input and the scan returns None for 'a<![CDATA[x'.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2780:31: replace + with * in scan_html_cdata",
+   "rationale": "'bytes.get(i * 1)' is bytes.get(i), which is always Some(b']') in this branch, so the ']]' pair check passes for a lone ']' too: in 'a<![CDATA[b]c]]>d' the scan reads 'c' at i+2 and steps +3 to the next ']', then reads 'd' at that i+2 and steps past the end, returning None - literal text where correct code takes branch 3 (+2) and matches.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2783:29: replace match guard b != 0 with true in scan_html_cdata",
+   "rationale": "Forcing the guard true makes ']]' followed by NUL take the 'i += 3' step instead of the '_ => return None' arm, matching a CDATA the correct scanner rejects. Divergence requires a NUL byte at i+2 right after a ']]' pair; no non-NUL input distinguishes the two.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2783:29: replace match guard b != 0 with false in scan_html_cdata",
+   "rationale": "With the guard always false, every non-'>' byte after a ']]' pair falls through to '_ => return None', so 'a<![CDATA[b]]x]]>c' - correctly matched with body 'b]]x' - renders as literal text.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2783:31: replace != with == in scan_html_cdata",
+   "rationale": "The guard becomes 'b == 0', so the normal case (any non-NUL byte after ']]', e.g. 'x') drops to the '_ => return None' arm and the CDATA goes unmatched - the same witness input as the guard-false mutant.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2783:41: replace += with -= in scan_html_cdata",
+   "rationale": "'i -= 3' after ']]' + non-close walks the cursor backwards into earlier content and oscillates (offsets 8-11 in 'a<![CDATA[b]]x]]>c': ']]x' steps back to 'A', the skip walk returns to ']]', repeat), so the scan never terminates and the mutant dies as a cargo-mutants timeout on the same input that kills its '*=' twin - a pure index spin with no allocation. Hang-class per decision 0040, killed here via the shared candidate's timeout rather than a dedicated hanging test.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2783:41: replace += with *= in scan_html_cdata",
+   "rationale": "'i *= 3' overshoots end-of-input from the first ']]x' (11 -> 33 > 17), so 'a<![CDATA[b]]x]]>c' returns None and renders literally instead of matching body 'b]]x'; the mutant terminates monotonically and is killed cleanly by the shared candidate.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2786:31: replace + with - in scan_html_cdata",
+   "rationale": "Branch 3 guards on bytes[i - 1] instead of bytes[i + 1]; the two diverge when a ']' directly precedes the lone ']' - the cursor lands there via the 'i += 3' skip after a ']]]' run (pair at i-3,i-2, byte ']' at i-1) - so in 'a<![CDATA[w]]]]x]]>b' the guard reads ']' and returns None where correct code reads 'x' and advances, eventually matching body 'w]]]]x'.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2786:31: replace + with * in scan_html_cdata",
+   "rationale": "'bytes.get(i * 1)' returns Some(b']') - the very byte that routed control into branch 3 - so the closure test 'b != b']'' is always false and every lone-']' position returns None instead of stepping i += 2; 'a<![CDATA[b]c]]>d' correctly matches but the mutant renders it literal.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2786:55: replace != with == in scan_html_cdata",
+   "rationale": "The guard becomes 'b == b']'', which is always false in branch 3 because the lookahead is not ']' by construction (branch 2 took that case), so every lone ']' inside CDATA content returns None instead of stepping +2 - the 'b]c]]>' witness.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2786:63: replace && with || in scan_html_cdata",
+   "rationale": "In branch 3 the lookahead is never ']', so the correct 'b != b']' && b != 0' reduces to 'b != 0' while '||' is true for every byte; divergence requires a NUL byte right after the lone ']' (mutant advances i += 2, correct returns None).",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2786:68: replace != with == in scan_html_cdata",
+   "rationale": "The guard becomes 'b != b']' && b == 0', false for every real content byte, so branch 3 always returns None instead of stepping i += 2; 'a<![CDATA[b]c]]>d' correctly matches with content 'b]c' but the mutant renders it literal.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2787:15: replace += with -= in scan_html_cdata",
+   "rationale": "'i -= 2' at a lone ']' walks back into the 'CDATA[' prefix and oscillates (offsets 9-11 in 'a<![CDATA[b]c]]>d': branch 3 steps back to '[', the skip walk returns to the lone ']'), never terminating - killed as a pure-spin timeout by the shared candidate, no allocation. Hang-class per decision 0040, covered via the shared candidate's timeout rather than a dedicated hanging test.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2787:15: replace += with *= in scan_html_cdata",
+   "rationale": "'i *= 2' from the lone ']' overshoots end-of-input (11 -> 22 > 17), so the scan returns None and 'a<![CDATA[b]c]]>d' renders literally instead of matching; terminates monotonically and is killed cleanly by the shared candidate.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2860:7: replace += with *= in scan_tagname",
+   "rationale": "'i *= 1' is a no-op leaving i == start, and the following while re-consumes bytes[start], which is alphabetic and therefore alphanumeric - the walk visits exactly the same bytes and returns the same 'i - start' for every input.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2886:7: replace += with *= in scan_attribute_name",
+   "rationale": "'i *= 1' leaves i == start, and every allowed first byte (alphabetic, ':', '_') satisfies the while condition (alphanumeric or one of : . _ -), so the loop re-consumes it and the scan result is identical for every input.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1288:47: replace | with ^ in Parser<'defs, 'a, 'ext>::scan_to_closing_backticks",
+   "verdict": "EQUIVALENT",
+   "rationale": "The memo write combines (memo_gen << 40) with (run_start & MEMO_POS_MASK): the left operand always has zero low 40 bits and the right operand is masked strictly below 2^40, so the two operands never share a bit and XOR is bit-identical to OR for every input. The entry handle_backticks later decodes (entry >> 40, entry & MEMO_POS_MASK at lines 1234-1235) is therefore unchanged under the mutant."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2281:5: replace code_span_value -> String with String::new()",
+   "verdict": "KILLABLE",
+   "rationale": "The documented mdast-value contract (raw content with one leading and one trailing space or line-ending byte removed when both edges have one and the content is not all whitespace) requires real content, and mdast reference fixtures pin values like ' a' for '` a`', but the mutant returns the empty string for every span. It survived only because nothing in the run's package set (geist4-core, geist4-ext) executes code_span_value; a direct unit test on ' a ' (expected 'a') kills it."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2281:5: replace code_span_value -> String with \"xyzzy\".into()",
+   "verdict": "KILLABLE",
+   "rationale": "Same coverage hole as the String::new() replace: the sentinel 'xyzzy' differs from every legitimate value, and the function is simply never exercised by the run's package set because its only caller is the mdast exporter. A direct unit test on ' a ' (expected 'a') kills it."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2284:20: replace >= with < in code_span_value",
+   "verdict": "KILLABLE",
+   "rationale": "bytes.len() >= 2 is what keeps empty and one-byte content unstripped; flipped to <, the length guard only holds below 2, so every longer span with strippable edges takes the strip branch and code_span_value(' a ') returns ' a ' instead of 'a'."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2284:25: replace && with || in code_span_value",
+   "verdict": "KILLABLE",
+   "rationale": "With the first && widened to || the strip branch no longer requires the length guard to hold, so on ' a' (len 2, trailing byte not strippable) the condition is true via len >= 2 and the mutant strips, returning '' instead of ' a'."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2284:28: delete ! in code_span_value",
+   "verdict": "KILLABLE",
+   "rationale": "Deleting ! inverts the all-whitespace exclusion, so all-space content like '  ' - which the reference keeps verbatim (mdast fixture 334 pins '`  `' -> '  ') - satisfies the condition and loses its edge spaces."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2284:39: replace && with || in code_span_value",
+   "verdict": "KILLABLE",
+   "rationale": "The widened condition (len >= 2 && !all_strip) || (strip(first) && strip(last)) drops the requirement that all four conjuncts hold together: on ' a' the length and non-whitespace halves hold while the trailing edge is not strippable, so the original refuses to strip and the mutant strips, returning '' instead of ' a'."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2284:58: replace && with || in code_span_value",
+   "verdict": "KILLABLE",
+   "rationale": "strip(first) || strip(last) strips when only one edge is strippable: on ' a' the leading space alone satisfies it and the mutant returns '' instead of ' a' (mdast fixture 332 pins this one-sided case)."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2284:85: replace - with + in code_span_value",
+   "verdict": "KILLABLE",
+   "rationale": "bytes[bytes.len() + 1] indexes one past the end of the content, so any non-all-whitespace span whose first byte is strippable, like ' a', evaluates the last conjunct and panics instead of returning."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2284:85: replace - with / in code_span_value",
+   "verdict": "KILLABLE",
+   "rationale": "bytes[bytes.len() / 1] is bytes[len], one past the end of the content, so the same inputs panic instead of returning."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2285:32: replace - with + in code_span_value",
+   "verdict": "KILLABLE",
+   "rationale": "content[1..bytes.len() + 1] is an out-of-range slice end, so code_span_value(' a ') panics instead of returning 'a'."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2285:32: replace - with / in code_span_value",
+   "verdict": "KILLABLE",
+   "rationale": "content[1..bytes.len() / 1] ends one byte early, keeping the trailing edge byte, so ' a ' yields 'a ' instead of 'a'."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2301:21: replace match guard chars.peek() == Some(&'\\n') with true in normalize_code",
+   "verdict": "KILLABLE",
+   "rationale": "A CR not followed by LF must fall through to the CR/LF arm and emit one space; with the guard always true the CR is swallowed, so normalize_code on 'a' CR 'b' yields 'ab' instead of 'a b'."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2301:21: replace match guard chars.peek() == Some(&'\\n') with false in normalize_code",
+   "verdict": "KILLABLE",
+   "rationale": "With the guard always false a CRLF pair emits two spaces - the CR falls through to the CR/LF arm and the LF adds another - so normalize_code on 'a' CR LF 'b' yields 'a  b' instead of 'a b'."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2301:34: replace == with != in normalize_code",
+   "verdict": "KILLABLE",
+   "rationale": "Inverting the guard swaps which CR forms are swallowed: a CRLF pair now emits two spaces and a bare CR is dropped, so normalize_code on 'a' CR LF 'b' yields 'a  b' instead of the documented one-space-per-line-ending 'a b'."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:828:19: replace > with >= in TriggerInner<'p, 'defs, 'a, 'ext>::emit_link",
+   "rationale": "The guard only decides whether self.unput(rewind) runs, and unput's entire body is a 'while n > 0' loop, so calling it with rewind == 0 executes nothing and mutates no state. The always-true '>= ' therefore matches the original for every rewind value; run8's caught '==' and '<' variants (which skip the unput for real rewinds) confirm rewind > 0 is the only live edge.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1436:72: replace - with + in Parser<'defs, 'a, 'ext>::handle_close_bracket",
+   "rationale": "The literal ']' emitted when the bracket stack is empty must span (initial_pos - 1, initial_pos); '+' inverts the range (start > end, which panics span slicing) and no test asserts this node's span. A span+slicing assertion on a no-opener ']' kills it.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1436:72: replace - with / in Parser<'defs, 'a, 'ext>::handle_close_bracket",
+   "rationale": "initial_pos / 1 == initial_pos collapses the ']' node's span to empty (start == end), hiding the bracket's source position; the text content stays ']' so only a span assertion can see it, and none exists for the no-opener path (the only close-bracket span test covers the disabled-link pop at 1442).",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1464:49: replace > with >= in Parser<'defs, 'a, 'ext>::handle_close_bracket",
+   "rationale": "title_raw feeds only title_raw.and_then(clean_title); the mutant differs solely when endtitle == starttitle, which happens exactly when no title was consumed (scan_link_title returns >= 2 whenever Some, else unwrap_or(0) forces equality), and then '>=' yields Some(\"\") whose clean_title returns None via the bytes.is_empty() early return. matched's title is None either way; run8 caught '==' and '<' (which drop real titles) and missed only '>='.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1697:44: replace > with == in Parser<'defs, 'a, 'ext>::handle_close_bracket",
+   "rationale": "The cap duplicates the following char-boundary walk: for cut > text.len() every index above len is out of bounds, std's is_char_boundary returns false there (get() is None and index == len fails), so the walk at line 1700 decrements cut to exactly text.len() - the same value the cap would set; for cut == len the cap is a no-op. Every reachable input converges to the original cut.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1697:44: replace > with >= in Parser<'defs, 'a, 'ext>::handle_close_bracket",
+   "rationale": "The mutant's cap fires one step earlier only at cut == text.len(), where cut = text.len() is a no-op; for cut < len it never fires and for cut > len it sets the same value the original's cap does. No input can distinguish the two.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1700:47: replace > with >= in Parser<'defs, 'a, 'ext>::handle_close_bracket",
+   "rationale": "cut is usize so 'cut >= 0' is always true and the loop condition reduces to !text.is_char_boundary(cut); is_char_boundary(0) is always true, so the mutant stops at 0 exactly where the original's 'cut > 0' conjunct stops it, and for cut > 0 both continue under the same boundary test. The walk is identical for every input; run8 caught '==' and '<' (which disable the walk and panic on mid-character cuts) and missed only '>= '.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1787:80: replace - with + in Parser<'defs, 'a, 'ext>::handle_close_bracket",
+   "rationale": "The literal ']' of a bracket group that matched nothing must span (initial_pos - 1, initial_pos); '+' inverts the range (slicing panics). Existing tests pin only the problem message and rendered HTML for failed groups, never this node's span, so a span assertion kills it.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1787:80: replace - with / in Parser<'defs, 'a, 'ext>::handle_close_bracket",
+   "rationale": "initial_pos / 1 == initial_pos collapses the failed group's ']' span to empty while the text content stays ']', so rendered HTML is unchanged and only a span+slicing assertion exposes it; none exists today.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2338:28: replace += with *= in scan_link_url",
+   "rationale": "Inside a pointy destination the escape arm must step two bytes; i *= 2 doubles the cursor instead, so for '[t](<\\!>)' the scan jumps from the backslash at index 5 to index 10 of a 9-byte subject, exits via the i >= len guard, and the group degrades to literal text where the original emits <a href=\"!\">t</a>. No test scans a terminating escape inside <...> (the spec's escaped-pointy example <foo\\> never closes, so both versions return None there). This is the non-excluded '*=' sibling at a hang-class line (only '-=' at this position is in mutants.toml) and run8 recorded it as Success, so it terminates.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2352:80: replace + with * in scan_link_url",
+   "rationale": "With bytes[i * 1] the escape test inspects the backslash itself (always ASCII punctuation), so every backslash consumes two bytes, while the original advances one and re-examines the next - which matters exactly when that next byte is whitespace, the bare destination's terminator. For '[t](\\ x)' the original ends the destination at the backslash and the link fails (literal output), while the mutant skips the space and links href=\"%5C%20x\"; no test or seed has a backslash-before-space destination, which is why the differential suite caught the '-' sibling but not this one.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2357:30: replace > with == in scan_link_url",
+   "rationale": "The nesting cap rejects a destination once depth exceeds 32; '==' fires at exactly 32 (the check runs after each increment and returns immediately), so a destination with exactly 32 nested parenthesis levels - legal for the original and within the spec's at-least-three-levels allowance for this implementation's chosen limit - stops linking and degrades to literal text. The suite never exceeds two nesting levels, so the threshold is unpinned.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2357:30: replace > with >= in scan_link_url",
+   "rationale": "Same as the '==' variant: the per-increment check returns immediately, so '>=' also fires at exactly depth 32 instead of 33, rejecting a destination the original accepts. One exactly-32-levels input kills both.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2395:76: replace + with * in scan_link_title",
+   "rationale": "At a backslash both versions either take the escape arm and advance 2, or advance past the backslash and the next byte in two steps; the only skipped examination is of bytes[i+1], and a byte reached in the non-escape case is by definition non-punctuation, so it can be neither the closing quote ('\"', '\\'', ')') nor the nested-'(' byte those arms test for. Landing position and every return value coincide for all inputs; run8's caught '-' variant differs precisely because it inspects a different byte (bytes[i-1]).",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2531:16: replace match guard bytes.len() >= 2 with true in clean_title",
+   "rationale": "Both call sites pass titles of at least two bytes - the inline site slices scan_link_title's return, which is >= 2 whenever Some, and the definition site (parser/mod.rs:2388) slices leaf::scan_title's bytes[..=i] with i >= 1 - so the length conjunct never rejects a reachable input; the mutant only changes behavior for a one-byte title (where it would panic on &title[1..0]), which no caller can produce, and length 0 still returns None via the is_empty early return.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:359:5: replace widen_container_spans with ()",
+   "verdict": "KILLABLE",
+   "rationale": "The union enforces the pinned invariant that a container's span encloses its alive subtree (comment at inline/mod.rs:354-357). Hook-emitted spans are positional arithmetic, not chain-contiguous: emit_link (827-863) claims [pos-rewind, pos+take] even when unput stalls on a non-text cell (806-808), so an adopted child can start before its container's opener; without the union the container span stays narrow and span-enclosure assertions fail."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:392:28: delete ! in widen_container_spans",
+   "verdict": "KILLABLE",
+   "rationale": "Pre-triaged KILLABLE: inverting the guard makes the union skip every recorded child (cs==0 && ce==0 is false for any real span), so it behaves like the whole-function removal. The only observed catch was the flaky wall-clock timing test (emphasis_families_scale_linearly), which run 8 passed at the same tree, so the reproducible kill is the behavior route: a hook-emitted child starting at byte 0 that the union must pull in."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:392:33: replace == with != in widen_container_spans",
+   "verdict": "EQUIVALENT",
+   "rationale": "The flipped limb only changes the union for children with an empty span: cs>0 with ce==0, or the never-recorded (0,0). Every alive cell's span is written at creation (push_spanned 967-972) or when its container matches (insert_emphasis 2062-2065, link 1550-1553, ext 1622-1627 and 1770-1774), adopted children lie inside [opener.end, closer.start], and a hook's zero-width scan_run node lands inside that range, so neither deviation class is reachable and no span changes."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:392:38: replace && with || in widen_container_spans",
+   "verdict": "KILLABLE",
+   "rationale": "!(cs==0 || ce==0) excludes every real child starting at byte 0 (cs==0, ce>0), a reachable class, so a container needing widening from such a child keeps its stale narrower span. A hook-emitted child spanning from byte 0 (emit_link rewind reaching the subject start) then pokes outside and fails a span-enclosure assertion."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:392:44: replace == with != in widen_container_spans",
+   "verdict": "KILLABLE",
+   "rationale": "!(cs==0 && ce!=0) excludes exactly the byte-0 children with content, so the union loses the same reachable class as the &&-mutation; a container whose widening depends on a child starting at byte 0 keeps a span the child pokes out of, which a correct-behavior enclosure test catches."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:393:35: replace < with == in widen_container_spans",
+   "verdict": "KILLABLE",
+   "rationale": "Turns the min half of the union into a no-op: a child whose start precedes the container's own start (the stalled-unput emit_link case, where the link's claimed start sits left of the adopter's opener) keeps poking outside, so the pinned container span differs (for example (1, N) instead of (0, N))."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:393:35: replace < with <= in widen_container_spans",
+   "verdict": "EQUIVALENT",
+   "rationale": "cs <= start differs from cs < start only when cs == start, where start = cs stores the identical value; the branch is idempotent at equality, so no span can ever differ."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:396:35: replace > with == in widen_container_spans",
+   "verdict": "KILLABLE",
+   "rationale": "Disables the max half of the subtree union that keeps container spans enclosing their children (inline/mod.rs:354-357); the spans.rs shared-delimiter test records that pre-fix an outer emphasis' span ended one byte short of its child, so child ends exceeding the container's own end are what this branch repairs. The current form of that test passes under the mutant (its pairing re-encloses), so the kill needs a sharper input, but the invariant is pinned behavior and per the prefer-KILLABLE rule this stays killable."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1222:5: replace Parser<'defs, 'a, 'ext>::handle_backticks with ()",
+   "verdict": "KILLABLE",
+   "rationale": "handle_backticks is the only handler for backtick bytes in the scan loop (873); a no-op body never advances the cursor past the run and never emits the code span or the literal text, so every code-span input either stalls the scan or renders the ticks wrong, and the code-span spec examples kill it."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1243:21: replace > with >= in Parser<'defs, 'a, 'ext>::handle_backticks",
+   "verdict": "KILLABLE",
+   "rationale": "Moves the literal-text cutoff down one: a run of exactly MAXBACKTICKS (1000) ticks, which the reference cap still scans as a code span, takes the literal path. The only boundary test pins 1001 ticks (mutants_inline_scan.rs run_of_1001_backticks_is_literal_text); exactly 1000 is unpinned."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1352:39: replace > with >= in Parser<'defs, 'a, 'ext>::scan_delims",
+   "verdict": "EQUIVALENT",
+   "rationale": "scan_delims runs only with the cursor on the run's first byte (handle_delim 1318, scan_run 659), so numdelims >= 1 invariantly and 'numdelims > 0' is always true; '>= 0' is likewise always true and no flanking verdict ever differs."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1357:40: replace > with >= in Parser<'defs, 'a, 'ext>::scan_delims",
+   "verdict": "EQUIVALENT",
+   "rationale": "Same invariant as the left-flanking site: both scan_delims callers (handle_delim 1318, scan_run 659) position the cursor on a run byte, so numdelims >= 1 always, 'numdelims > 0' is always true, and replacing it with '>= 0' changes no right-flanking verdict."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1833:30: replace < with <= in Parser<'defs, 'a, 'ext>::process_emphasis",
+   "verdict": "EQUIVALENT",
+   "rationale": "A delimiter cell's position is the cursor after its run, and stack_bottom is either 0 (final call, all positions >= 1) or an opener_position, the byte just past '[', which no delimiter run can end on because '[' is not a run character; position == stack_bottom is unreachable, so <= breaks exactly where < does."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1856:17: delete match arm b'\"' in Parser<'defs, 'a, 'ext>::process_emphasis",
+   "verdict": "EQUIVALENT",
+   "rationale": "The deleted arm maps b'\"' to 0 and the wildcard arm ('_ => 0') maps it to the same index, so the openers_bottom lookup is byte-identical without the arm."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1857:17: delete match arm b'\\'' in Parser<'defs, 'a, 'ext>::process_emphasis",
+   "verdict": "EQUIVALENT",
+   "rationale": "With the arm deleted, b'\\'' lands on the wildcard's 0 instead of 1, but quote delimiters never wrap content: the dispatch at 1900-1909 inserts nodes only for extension kinds and '*'/'_', so a quote closer only advances, and the index steers bottom writes and removals whose only readers are later quote closers, which also produce nothing."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1858:27: replace + with * in Parser<'defs, 'a, 'ext>::process_emphasis",
+   "verdict": "KILLABLE",
+   "rationale": "2*(can_open?3:0)+len%3 sends the '_' can-open classes to slots 6-8, colliding with the '*' not-open len%3=0 class at slot 8; a failing close-only '***' run writes an openers_bottom there that makes a later both-flanking '__' closer skip its viable opener below that position, so a strong that should form disappears."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1858:67: replace + with - in Parser<'defs, 'a, 'ext>::process_emphasis",
+   "verdict": "KILLABLE",
+   "rationale": "2+(can_open?3:0)-len%3 keeps the '_' class partition bijective but moves the not-open classes onto slots 0-2, the b'\"'/b'\\'' slots; a quote delimiter pushed by an extension writes a bottom on those slots that then skips viable '_' openers below it, changing pairing on crafted input."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1859:67: replace + with * in Parser<'defs, 'a, 'ext>::process_emphasis",
+   "verdict": "KILLABLE",
+   "rationale": "8+(can_open?3:0)*len%3 collapses all three '*' not-open classes onto slot 8, so a failing close-only len%3=1 run writes a bottom that a later close-only len%3=2 closer then reads, skipping its viable opener below the failed run's position; a strong that should form disappears."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:1923:56: replace < with <= in Parser<'defs, 'a, 'ext>::process_emphasis",
+   "verdict": "EQUIVALENT",
+   "rationale": "The cleanup removes while position >= stack_bottom; a delimiter position equals stack_bottom never (positions >= 1 over bottom 0, and no run ends on the '[' byte at an opener_position), so <= removes exactly the cells < removes."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2011:5: replace Parser<'defs, 'a, 'ext>::insert_emphasis with ()",
+   "verdict": "KILLABLE",
+   "rationale": "insert_emphasis is the only creator of Emph and Strong nodes (call site 1903); a no-op body leaves every '*' and '_' pair unresolved, so all emphasis and strong spec examples render literal and the 652-example floor fails."
+  },
+  {
+   "id": "crates/geist4-core/src/inline/mod.rs:2071:28: replace && with || in Parser<'defs, 'a, 'ext>::insert_emphasis",
+   "verdict": "EQUIVALENT",
+   "rationale": "The gate reads first = opener_node.next in the root chain; closer_node always lies after the opener with every intervening byte covered by a surviving node, so first is always Some and never Some(closer_node) (same-character runs cannot be chain-adjacent), making the || form evaluate identically on every reachable state."
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:169:17: replace += with *= in atx_heading",
+   "rationale": "The single step past the required space is absorbed by the following loop (lines 170-172) that skips all remaining spaces and tabs, so both versions stop at the first non-space byte and return the same (level, text, pos); content slice and span position are identical for every input. Provable equivalent, also recorded in STATUS.md.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:187:17: replace < with <= in atx_heading",
+   "rationale": "The extra hash_end == end case entered by <= only arises when the trailing-hash walk moved nothing, and there the body is a no-op: the earlier loop (180-182) already trimmed trailing spaces so preceded_by_space is false, and the content[..hash_end] slice with hash_end == end is the identity. No reachable input changes the returned text.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:432:21: replace + with - in attribute_len",
+   "rationale": "attribute_len only reports a boolean to open_tag_len, which then re-scans with the unmutated skip_attribute; starting the walk at pos-1 (the tag-name char or whitespace before the attribute) still walks the same in-class name chars to the same after_name, so the boolean is unchanged. The only caller passes pos >= 2, so no underflow is reachable.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:432:21: replace + with * in attribute_len",
+   "rationale": "pos * 1 == pos starts the walk on the attribute name's first char, which is in the continuation class, so the loop ends at the same after_name as the clean walk; the boolean outcome and downstream skip_attribute behavior are unchanged.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:435:52: replace || with && in attribute_len",
+   "rationale": "The conjunction's class is empty, so the walk stops after the first name char; the mutant can only turn a pristine false (unterminated quoted value or '=' at end of line) into true, and open_tag_len then converges because skip_attribute re-scans honestly and its failure paths (consuming to end of line, or returning None) leave the tag incomplete exactly as before. Whenever '=' is involved both walks stop at the same byte, so the mutant is never false where pristine is true.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:437:11: replace += with -= in attribute_len",
+   "rationale": "The backward walk cannot pass rest[0] ('<' stops it), and the forward whitespace re-skip lands on a name character that is never '=', so the value branch is entered only where the clean scan enters it; any false-to-true divergence converges at open_tag_len through skip_attribute's honest re-scan, which rejects the same malformed shapes.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:442:11: replace += with -= in attribute_len",
+   "rationale": "Stepping back lands on the attribute name's last char, which is never whitespace or '=', so the bare attribute is accepted exactly as the clean scan accepts it; pristine false outcomes (whitespace then '=' then a bad value) become true, and skip_attribute's unmutated re-scan makes open_tag_len reject the same tags, so no output differs.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:445:11: replace += with -= in attribute_len",
+   "rationale": "p steps back onto '=' or onto the character before it (a name char or whitespace), both of which route to the unquoted arm whose walk stops immediately at '=' and whose if-body is empty, so the mutant always returns true once '=' is found and the quote arms become unreachable; pristine false outcomes converge through skip_attribute, which consumes to end of line and leaves open_tag_len with no '>'.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:445:11: replace += with *= in attribute_len",
+   "rationale": "p stays on '=', which both the whitespace skip and the unquoted-value walk treat as a terminator, so the function returns true without entering the quote arms; as with the other attribute_len position mutants, pristine false outcomes converge at open_tag_len via skip_attribute's honest re-scan and no output differs.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:447:15: replace += with -= in attribute_len",
+   "rationale": "Stepping back onto '=' routes to the unquoted arm where '=' is itself a terminator, so with whitespace present the mutant always returns true and never enters the quote arms; with no whitespace the path is byte-identical to the clean scan, and every false-to-true divergence converges through skip_attribute's re-scan.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:451:19: replace += with *= in attribute_len",
+   "rationale": "p stays on the opening quote, the content loop stops immediately, and the closing-quote check sees that same quote, so the arm always yields true; unterminated values (pristine false) become true, and open_tag_len still returns None because skip_attribute consumes to end of line and leaves nothing before '>'.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:460:19: replace += with *= in attribute_len",
+   "rationale": "p stays on the opening quote so the content loop never advances and the closing check passes on that quote; the arm always yields true and pristine false outcomes converge at open_tag_len exactly as in the single-quote -= sibling, because skip_attribute re-scans honestly and its quote arm has no closing check to fail.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:470:21: delete ! in attribute_len",
+   "rationale": "The Some(_) unquoted-value arm has no false path and its final p is dead: the guarded if-body at 488 is empty and attribute_len returns only a boolean, so inverting the loop guard changes which iterations run but never the returned value or any downstream decision.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:488:22: replace == with != in attribute_len",
+   "rationale": "The if-body is empty (the comment records that '=' with an empty value is still a value by design), so flipping the guard on an empty statement cannot change any behavior on any input.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:488:36: replace + with * in attribute_len",
+   "rationale": "after_name * 1 only changes the guard of the same empty if-body at 488; no state is read or written either way, so no input distinguishes the mutant.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:577:26: replace || with && in contains_substring",
+   "rationale": "Every call site passes a non-empty literal needle (the four kind-1 closing tags, '-->', '?>', ']]>'), so the is_empty clause is defensive dead code and && and || agree on all reachable inputs; when haystack.len() < needle.len() the windows iterator is empty and any() already returns false, matching the early return.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:594:25: replace + with * in list_marker",
+   "rationale": "The bullet digit guard is redundant: item_start (parser/mod.rs:1239-1240) always runs marker_followed_by_space after list_marker, and a digit is never in that function's whitespace class, so '-1.' is rejected with or without the guard; the pinned test dash_number_period_is_not_a_list_marker passes under the mutant for exactly this reason.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:651:17: replace < with > in trim_ascii",
+   "rationale": "trim_ascii's callers only test membership: fence_start checks backtick containment and html_block_end checks fixed whitespace-free needles, and a needle containing no space or tab cannot start inside the trimmed-away leading whitespace run, so skipping the leading trim never changes any membership result.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:654:50: replace || with && in trim_ascii",
+   "rationale": "Same membership-only callers with whitespace-free needles: an occurrence cannot end inside the untrimmed trailing whitespace because its last byte would be a space or tab, so leaving the tail untrimmed changes no contains result at fence_start or html_block_end.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:742:15: replace += with -= in scan_link_def",
+   "rationale": "The post-newline whitespace skip is what lets scan_title see a title line that retains leading whitespace; when it fails, scan_title returns None, the scan rewinds to i, end_ok(i) succeeds on the destination's newline, and the definition is accepted without its title while the title line stays paragraph text, so the mutation flows straight into def.title, the rendered title attribute and the exported titled/title fields. Reference cmark 0.31.2 resolves the title for such inputs, so pristine matches the reference and the mutant does not; the suite only ever exercises stripped continuation lines, which is why it survived.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/parser/leaf.rs:802:15: replace += with *= in scan_ws_gap",
+   "rationale": "scan_ws_gap's second loop positions scan_destination past whitespace on the line after ':'; with *= the destination scan starts on a space, the bare-destination scan breaks at i == 0 and returns None, and the whole definition is rejected, so reference links stay literal instead of resolving. The clean scan accepts the definition per the CommonMark separator grammar (spaces, one newline, spaces), so the mutant diverges from both pristine and the reference.",
+   "verdict": "KILLABLE"
+  },
+  {
+   "id": "crates/geist4-core/src/extension.rs:198:9: replace Extension::kinds -> Vec<KindDecl> with vec![]",
+   "rationale": "vec![] and Vec::new() construct the same empty Vec; there is no behavioral difference of any kind on any input.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/extension.rs:206:9: replace Extension::inline_triggers -> &[u8] with Vec::leak(Vec::new())",
+   "rationale": "Vec::leak(Vec::new()) is an empty byte slice, exactly what the default &'[] returns; the only consumer (inline/mod.rs:282) iterates it, and zero iterations are identical either way, so the existing is_empty assertion passes under the mutant.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/extension.rs:216:9: replace Extension::inline_trigger with ()",
+   "rationale": "The default hook body is let _ = ctx;, a no-op; replacing it with () leaves the hook doing nothing, and both versions have no effect on parser state, so no caller can distinguish them.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/extension.rs:231:9: replace Extension::inline_bracket with ()",
+   "rationale": "Same no-op default: the clean body only binds ctx to discard it, the mutant discards nothing, and the hook's contract (claim nothing, leave the group literal) is met identically.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/extension.rs:288:9: replace Extension::document_suffix with ()",
+   "rationale": "The default document_suffix appends nothing to out and () also appends nothing, so the rendered document is byte-identical for extensions that do not override the hook.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/extension.rs:297:9: replace Extension::post_process with ()",
+   "rationale": "The default post_process touches nothing in TreeCtx and the mutant also touches nothing, so the tree, attributes and problems are identical for every extension that does not override the hook.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/extension.rs:314:9: replace Extension::html_filter -> bool with true",
+   "rationale": "The default body already returns true after discarding literal, so replacing the body with true yields the same value on every input; the sibling -> false mutant is the killable one and is already covered by a test.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/extension.rs:325:9: replace Extension::render with ()",
+   "rationale": "The default render writes nothing to out and () also writes nothing, so unclaimed extension kinds produce no output under both; the rendered document is identical.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/extension.rs:341:9: replace Extension::render_override with ()",
+   "rationale": "The default render_override writes nothing to out and the mutant is the same no-op, so claimed core nodes render identically for extensions that do not override the hook.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/extension.rs:352:9: replace Extension::try_start with ()",
+   "rationale": "The default try_start opens nothing and converts nothing and the mutant's () is the same no-op, so no block ever fires from the default implementation either way.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/extension.rs:373:9: replace Extension::close with ()",
+   "rationale": "The default close builds no children and the mutant also builds none, so an extension block closed without an override leaves the same (empty) subtree in the arena.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/extension.rs:526:9: replace BlockStartCtx<'p, 'a, 'l, 'ext>::line_blank -> bool with false",
+   "rationale": "extension_starts only reaches try_start after its loop verified a non-space byte remains (pos < line.len()) and nothing advances the cursor in between, so cursor.blank_from_here() is false at every call and line_blank is always false there; forcing false is indistinguishable, which is why the sibling -> true mutant is caught by existing tests and this one is not.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/basic_html.rs:116:21: replace < with <= in Renderer<'_>::push_filtered",
+   "rationale": "The extra iteration allowed by <= happens only at start == len, where literal[len..] is empty: find returns None, push_str pushes nothing and the loop breaks, so every real '<' is processed identically before that and the emitted bytes are the same for every literal, including the empty one. Run 8's own logs show the two caught siblings are the == and > replacements (which drop the literal entirely), not this off-by-one.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/basic_html.rs:225:13: delete match arm Node::Document in Renderer<'_>::block",
+   "rationale": "The Document arm is a defensive unreachable!: render_with pushes only the root's children and render_block_into and child_html only ever receive non-root nodes, so deleting the arm routes an impossible case to the _ => {} catch-all; no public input reaches it.",
+   "verdict": "EQUIVALENT"
+  },
+  {
+   "id": "crates/geist4-core/src/basic_html.rs:247:13: delete match arm Node::Item(_) in Renderer<'_>::block",
+   "rationale": "Items are rendered only through Step::Item pushed by the List arm, and no parser or shipped-extension path makes an Item a block child of a document, blockquote or extension node, so the deleted unreachable! arm is unreachable through every public path; the catch-all would silently skip an impossible case. Matches the repo's own recorded run-8 rationale.",
+   "verdict": "EQUIVALENT"
+  }
+ ],
+ "candidates": [
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "input": "Foo\\*bar\\]",
+   "expected": "Calling geist4_core::parser::decode_label on this label returns \"Foo*bar]\" (backslash escapes before ASCII punctuation resolve, per the fn's contract and mdast fixtures 194/550).",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2481:5: replace decode_label -> String with String::new()",
+    "crates/geist4-core/src/inline/mod.rs:2481:5: replace decode_label -> String with \"xyzzy\".into()",
+    "crates/geist4-core/src/inline/mod.rs:2484:13: replace < with == in decode_label",
+    "crates/geist4-core/src/inline/mod.rs:2484:13: replace < with > in decode_label",
+    "crates/geist4-core/src/inline/mod.rs:2486:22: replace match guard bytes.get(i + 1).is_some_and(|b| b.is_ascii_punctuation()) with false in decode_label"
+   ],
+   "why_missed": "decode_label's only consumers are the mdast export's label fields (geist4-mdast/src/render.rs:418,691,710); no geist4-core or geist4-ext test calls it, and the run's test phase builds only --package geist4-core --package geist4-ext, so no test in the battery ever observed a decoded label. The unit assertion kills the whole-body replacements (empty/xyzzy), the loop guards that never enter the loop, and the guard-false mutant that leaves escapes raw."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "input": "\\G",
+   "expected": "decode_label returns \"\\G\" unchanged: a backslash before a non-punctuation byte stays literal (the fn's documented third rule).",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2486:22: replace match guard bytes.get(i + 1).is_some_and(|b| b.is_ascii_punctuation()) with true in decode_label",
+    "crates/geist4-core/src/inline/mod.rs:2486:22: replace match guard bytes.get(i + 1).is_some_and(|b| b.is_ascii_punctuation()) with false in decode_label",
+    "crates/geist4-core/src/inline/mod.rs:2486:34: replace + with - in decode_label",
+    "crates/geist4-core/src/inline/mod.rs:2486:34: replace + with * in decode_label"
+   ],
+   "why_missed": "No test in the mutant phase reaches decode_label (its consumers live in the mdast export), so no input ever exercised a backslash before a non-punctuation byte. Guard-true and the i*1 guard (the backslash itself is ASCII punctuation) both eat the backslash yielding \"G\"; the i-1 guard underflows at i=0 and panics. The guard-false id is also listed here because this input's correct output pins the escape arm's non-match path."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "input": "\\!",
+   "expected": "decode_label returns \"!\" (backslash before ASCII punctuation yields the character).",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2487:34: replace + with - in decode_label",
+    "crates/geist4-core/src/inline/mod.rs:2487:34: replace + with * in decode_label",
+    "crates/geist4-core/src/inline/mod.rs:2488:19: replace += with -= in decode_label"
+   ],
+   "why_missed": "No test in the mutant phase reaches decode_label, so the escape arm's body and cursor step were never observed. bytes[i-1] underflows at i=0, bytes[i*1] emits the backslash itself (\"\\\"), and i -= 2 underflows at i=0; all three fail or panic against the expected \"!\"."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "input": "abc\\!d",
+   "expected": "decode_label returns \"abc!d\".",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2488:19: replace += with *= in decode_label"
+   ],
+   "why_missed": "No test in the mutant phase reaches decode_label. The i *= 2 step happens to stay correct only when escapes sit at even offsets; the escape at odd byte 3 doubles the cursor to 6, exiting the loop and dropping the trailing d (\"abc!\")."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "input": "a&amp;b",
+   "expected": "decode_label returns \"a&b\" (character references decode, per the fn's contract and mdast fixture 545-style decoded labels).",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2490:13: delete match arm b'&' in decode_label",
+    "crates/geist4-core/src/inline/mod.rs:2490:56: replace + with - in decode_label",
+    "crates/geist4-core/src/inline/mod.rs:2490:56: replace + with * in decode_label",
+    "crates/geist4-core/src/inline/mod.rs:2493:23: replace += with -= in decode_label",
+    "crates/geist4-core/src/inline/mod.rs:2493:23: replace += with *= in decode_label",
+    "crates/geist4-core/src/inline/mod.rs:2493:28: replace + with - in decode_label",
+    "crates/geist4-core/src/inline/mod.rs:2493:28: replace + with * in decode_label"
+   ],
+   "why_missed": "No test in the mutant phase reaches decode_label, so no input ever carried an entity through the label decoder. The deleted b'&' arm and both shifted scan starts (raw[i-1..], raw[i*1..]) leave the reference literal (\"a&amp;b\"); the two underflowing cursor updates panic; the two multiplied/short advance forms emit \"a&;b\". All differ from \"a&b\"."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "input": "&x",
+   "expected": "decode_label returns \"&x\" unchanged: an '&' that does not start a valid character reference stays literal.",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2497:23: replace += with -= in decode_label",
+    "crates/geist4-core/src/inline/mod.rs:2497:23: replace += with *= in decode_label"
+   ],
+   "why_missed": "No test in the mutant phase reaches decode_label, so no input ever hit the no-entity arm. i -= 1 underflows at i=0 and panics; i *= 1 never advances and the loop pushes '&' forever until the run's memory guard kills the test (same hang-as-kill shape as the existing char_at walk test)."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "input": "a",
+   "expected": "decode_label returns \"a\" unchanged.",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2503:19: replace += with -= in decode_label",
+    "crates/geist4-core/src/inline/mod.rs:2503:19: replace += with *= in decode_label"
+   ],
+   "why_missed": "No test in the mutant phase reaches decode_label, so the default (plain character) arm's cursor step was never observed. i -= len_utf8 underflows after the first byte and panics; i *= len_utf8 pins the cursor at 0 and the loop pushes 'a' forever until the memory guard kills the test."
+  },
+  {
+   "expected": "<p>a<![CDATA[x]]></p>\n",
+   "input": "a<![CDATA[x]]>\n",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2770:23: replace + with - in scan_html_cdata"
+   ],
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "why_missed": "The battery's only CDATA coverage is block-level (blocks.rs scans '<![CDATA[x]]>' at line start, consumed by the HTML-block phase, never by scan_inline_html), so no test drives the inline CDATA path; under the mutant i = start - PREFIX.len() = 4 - 6 underflows (or wraps to a huge index whose scan then returns None), while correct code matches and emits the CDATA raw."
+  },
+  {
+   "expected": "<p>a&lt;![CDATA[x</p>\n",
+   "input": "a<![CDATA[x\n",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2772:13: replace < with <= in scan_html_cdata",
+    "crates/geist4-core/src/inline/mod.rs:2777:21: replace < with <= in scan_html_cdata"
+   ],
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "why_missed": "No battery input contains an unterminated inline CDATA: the correct scan walks i to end-of-slice, both loops exit, and the scan returns None so the text renders literally; either '<=' mutant instead evaluates bytes[i] at i == len and indexes one past the slice, panicking."
+  },
+  {
+   "expected": "<p>a<![CDATA[b]c]]>d</p>\n",
+   "input": "a<![CDATA[b]c]]>d\n",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2780:31: replace + with * in scan_html_cdata",
+    "crates/geist4-core/src/inline/mod.rs:2786:31: replace + with * in scan_html_cdata",
+    "crates/geist4-core/src/inline/mod.rs:2786:55: replace != with == in scan_html_cdata",
+    "crates/geist4-core/src/inline/mod.rs:2786:68: replace != with == in scan_html_cdata",
+    "crates/geist4-core/src/inline/mod.rs:2787:15: replace += with -= in scan_html_cdata",
+    "crates/geist4-core/src/inline/mod.rs:2787:15: replace += with *= in scan_html_cdata"
+   ],
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "why_missed": "No battery input has inline CDATA content holding a lone ']' before the closing ']]>' (the fuzz corpus contains no '<![CDATA' sequence at all and the differential vocabulary has no CDATA token), so the lone-']' branch was never exercised on distinguishing input; the '-=' twin dies on the same input as a pure index oscillation timeout (offsets 9-11, no allocation)."
+  },
+  {
+   "expected": "<p>a<![CDATA[b]]x]]>c</p>\n",
+   "input": "a<![CDATA[b]]x]]>c\n",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2783:29: replace match guard b != 0 with false in scan_html_cdata",
+    "crates/geist4-core/src/inline/mod.rs:2783:31: replace != with == in scan_html_cdata",
+    "crates/geist4-core/src/inline/mod.rs:2783:41: replace += with -= in scan_html_cdata",
+    "crates/geist4-core/src/inline/mod.rs:2783:41: replace += with *= in scan_html_cdata"
+   ],
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "why_missed": "No battery input has ']]' inside CDATA content followed by a non-'>' byte with a later real ']]>' (corpus has no '<![CDATA', differential vocabulary none either), so the ']]' + non-close match arm was never exercised; the '-=' twin dies on the same input as a pure index oscillation timeout (offsets 8-11, no allocation)."
+  },
+  {
+   "expected": "<p>a<![CDATA[w]]]]x]]>b</p>\n",
+   "input": "a<![CDATA[w]]]]x]]>b\n",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2786:31: replace + with - in scan_html_cdata"
+   ],
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "why_missed": "The mutant guards branch 3 on bytes[i-1] where correct code guards on bytes[i+1]; they diverge only when a ']' immediately precedes the lone ']' (the cursor lands there via the i += 3 skip after a ']]]' run), i.e. content containing ']]]]' - a shape absent from every battery input."
+  },
+  {
+   "expected": "<p>a<?b?c?></p>\n",
+   "input": "a<?b?c?>d\n",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2732:15: replace += with *= in scan_html_pi"
+   ],
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "why_missed": "Battery PIs are either block-level (a line-initial '<?' is CommonMark HTML block type 2 and never reaches the inline scanner) or terminate at the first '?>' with no bare '?' in the body, so the mutated step never executes; a<?b?c?>d is the smallest inline PI whose body contains a '?' not followed by '>'."
+  },
+  {
+   "expected": "<p><!---x--></p>\n",
+   "input": "<!---x-->\n",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2708:31: replace + with - in scan_html_comment"
+   ],
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "why_missed": "Every comment body the battery scans either starts with a non-dash byte or is caught by the caller's minimal-comment fast paths (at(pos+3)=='>' and '-->'), so branch 3 is never entered at i == start, the only position where bytes[i-1] is the opener's second '-'; a body beginning '-x' is the smallest witness."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "input": " a ",
+   "expected": "a",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2281:5: replace code_span_value -> String with String::new()",
+    "crates/geist4-core/src/inline/mod.rs:2281:5: replace code_span_value -> String with \"xyzzy\".into()",
+    "crates/geist4-core/src/inline/mod.rs:2284:20: replace >= with < in code_span_value",
+    "crates/geist4-core/src/inline/mod.rs:2284:85: replace - with + in code_span_value",
+    "crates/geist4-core/src/inline/mod.rs:2284:85: replace - with / in code_span_value",
+    "crates/geist4-core/src/inline/mod.rs:2285:32: replace - with + in code_span_value",
+    "crates/geist4-core/src/inline/mod.rs:2285:32: replace - with / in code_span_value"
+   ],
+   "why_missed": "code_span_value is never executed by the run: its only caller is the mdast exporter (geist4-mdast/src/render.rs:619) and the run tests only geist4-core and geist4-ext, so no existing test reaches the function and the whole-fn replaces plus every boundary mutant survive together. Kill test: a direct unit call assert_eq!(geist4_core::code_span_value(\" a \"), \"a\") pinning the documented contract (one leading and one trailing space or line-ending byte stripped when both edges have one and the content is not all whitespace); the / and + mutants panic on an out-of-range byte index or slice end, the < mutant returns ' a ', and both whole-fn replaces return '' or 'xyzzy'."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "input": " a",
+   "expected": " a",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2284:25: replace && with || in code_span_value",
+    "crates/geist4-core/src/inline/mod.rs:2284:39: replace && with || in code_span_value",
+    "crates/geist4-core/src/inline/mod.rs:2284:58: replace && with || in code_span_value"
+   ],
+   "why_missed": "Same coverage hole as the other code_span_value survivors: the run's package set never calls the function, and no test in it pins the one-sided edge where only the leading byte is strippable (mdast fixture 332 pins '` a`' -> ' a' but geist4-mdast is outside the run). Kill test: assert_eq!(geist4_core::code_span_value(\" a\"), \" a\"); each || mutant fires the strip branch on this one-sided input and returns '' instead of ' a'."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "input": "  ",
+   "expected": "  ",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2284:28: delete ! in code_span_value"
+   ],
+   "why_missed": "Same coverage hole: no test in the run's package set pins that all-whitespace content is returned verbatim (mdast fixture 334 pins '`  `' -> '  ' but geist4-mdast is outside the run). Kill test: assert_eq!(geist4_core::code_span_value(\"  \"), \"  \"); with ! deleted the all-strip input takes the strip branch and returns ''."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "input": "a\r\nb",
+   "expected": "a b",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2301:21: replace match guard chars.peek() == Some(&'\\n') with false in normalize_code",
+    "crates/geist4-core/src/inline/mod.rs:2301:34: replace == with != in normalize_code"
+   ],
+   "why_missed": "normalize_code is exercised by render and heading-id tests, but code-span content built from block-parsed text never contains a raw CR: the block reader ends lines at CR or LF and joins continuation lines with LF (parser/mod.rs:670-687, append_paragraph_text), so the CRLF arm and its guard go unobserved and both CR-dependent mutants survive. Kill test: a direct unit call assert_eq!(geist4_core::normalize_code(\"a\\r\\nb\"), \"a b\") pinning the documented contract that each line ending becomes one space; guard-false and the inverted == both emit two spaces here ('a  b')."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "input": "a\rb",
+   "expected": "a b",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2301:21: replace match guard chars.peek() == Some(&'\\n') with true in normalize_code"
+   ],
+   "why_missed": "Same CR-blindness: markdown can never put a bare CR into a code span because the block layer treats CR as a line ending, so guard-true - which drops a CR not followed by LF - is unobserved by every existing caller. Kill test: assert_eq!(geist4_core::normalize_code(\"a\\rb\"), \"a b\"); under the mutant the CR is dropped and the result is 'ab'."
+  },
+  {
+   "expected": "Rendered <p>]a</p>; the paragraph's Text(\"]\") node spans exactly (0,1) and span_of slices it to \"]\". Under '+' the span is (2,1) and slicing panics; under '/' it is (1,1) and slices to \"\".",
+   "input": "]a\n",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:1436:72: replace - with + in Parser<'defs, 'a, 'ext>::handle_close_bracket",
+    "crates/geist4-core/src/inline/mod.rs:1436:72: replace - with / in Parser<'defs, 'a, 'ext>::handle_close_bracket"
+   ],
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "why_missed": "No test asserts the span of a ']' emitted with an empty bracket stack; the only close-bracket span test (disabled_link_close_bracket_text_covers_one_byte) covers the disabled-link pop at 1442, and HTML output alone cannot see a zero-length or inverted span."
+  },
+  {
+   "expected": "Rendered <p>[a]</p> with one problem (\"no link reference definition for 'a'\"); the literal Text(\"]\") node under the paragraph spans exactly (2,3) and slices to \"]\". Under '+' the span is (4,3) and slicing panics; under '/' it is (3,3) and slices to \"\".",
+   "input": "[a]\n",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:1787:80: replace - with + in Parser<'defs, 'a, 'ext>::handle_close_bracket",
+    "crates/geist4-core/src/inline/mod.rs:1787:80: replace - with / in Parser<'defs, 'a, 'ext>::handle_close_bracket"
+   ],
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "why_missed": "Existing failed-group tests (problems.rs, broken_reference_label_is_trimmed_on_both_sides) pin the problem message and HTML but never the ']' node's span, so a shifted or emptied span stays invisible."
+  },
+  {
+   "expected": "<p><a href=\"(((((((((((((((((((((((((((((((((u)))))))))))))))))))))))))))))))))\">t</a></p> (32 nesting levels link; escape_href keeps parens raw). Under both mutants the scan returns None at depth 32 and the output is the literal <p>[t](...)</p> plus a problem.",
+   "input": "[t](((((((((((((((((((((((((((((((((u)))))))))))))))))))))))))))))))))\n",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2357:30: replace > with == in scan_link_url",
+    "crates/geist4-core/src/inline/mod.rs:2357:30: replace > with >= in scan_link_url"
+   ],
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "why_missed": "No test nests destination parentheses deeper than the spec examples' two levels (foo(and(bar))), so the exact cap boundary (rejects above 32, accepts exactly 32) is unpinned; both mutants fire at depth 32 instead of 33."
+  },
+  {
+   "expected": "<p><a href=\"!\">t</a></p> - the escape \\! inside the pointy destination steps two bytes and the destination closes at '>', yielding url \\! cleaned to '!'. Under the mutant the cursor doubles from index 5 to 10 of the 9-byte subject, the i >= len guard returns None, and the output is the literal <p>[t](<\\!>)</p> plus a problem.",
+   "input": "[t](<\\!>)\n",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2338:28: replace += with *= in scan_link_url"
+   ],
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "why_missed": "No test exercises a backslash escape that terminates a pointy destination: the spec suite's only escaped-pointy example ([link](<foo\\>)) never closes, so both original and mutant return None there and the arm's step size goes unobserved."
+  },
+  {
+   "expected": "<p>[t](\\ x)</p> - a backslash before a space is not an escape, so the bare destination ends at the backslash, the title scan fails at 'x', and the group stays literal. Under the mutant the escape check reads bytes[i] (the backslash, always punctuation), the scan skips the space, and the output is <p><a href=\"%5C%20x\">t</a></p>.",
+   "input": "[t](\\ x)\n",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2352:80: replace + with * in scan_link_url"
+   ],
+   "target_file": "crates/geist4-core/tests/mutants_inline_scan.rs",
+   "why_missed": "No test or fuzz seed has a backslash-before-non-punctuation followed by whitespace in a bare destination, the one shape where examining the byte after the backslash changes the destination's end; the '-' sibling was caught only by the differential corpus, which lacks this shape."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_emph.rs",
+   "input": "with an extension registering b\"@\" whose inline_trigger calls ctx.emit_link(7, 1, \"/x\".to_owned()), parse: q*y<b>z@w*",
+   "expected": "the paragraph's emphasis node spans (0, 10): the union of the pair's own [1, 10] with the hook-emitted link child [0, 8] whose unput stalled on the inline-HTML cell",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:359:5: replace widen_container_spans with ()",
+    "crates/geist4-core/src/inline/mod.rs:392:28: delete ! in widen_container_spans",
+    "crates/geist4-core/src/inline/mod.rs:392:38: replace && with || in widen_container_spans",
+    "crates/geist4-core/src/inline/mod.rs:392:44: replace == with != in widen_container_spans",
+    "crates/geist4-core/src/inline/mod.rs:393:35: replace < with == in widen_container_spans"
+   ],
+   "why_missed": "No battery hook emits a node whose span escapes its adopter: the registered hooks (Pct, Strike, Claimer and friends) emit chain-contiguous spans, and every plain-markdown pairing keeps adopted children inside [opener.end, closer.start], so the union's min branch never had to repair anything in the existing tests and the survivors shipped unnoticed."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_emph.rs",
+   "input": "__a bc*** d x__e",
+   "expected": "<p><strong>a bc*** d x</strong>e</p>",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:1858:27: replace + with * in Parser<'defs, 'a, 'ext>::process_emphasis"
+   ],
+   "why_missed": "The kill needs a failing close-only '***' run whose openers_bottom write lands on slot 8, the slot the mutated '_' can-open len%3=2 class reads, with that closer's viable '__' opener positioned before the write; no spec example or battery test has that delimiter sequence, so the collision never fired."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_emph.rs",
+   "input": "x**a *b c**",
+   "expected": "<p>x<strong>a *b c</strong></p>",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:1859:67: replace + with * in Parser<'defs, 'a, 'ext>::process_emphasis"
+   ],
+   "why_missed": "Needs a close-only single-star closer blocked by the rule of three against a both-flanking double-star opener (so it fails and writes slot 8 under the mutant), followed by a close-only double-star closer whose viable opener sits before the failed run's position; no existing input has that sequence."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_emph.rs",
+   "input": "{1000 backticks}x{1000 backticks} (a code span whose opener and closer runs are exactly MAXBACKTICKS ticks)",
+   "expected": "<p><code>x</code></p>",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:1243:21: replace > with >= in Parser<'defs, 'a, 'ext>::handle_backticks"
+   ],
+   "why_missed": "The only MAXBACKTICKS boundary test pins 1001 ticks staying literal; exactly 1000, still inside the scannable range, is unpinned, so moving the cutoff to >= passes the whole battery."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_emph.rs",
+   "input": "`code` and ``two``",
+   "expected": "<p><code>code</code> and <code>two</code></p>",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:1222:5: replace Parser<'defs, 'a, 'ext>::handle_backticks with ()"
+   ],
+   "why_missed": "The whole-function removal either stalls the scan at the first backtick or drops every code span; run 8 recorded no behavioral kill, so a plain code-span pin documents the kill and guards the function's contract."
+  },
+  {
+   "target_file": "crates/geist4-core/tests/mutants_inline_emph.rs",
+   "input": "*a* b **c**",
+   "expected": "<p><em>a</em> b <strong>c</strong></p>",
+   "mutant_ids": [
+    "crates/geist4-core/src/inline/mod.rs:2011:5: replace Parser<'defs, 'a, 'ext>::insert_emphasis with ()"
+   ],
+   "why_missed": "No emphasis or strong could form at all under the replacement, so the survival points to a run artifact rather than behavior; a minimal emphasis-plus-strong pin kills it and documents the splicing contract."
+  },
+  {
+   "expected": "<blockquote>\n<p><a href=\"/u\" title=\"t\">t</a></p>\n</blockquote>",
+   "input": "> [a]: /u\n    \"t\"\n> \n> [t][a]",
+   "mutant_ids": [
+    "crates/geist4-core/src/parser/leaf.rs:742:15: replace += with -= in scan_link_def"
+   ],
+   "target_file": "crates/geist4-core/tests/mutants_leaf.rs",
+   "why_missed": "The mutated whitespace skip only executes when the joined paragraph buffer retains leading whitespace after a newline, which by design happens only for lazily continued container lines (append_paragraph_rest keeps the line's leading whitespace; matched lines are stripped). The suite's title-on-next-line test uses a top-level paragraph whose continuation lines are already stripped, so the mutated statement never runs, and the differential corpus never generated a definition spanning a lazy container line. Under the mutant scan_title sees the newline first, returns None, the scan rewinds to i, end_ok(i) succeeds on the destination's newline, and the definition is accepted with title lost and the title line left as paragraph text, so def.title, the rendered title attribute and the exported titled/title fields all diverge from pristine and from reference cmark 0.31.2."
+  },
+  {
+   "expected": "<blockquote>\n<p><a href=\"/u\">t</a></p>\n</blockquote>",
+   "input": "> [a]:\n    /u\n> \n> [t][a]",
+   "mutant_ids": [
+    "crates/geist4-core/src/parser/leaf.rs:802:15: replace += with *= in scan_ws_gap"
+   ],
+   "target_file": "crates/geist4-core/tests/mutants_leaf.rs",
+   "why_missed": "scan_ws_gap's post-newline loop only fires when the buffer's continuation line keeps leading whitespace, i.e. only for lazy container lines; every existing input reaches scan_destination with the destination already first, so the loop never iterates. Under the mutant the destination scan starts on a space, the bare-destination scan breaks at i == 0 and returns None, the whole definition is rejected, and the paragraph keeps '[a]:' and '/u' as text while [t][a] stays literal, instead of the clean (and reference-conformant) resolved link."
+  }
+ ]
+}
