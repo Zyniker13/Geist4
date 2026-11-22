@@ -7,6 +7,8 @@
 //! specification's appendix. The document is an arena tree whose nodes carry
 //! source spans, so renderers and tools can map output back to the input.
 
+#![deny(missing_docs)]
+
 pub mod arena;
 pub mod basic_html;
 pub mod debug;
