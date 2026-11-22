@@ -11,7 +11,7 @@ use geist4_core::parser::parse_with;
 use geist4_core::{Document, debug};
 use std::sync::Arc;
 
-fn doc(src: &str) -> Document {
+fn doc(src: &str) -> Document<'_> {
     parse_with(src, &Options::new())
 }
 
