@@ -159,22 +159,35 @@ cross-binding suite instead):
 
 ```sh
 cargo install --locked cargo-llvm-cov@0.9.2   # once; matches CI
-cargo llvm-cov llvm-cov --workspace \
+cargo llvm-cov --workspace \
     --exclude geist4-bench --exclude geist4-spec-harness \
     --exclude geist4-cli --exclude geist4-python \
     --exclude geist4-wasm --exclude geist4-ffi \
-    --fail-under-lines 95 --fail-under-file-lines 80   # ~4 min
+    --json --output-path coverage.json   # ~4 min
+python3 tools/check_coverage.py coverage.json 95
 ```
 
+(The subcommand token is supplied automatically when cargo is the
+driver — writing `cargo llvm-cov llvm-cov` passes it twice and fails
+with "unrecognized subcommand llvm-cov".)
+
 The roadmap's gate is line coverage over 95% for the core and HTML
-crates, enforced by the `coverage` job in CI with `--fail-under-lines`.
+crates, enforced by the `coverage` job in CI through
+`tools/check_coverage.py`, which aggregates the JSON report per crate.
+The run deliberately covers the whole workspace battery — the
+ext/mdast/writer tests exercise core code, so a core-scoped run would
+under-measure it — but only the core and HTML crates are gated: the
+workspace total (84% lines at the release) sits lower because
+`geist4-ext` and `geist4-ext-loader` still have deliberate gaps, led by
+`front_matter.rs` (~47%). The binding crates are out of scope entirely:
+their behavior is pinned by the byte-exact contract suites, not by
+line counts.
+
 Release numbers (2026-11-22): `geist4-core` **96.35%** (190 of 5211
-lines missed; the weakest file, `parser/textmap.rs`, sits at 82.46%
-under the per-file 80% floor). `geist4-html` is a documentation shell
-with no instrumentable lines — the HTML renderer lives in
-`geist4-core::basic_html` (96.21% covered). The binding crates'
-coverage is intentionally out of scope: their behavior is pinned by the
-byte-exact contract suites, not by line counts.
+lines missed; the weakest file, `parser/textmap.rs`, sits at 82.46%).
+`geist4-html` is a documentation shell with no instrumentable lines —
+the HTML renderer lives in `geist4-core::basic_html` (96.21%
+covered).
 
 ### The C ABI header and tests
 

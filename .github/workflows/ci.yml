@@ -220,13 +220,22 @@ jobs:
         run: cargo install --locked cargo-llvm-cov@0.9.2
       - name: Measure line coverage
         # The roadmap's gate: line coverage over 95% for the core and
-        # HTML crates, measured over the workspace battery (the binding
-        # and harness crates are excluded; TESTING.md, "Coverage").
+        # HTML crates, measured over the whole workspace battery — the
+        # ext/mdast/writer tests exercise core code, so a core-scoped
+        # run would under-measure it (TESTING.md, "Coverage"). The gate
+        # itself is per-crate via tools/check_coverage.py: no
+        # cargo-llvm-cov flag can gate a subset of crates, and the
+        # workspace total sits lower because ext and ext-loader still
+        # have deliberate gaps.
         # geist4-html is a documentation shell with no instrumentable
-        # lines, so the whole gate rides on geist4-core.
+        # lines, so the whole gate effectively rides on geist4-core.
+        # NOTE: with cargo as the driver the `llvm-cov` subcommand token
+        # is supplied automatically; writing `cargo llvm-cov llvm-cov`
+        # passes it twice and fails with "unrecognized subcommand".
         run: |
-          cargo llvm-cov llvm-cov --workspace \
+          cargo llvm-cov --workspace \
             --exclude geist4-bench --exclude geist4-spec-harness \
             --exclude geist4-cli --exclude geist4-python \
             --exclude geist4-wasm --exclude geist4-ffi \
-            --fail-under-lines 95 --fail-under-file-lines 80
+            --json --output-path coverage.json
+          python3 tools/check_coverage.py coverage.json 95
