@@ -10,7 +10,7 @@ before 1.0 (versioning lives in decisions 0002 and 0003).
 
 Nothing yet.
 
-## [0.1.0] - 2026-11-19
+## [0.1.0] - 2026-11-22
 
 First release: the full engine per the roadmap's M0 through M8.
 

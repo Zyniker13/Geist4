@@ -202,3 +202,31 @@ jobs:
         with:
           name: iai-log
           path: iai.log
+
+  coverage:
+    name: Line coverage gate (>95% core)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install Rust (stable, with llvm-tools)
+        run: |
+          rustup toolchain install stable --profile minimal --component llvm-tools --no-self-update
+          rustup default stable
+      - name: Install cargo-llvm-cov
+        # The version the numbers in TESTING.md were measured with;
+        # bump both together.
+        run: cargo install --locked cargo-llvm-cov@0.9.2
+      - name: Measure line coverage
+        # The roadmap's gate: line coverage over 95% for the core and
+        # HTML crates, measured over the workspace battery (the binding
+        # and harness crates are excluded; TESTING.md, "Coverage").
+        # geist4-html is a documentation shell with no instrumentable
+        # lines, so the whole gate rides on geist4-core.
+        run: |
+          cargo llvm-cov llvm-cov --workspace \
+            --exclude geist4-bench --exclude geist4-spec-harness \
+            --exclude geist4-cli --exclude geist4-python \
+            --exclude geist4-wasm --exclude geist4-ffi \
+            --fail-under-lines 95 --fail-under-file-lines 80

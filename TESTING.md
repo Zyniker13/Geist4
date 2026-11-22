@@ -150,6 +150,32 @@ the same tree — timing catches do not count as kills (decision 0040).
 `DelimList::push` `115:13`/`114:13`-style field-deletion mutants are
 absorbed by struct-update syntax that re-supplies the field.
 
+### Coverage
+
+`cargo-llvm-cov` measures line coverage over the whole workspace test
+battery (the spec harness, CLI, and binding crates are excluded from the
+measurement scope; the bindings are exercised byte for byte by the
+cross-binding suite instead):
+
+```sh
+cargo install --locked cargo-llvm-cov@0.9.2   # once; matches CI
+cargo llvm-cov llvm-cov --workspace \
+    --exclude geist4-bench --exclude geist4-spec-harness \
+    --exclude geist4-cli --exclude geist4-python \
+    --exclude geist4-wasm --exclude geist4-ffi \
+    --fail-under-lines 95 --fail-under-file-lines 80   # ~4 min
+```
+
+The roadmap's gate is line coverage over 95% for the core and HTML
+crates, enforced by the `coverage` job in CI with `--fail-under-lines`.
+Release numbers (2026-11-22): `geist4-core` **96.35%** (190 of 5211
+lines missed; the weakest file, `parser/textmap.rs`, sits at 82.46%
+under the per-file 80% floor). `geist4-html` is a documentation shell
+with no instrumentable lines — the HTML renderer lives in
+`geist4-core::basic_html` (96.21% covered). The binding crates'
+coverage is intentionally out of scope: their behavior is pinned by the
+byte-exact contract suites, not by line counts.
+
 ### The C ABI header and tests
 
 `crates/geist4-ffi` is the one place Rust meets C. Its header
