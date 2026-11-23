@@ -162,3 +162,96 @@ Later decisions are numbered on from there.
 ## After 0.1.0
 
 Not in scope until 0.1.0 is tagged: other language bindings (PHP, Go, Ruby, Kotlin), syntax highlighting, incremental reparsing for editors, and a language server.
+
+## M9+: Post-0.1.0 Roadmap
+
+The 0.1.0 release is tagged. Work below runs under the same priorities
+(correctness, then security, then speed, then features) and the same
+rules as M0–M8: every behavior change gets tests, decisions get records
+in `docs/decisions/`, and `scripts/check.sh` stays identical to CI.
+
+### M9: Close the ext coverage gaps
+
+TESTING.md, "Coverage" records the crates left below the core's bar at
+the 0.1.0 release. The core/html gate itself does not change, but these
+files should earn their way up:
+
+- `geist4-ext/src/front_matter.rs` (~47%): the delimiter-scan and
+  document-start paths are only partly exercised. Tests for: no front
+  matter at all; front matter at byte 0 only; the YAML and TOML
+  delimiters; an unclosed block; a delimiter line inside the block that
+  looks like a closer but is not; interaction with options.
+- `geist4-ext/src/tagfilter.rs` (84%), `autolink.rs` (~90%),
+  `deflists.rs` (~87%): the missed lines are the edge branches — add
+  targeted examples per branch from their spec files.
+- `geist4-ext-loader/src/error.rs` (~48%) and `src/package.rs` (~55%):
+  the error-display and package-edge paths.
+- `geist4-ext-loader/src/sandbox.rs` and `src/adapter.rs` (0% in the
+  default-features measurement): they are behind the `sandbox` feature,
+  whose tests never ran in the coverage job. Decide and record (a
+  decision record) whether CI measures with `--all-features` (compiles
+  wasmtime on every coverage run, slower) or adds a separate lane;
+  either way `tests/sandbox.rs`, `tests/adapter.rs` and
+  `tests/hostile.rs` must show in the numbers.
+- After the tests land: raise the gate in `tools/check_coverage.py`
+  for `geist4-ext` once the achieved numbers are known (start at 90%),
+  and update TESTING.md's coverage section.
+
+**Done when:** every file above measures 90% or better (sandbox and
+adapter under the chosen feature lane), the CI gate for `geist4-ext`
+is raised to the achieved level, and TESTING.md quotes the new numbers.
+
+### M10: Syntax highlighting
+
+Highlight fenced code blocks in the HTML renderer, behind an option so
+the default output stays byte-identical to the spec suite:
+
+- Investigate `syntect` (the Rust standard) vs. a tree-sitter grammar;
+  record the choice and its dependency/security review in a decision
+  record. Prefer a solution that works on `wasm32-unknown-unknown`, or
+  document why the wasm build opts out.
+- API: `Options` gains a highlighting setting (off by default; theme
+  and language-map overrides); the HTML renderer emits `<code>` spans
+  with class-based tokens (no inline styles unless asked).
+- Correctness rules: unknown languages render as plain code, never an
+  error; highlighting never changes any other part of the document; a
+  highlighted render is still safe HTML — everything the highlighter
+  does not own is escaped as before.
+- Tests: unit tests per token class, a differential check that with
+  highlighting off nothing changes, and the wasm size budget
+  re-checked if the wasm build includes the feature.
+
+**Done when:** highlighting is on in the CLI with a flag, off by
+default in the library API, the full battery stays green with it both
+on and off, and the decision record names the chosen engine with its
+wasm story.
+
+### M11: Incremental reparsing for editors
+
+The editor use case (the main consumer) re-renders on every keystroke:
+
+- Parse-time incrementality: given the previous parse's block
+  structure, reparse only the blocks whose source spans changed
+  (line- or byte-diff based), keeping the arena tree and re-running
+  inlines only inside changed leaves. The block structure above and
+  below an edit must be provably unchanged — with tests that mutate
+  random spans and compare full parses against incremental ones.
+- Inline incrementality where profitable (one paragraph's delimiter
+  stack, not the document's).
+- The API shape must work from every binding: an update call taking
+  (previous document, new source) and returning the new document plus
+  a changed-spans list for renderer patching. No threads, no global
+  state; the wasm size budget still holds.
+- Benchmarks: edit-a-typical-document scenarios at 10 KiB–1 MiB with
+  before/after numbers in `docs/benchmarks.md`.
+
+**Done when:** for a fuzzed corpus of edit sequences, incremental
+parses are byte-identical to full parses, the benchmark shows a
+measured win (numbers recorded), and the API is exercised from at
+least the JavaScript binding.
+
+### After M11
+
+Other language bindings (PHP, Go, Ruby, Kotlin), a language server,
+and anything else go into a future revision of this file — add them
+with the same milestone shape when their time comes.

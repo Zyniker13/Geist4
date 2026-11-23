@@ -1,8 +1,8 @@
 # Status
 
-- **Current milestone:** M8 (Tools and 0.1.0) — **DONE. Tag `v0.1.0` pushed onto `ee390cac`, CI/Fuzz/CodeQL all green on the tagged commit.**
-- **Last done:** Fixed the coverage CI job (`fd759b40`): the earlier failure was the doubled `llvm-cov` subcommand token (`cargo llvm-cov llvm-cov` → "unrecognized subcommand"); the gate now runs `tools/check_coverage.py` over the cargo-llvm-cov JSON report and enforces the roadmap's criterion per crate — geist4-core and geist4-html ≥95% line coverage over the whole workspace battery (core measured 96.35%). Locally verified pass at 95, fail at 97 and on corrupted data. Then: CI run 45075634289 **success** (all jobs incl. the coverage gate), Fuzz success, CodeQL success on `ee390cac`; tagged and pushed **`v0.1.0`** (annotated; verified via ls-remote).
-- **Next step:** Nothing for 0.1.0 — the release is complete. Publishing (crates.io / npm / PyPI / Swift registry) needs Mahler's accounts and was never part of the autonomous goal; stop here unless Mahler asks.
+- **Current milestone:** M9 (close the ext coverage gaps) — first milestone of 0.2.0, added to ROADMAP.md's new "M9+" section.
+- **Last done:** v0.1.0 tagged and released (CI/Fuzz/CodeQL green). M9 planning done: ROADMAP.md gained the M9+ section (M9 ext coverage gaps, M10 syntax highlighting, M11 incremental reparsing).
+- **Next step:** M9 test work — front_matter.rs (~47%), tagfilter/autolink/deflists edge branches, ext-loader error.rs/package.rs; decide the sandbox coverage lane (decision record), then raise the geist4-ext gate and update TESTING.md.
 - **Blocked on:** nothing.
 
 ## Log
