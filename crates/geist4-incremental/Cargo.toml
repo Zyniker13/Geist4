@@ -12,6 +12,11 @@ workspace = true
 
 [dev-dependencies]
 geist4-ext = { path = "../geist4-ext" }
+criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "update"
+harness = false
 
 [dependencies]
 geist4-core = { path = "../geist4-core" }
