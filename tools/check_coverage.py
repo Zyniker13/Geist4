@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Enforce the roadmap's line-coverage gate: core and HTML crates over 95%.
+"""Enforce the roadmap's line-coverage gate: core/HTML over 95%, ext over 90%.
 
 Reads the JSON report produced by `cargo llvm-cov --json --output-path`,
 aggregates line coverage per crate, and exits 1 unless geist4-core (and
-geist4-html, if it has any instrumentable lines) reach 95%. The rest of
-the workspace is reported for the record but not gated: the binding
-crates are pinned by their byte-exact contract suites, and the ext
-crates' residual gaps are tracked in TESTING.md.
+geist4-html, if it has any instrumentable lines) reach 95% and
+geist4-ext reaches 90%. The rest of the workspace is reported for the
+record but not gated: the binding crates are pinned by their byte-exact
+contract suites, and the loader/mdast/writer gaps are tracked in
+TESTING.md.
 
 Usage: check_coverage.py <coverage.json> [min-percent]
 """
@@ -48,17 +49,18 @@ def main() -> int:
         print(f"{crate:24s} lines={total:6d} covered={covered:6d} {shown}")
         if pct is None:
             continue  # a documentation shell cannot fail a line gate
-        gated = crate in ("geist4-core", "geist4-html")
-        if gated and pct < min_pct:
+        gated = crate in ("geist4-core", "geist4-html", "geist4-ext")
+        threshold = min_pct if crate != "geist4-ext" else 90.0
+        if gated and pct < threshold:
             print(
-                f"FAIL: {crate} line coverage {pct:.2f}% is below {min_pct:.0f}%",
+                f"FAIL: {crate} line coverage {pct:.2f}% is below {threshold:.0f}%",
                 file=sys.stderr,
             )
             failed = True
 
     if failed:
         return 1
-    print(f"coverage gate ok (core/html >= {min_pct:.0f}% lines)")
+    print(f"coverage gate ok (core/html >= {min_pct:.0f}%, ext >= 90% lines)")
     return 0
 
 

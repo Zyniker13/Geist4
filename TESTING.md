@@ -189,6 +189,25 @@ lines missed; the weakest file, `parser/textmap.rs`, sits at 82.46%).
 the HTML renderer lives in `geist4-core::basic_html` (96.21%
 covered).
 
+Since the release, the M9 work closed the ext coverage gaps and the
+measurement moved to `--all-features` (decision 0042): the loader's
+tier-2 sandbox is the security-critical tier, and a measurement that
+compiled it out reported 0% there — invisible, not tested. With the
+feature on, the sandbox suites (`sandbox.rs`, `adapter.rs`,
+`hostile.rs`) run inside the same report.
+
+Post-M9 numbers (2026-11-23, all-features): `geist4-core` **96.35%**,
+`geist4-ext` **92.51%** (gate: 90%), `geist4-ext-loader` **91.76%**
+(`sandbox.rs` 89.5%, `adapter.rs` 83.9%, `package.rs` 97.1%),
+`geist4-json` 94.78%, `geist4-mdast` 88.31%, `geist4-writer` 91.21%.
+The gate in `tools/check_coverage.py` now enforces core/HTML ≥ 95% and
+`geist4-ext` ≥ 90%. The line-percent denominators llvm-cov reports
+include comment, blank and brace lines, so a file whose only zero-hit
+lines are structural can show a lower percent than its executed code:
+`front_matter.rs` reads 64.9% while every one of its zero-hit lines is
+a brace, a blank line or a doc comment — the executable code is fully
+exercised.
+
 ### The C ABI header and tests
 
 `crates/geist4-ffi` is the one place Rust meets C. Its header

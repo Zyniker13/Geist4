@@ -224,16 +224,17 @@ jobs:
         # ext/mdast/writer tests exercise core code, so a core-scoped
         # run would under-measure it (TESTING.md, "Coverage"). The gate
         # itself is per-crate via tools/check_coverage.py: no
-        # cargo-llvm-cov flag can gate a subset of crates, and the
-        # workspace total sits lower because ext and ext-loader still
-        # have deliberate gaps.
+        # cargo-llvm-cov flag can gate a subset of crates.
         # geist4-html is a documentation shell with no instrumentable
         # lines, so the whole gate effectively rides on geist4-core.
+        # The run uses --all-features (decision 0042): the loader's
+        # tier-2 sandbox is the security-critical tier, and a
+        # measurement that compiles it out would silently skip it.
         # NOTE: with cargo as the driver the `llvm-cov` subcommand token
         # is supplied automatically; writing `cargo llvm-cov llvm-cov`
         # passes it twice and fails with "unrecognized subcommand".
         run: |
-          cargo llvm-cov --workspace \
+          cargo llvm-cov --workspace --all-features \
             --exclude geist4-bench --exclude geist4-spec-harness \
             --exclude geist4-cli --exclude geist4-python \
             --exclude geist4-wasm --exclude geist4-ffi \
