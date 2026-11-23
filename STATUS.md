@@ -2,7 +2,7 @@
 
 - **Current milestone:** M11 (incremental reparsing) — the last milestone of 0.2.0.
 - **Last done:** **M11 property battery landed (`1b4a70e3`).** A proptest over edits of generated paragraph documents (single edits + chains, 256 cases each, seed 2026_1123, regression file checked in) asserts every update matches a full parse through the differential corpus's lockstep oracle — and its first run exposed two real fallback-path bugs, both fixed with regression tests in `tests/regressions.rs`: `hard_boundary` underflowed `blocks[first - 1]` when the first block follows leading blank lines (the `prefix_end == 0` short-circuit no longer applies, so the check now keys on `first == 0` and a new `blank_prefix` gate admits a first block preceded only by whole blank lines), and the prefix-identity check sliced `old_source[..prefix_end]` without bounds, panicking when the edit deletes the first block of a longer document (the claim is now checked; a violated claim falls back to the full parse). geist4-incremental 38 tests green (9 diff + 24 differential + 2 property + 3 regression); clippy `-D warnings` clean; CI green on `1b4a70e3` (all three workflows).
-- **Next step:** M11 close-out: ROADMAP.md done-when review (fuzz target for the incremental pair or an explicit note that the property battery + corpus cover it), TESTING.md bookkeeping, decision-record note if anything changed, then the final CI confirmation — M11 is the last milestone of 0.2.0.
+- **Next step:** M11 closed (`449a58b9`): ROADMAP done-when marked with status, TESTING.md "Incremental reparsing (M11)" section, decision 0045 amendment for the property battery; `scripts/check.sh` exit=0 (78 suites). CI confirmation on `449a58b9` is the only remaining check.
 - **Blocked on:** nothing.
 
 ## Log
