@@ -973,6 +973,7 @@ name = "geist4-incremental"
 version = "0.1.0"
 dependencies = [
  "geist4-core",
+ "geist4-ext",
 ]
 
 [[package]]

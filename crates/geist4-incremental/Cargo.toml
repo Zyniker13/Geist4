@@ -10,5 +10,8 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[dev-dependencies]
+geist4-ext = { path = "../geist4-ext" }
+
 [dependencies]
 geist4-core = { path = "../geist4-core" }

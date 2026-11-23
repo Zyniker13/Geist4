@@ -5,81 +5,96 @@
 //! This crate turns a previous parse and the new source into a new
 //! parse that reuses the unchanged blocks, per decision 0045: the edit
 //! region (the top-level blocks a line diff marks as changed, plus
-//! everything whose byte offsets shifted) is reparsed through the
-//! core's fragment parser, unchanged blocks are copied with their
-//! spans shifted, and what genuinely depends on the whole document —
-//! link reference definitions, extension post-processing — is
-//! re-derived document-wide.
+//! everything after them) is reparsed through the core's fragment
+//! parser, unchanged blocks are copied structurally, and what
+//! genuinely depends on the whole document — link reference
+//! definitions, broken-reference problems — is re-derived from the
+//! two halves.
 //!
 //! The full parse is the oracle: [`Editor::update`] falls back to it
-//! whenever the region choice cannot be proven safe, and the fuzzed
-//! differential corpus compares every incremental result against
-//! `parse_with` byte for byte.
+//! whenever the region choice cannot be proven safe, and the
+//! differential corpus in `tests/` compares every incremental result
+//! against `parse_with` node for node.
+//!
+//! ## When the fast path runs
+//!
+//! Every guard below must hold, or the update is a full parse (which
+//! is byte-identical by construction):
+//!
+//! * no extensions are registered — `begin_parse` state and
+//!   document-wide `post_process` would have to be re-driven over the
+//!   assembled tree, and a fragment starting at a front-matter
+//!   delimiter could be mis-claimed;
+//! * the checkpoint succeeded — the previous tree contains no
+//!   extension nodes;
+//! * the line diff finds at most one region — a multi-site edit is
+//!   not split yet;
+//! * the byte-identical prefix check passes — everything before the
+//!   first changed block is the same in both sources;
+//! * every link reference definition of the previous document lies
+//!   inside the prefix, so no prefix reference can have resolved
+//!   against a definition inside the reparsed region;
+//! * the fragment defines no link references of its own, so a
+//!   reference the previous parse left broken (literal text) cannot
+//!   become resolved in the new document while the copy keeps it
+//!   broken;
+//! * the boundary is hard: the update starts at the beginning of the
+//!   document, or the old source ends the prefix with a blank line
+//!   (which closes paragraphs and HTML blocks) and the last copied
+//!   block is neither a list (items continue across single blank
+//!   lines) nor an indented code block (blank lines are interior to
+//!   it). Without this, a fragment whose first line would continue
+//!   the last copied block parses differently in context than alone.
+//!
+//! References in the fragment: the current guards refuse any
+//! reparse whose fragment contains a `[` (a definition, a reference
+//! link, an image or a footnote marker could all resolve differently
+//! out of context), so the fragment cannot disagree with the copy it
+//! replaces about resolution, and the prefix's definition map carries
+//! over verbatim. A later stage can narrow this guard by seeding the
+//! fragment parse with the prefix's definitions, the way a full parse
+//! sees them in document order.
 
 #![forbid(unsafe_code)]
 
-use geist4_core::extension::Options;
-use geist4_core::node::{CodeBlockData, HeadingData, HtmlBlockData, ListData, Node, SpannedDef};
-use geist4_core::parser::{Document, parse_with};
+use geist4_core::arena::{Arena, NodeId};
+use geist4_core::extension::{AttrValue, Options};
+use geist4_core::node::{Node, SpannedDef};
+use geist4_core::parser::{Document, normalize_label, parse_with};
 use geist4_core::span::Span;
-
-/// What one top-level block of the checkpoint remembers, so an
-/// unchanged copy reproduces the block byte for byte and a shifted
-/// copy can have its spans adjusted.
-#[derive(Debug, Clone)]
-enum BlockSummary<'a> {
-    /// A block with no payload: blockquote, thematic break, paragraph.
-    /// The paragraph's inline children ride along inside the copy.
-    Plain,
-    /// A list; the marker data and tightness reproduce verbatim.
-    List(ListData),
-    /// A list item; the padding reproduces verbatim.
-    Item(u32),
-    /// A heading; level and setext-ness reproduce verbatim.
-    Heading(HeadingData),
-    /// A code block; fence shape, info string and literal.
-    Code(CodeBlockData<'a>),
-    /// A raw HTML block; kind and literal.
-    Html(HtmlBlockData<'a>),
-    /// An extension's node: the kind name, attributes and the
-    /// extension's index in the options list.
-    Extension { kind: String, index: Option<usize> },
-}
-
-/// One checkpointed top-level block.
-#[derive(Debug, Clone)]
-struct CheckpointBlock<'a> {
-    #[allow(dead_code)]
-    summary: BlockSummary<'a>,
-    /// The block's source span in the checkpoint's source.
-    #[allow(dead_code)]
-    span: Span,
-    /// The link reference definitions this block contributed, in
-    /// document order, with their spans.
-    #[allow(dead_code)]
-    defs: Vec<SpannedDef<'a>>,
-    /// The block's full arena slice in allocation order: the block's
-    /// own id first, then every descendant, depth-first. A copy walks
-    /// this list and re-allocates each entry with rewritten child
-    /// lists and shifted spans.
-    #[allow(dead_code)]
-    nodes: Vec<CopiedNode<'a>>,
-}
-
-/// One node of a copied block: the data needed to re-allocate it into
-/// a new arena.
+/// One node of a checkpointed block: the data needed to re-allocate it
+/// into a new arena.
 #[derive(Debug, Clone)]
 struct CopiedNode<'a> {
     kind: Node<'a>,
     span: Span,
-    /// The children as indices into the block's own node list
-    /// (positions in `CheckpointBlock::nodes`), not arena ids.
+    /// The children as positions in the block's own node list, not
+    /// arena ids.
     children: Vec<usize>,
-    /// The index of this node within the block's list (its own
-    /// position), so parent links resolve during the copy.
-    position: usize,
+    /// The attributes set on the node, in set order.
+    attrs: Vec<(String, AttrValue)>,
     /// The extension-ownership mark, if the node was claimed.
     owned: Option<usize>,
+}
+
+/// One checkpointed top-level block: its source span and its full
+/// subtree in pre-order (the block's own node first, then every
+/// descendant, depth-first).
+#[derive(Debug, Clone)]
+struct CheckpointBlock<'a> {
+    span: Span,
+    nodes: Vec<CopiedNode<'a>>,
+}
+
+/// The editor's checkpoint: everything a cheap update needs from the
+/// previous parse. It borrows the old source, which the previous
+/// document borrows too, so both live as long as the caller's buffer.
+#[derive(Debug, Clone)]
+struct Checkpoint<'a> {
+    /// The top-level blocks in document order.
+    blocks: Vec<CheckpointBlock<'a>>,
+    /// The source the checkpoint was taken from.
+    old_source: &'a str,
 }
 
 /// The editor state: the options every update runs with.
@@ -97,23 +112,382 @@ impl Editor {
     }
 
     /// Produces the document for `new_source` given the previous
-    /// document `previous`, reusing its unchanged blocks.
+    /// document `previous` and the source it was parsed from,
+    /// reusing the unchanged blocks where the guards in the
+    /// [module documentation](self) prove that safe, and falling back
+    /// to a full parse whenever they do not.
+    ///
+    /// `old_source` must be the exact source `previous` was parsed
+    /// from; the crate cannot recover it from the document, because
+    /// the arena stores nodes, not text. Both sources must outlive the
+    /// returned document: the copied prefix borrows `old_source` and
+    /// the reparsed region borrows `new_source`.
     ///
     /// The returned span list reports, in new-source coordinates, the
-    /// byte ranges that were reparsed (not merely shifted), so a
-    /// renderer can patch exactly those regions of its output.
-    ///
-    /// While the checkpoint machinery is being built out, every update
-    /// is a full parse — byte-identical by construction, and the
-    /// baseline the benchmark measures against.
+    /// byte ranges that were reparsed rather than copied, so a
+    /// renderer can patch exactly those regions of its output. A
+    /// full-parse fallback reports the whole source; an update on an
+    /// unchanged source reports nothing.
     #[must_use]
     pub fn update<'doc>(
         &self,
-        _previous: &Document<'doc>,
+        previous: &Document<'doc>,
+        old_source: &'doc str,
         new_source: &'doc str,
     ) -> (Document<'doc>, Vec<Span>) {
-        (parse_with(new_source, &self.options), Vec::new())
+        // The fast path is plain CommonMark only, this stage: with
+        // extensions registered, per-parse `begin_parse` state and
+        // document-wide `post_process` would have to be re-driven over
+        // the assembled tree.
+        if !self.options.extensions().is_empty() {
+            return (
+                parse_with(new_source, &self.options),
+                vec![whole(new_source)],
+            );
+        }
+        let Some(checkpoint) = checkpoint_from(previous, old_source) else {
+            return (
+                parse_with(new_source, &self.options),
+                vec![whole(new_source)],
+            );
+        };
+        match diff_regions(old_source, new_source).as_slice() {
+            // The sources are identical: copy the whole document at
+            // shift zero. The result is value-identical to a full parse
+            // and costs no parse.
+            [] => (
+                assemble(
+                    previous,
+                    &checkpoint,
+                    new_source,
+                    checkpoint.blocks.len(),
+                    old_source.len(),
+                    &empty_document(&self.options),
+                ),
+                Vec::new(),
+            ),
+            [region] => self.update_region(previous, &checkpoint, new_source, region),
+            // A multi-site edit is not split into regions yet.
+            _ => (
+                parse_with(new_source, &self.options),
+                vec![whole(new_source)],
+            ),
+        }
     }
+
+    /// The one-region incremental path: copy the byte-identical prefix
+    /// blocks, reparse from the first changed block to the end of the
+    /// document, and re-derive the document-wide collections.
+    fn update_region<'doc>(
+        &self,
+        previous: &Document<'doc>,
+        checkpoint: &Checkpoint<'doc>,
+        new_source: &'doc str,
+        region: &EditRegion,
+    ) -> (Document<'doc>, Vec<Span>) {
+        let full = || {
+            (
+                parse_with(new_source, &self.options),
+                vec![whole(new_source)],
+            )
+        };
+        let Some(first) = region_blocks(checkpoint, region.old_start, region.old_end) else {
+            return full();
+        };
+        // The prefix through the first changed block's start is
+        // byte-identical in both sources: the diff trimmed the common
+        // prefix, and any block starting before the region ends at or
+        // before it.
+        let prefix_end = checkpoint.blocks[first].span.start;
+        if prefix_end > new_source.len()
+            || old_source(checkpoint)[..prefix_end] != new_source[..prefix_end]
+        {
+            return full();
+        }
+        // Guard: every previous definition lies in the prefix, so no
+        // prefix reference resolved against a definition the reparse
+        // discards.
+        if !previous.defs.iter().all(|def| def.span.end <= prefix_end) {
+            return full();
+        }
+        // Guard: the boundary is hard (see the module documentation).
+        if !hard_boundary(checkpoint, first, prefix_end) {
+            return full();
+        }
+        let fragment_source = &new_source[prefix_end..];
+        // Guard: the fragment holds no `[` at all, so it contains no
+        // link reference definitions and no reference links or images.
+        // The prefix's definitions therefore stay complete (the
+        // previous guard proved they end before the boundary), the
+        // fragment cannot resolve or break a reference differently
+        // from the copy it replaces, and a definition it would add
+        // cannot shadow the prefix's map. A fragment that mentions a
+        // bracket takes the full parse; the corpus pins that the
+        // result still matches.
+        if fragment_source.contains('[') {
+            return full();
+        }
+        let fragment = geist4_core::parser::parse_fragment(fragment_source, &self.options);
+        let document = assemble(
+            previous, checkpoint, new_source, first, prefix_end, &fragment,
+        );
+        let changed = vec![Span::new(prefix_end, new_source.len())];
+        (document, changed)
+    }
+}
+
+/// A span covering all of `source`.
+fn whole(source: &str) -> Span {
+    Span::new(0, source.len())
+}
+
+/// The checkpoint's old source.
+fn old_source<'doc>(checkpoint: &Checkpoint<'doc>) -> &'doc str {
+    checkpoint.old_source
+}
+
+/// Whether the update can start a reparse at `prefix_end`: either the
+/// document begins there, or the old source ends the prefix with a
+/// blank line and the last copied block neither continues across
+/// blank lines (a list) nor contains them (an indented code block).
+fn hard_boundary(checkpoint: &Checkpoint<'_>, first: usize, prefix_end: usize) -> bool {
+    if prefix_end == 0 {
+        return true;
+    }
+    let last = &checkpoint.blocks[first - 1];
+    if matches!(last.nodes[0].kind, Node::List(_)) {
+        return false;
+    }
+    if let Node::CodeBlock(data) = &last.nodes[0].kind {
+        if !data.fenced {
+            return false;
+        }
+    }
+    ends_with_blank_line(&checkpoint.old_source[..prefix_end])
+}
+
+/// Whether `src`'s last line is empty after trimming spaces and tabs.
+fn ends_with_blank_line(src: &str) -> bool {
+    match src.lines().last() {
+        Some(last) => last
+            .trim_matches(|c: char| c == ' ' || c == '\t')
+            .is_empty(),
+        None => false,
+    }
+}
+
+/// An empty fragment, for paths where the reparse contributes nothing:
+/// the assembly needs a `Document` value with an empty arena, and a
+/// fragment parse of the empty string provides one.
+fn empty_document(options: &Options) -> Document<'static> {
+    geist4_core::parser::parse_fragment("", options)
+}
+
+/// Which top-level block the byte range `[start, end)` first
+/// intersects; the reparse runs from there to the end of the document.
+///
+/// A region that intersects no block sits in the gap between two
+/// blocks (blank lines): the reparse starts at the last block before
+/// the gap, because an inserted line there may belong to that block's
+/// parse. With no block before the gap either, the update falls back.
+fn region_blocks(checkpoint: &Checkpoint<'_>, start: usize, end: usize) -> Option<usize> {
+    for (index, block) in checkpoint.blocks.iter().enumerate() {
+        if block.span.start < end && block.span.end > start {
+            return Some(index);
+        }
+    }
+    checkpoint
+        .blocks
+        .iter()
+        .rposition(|block| block.span.end <= start)
+}
+
+/// Builds the new document: the copied prefix blocks, then the
+/// fragment's tree with spans shifted into document coordinates, and
+/// the document-wide collections re-derived from the two halves.
+///
+/// With `first` equal to the block count and `prefix_end` equal to the
+/// old source's length this copies the whole checkpoint — the
+/// identical-sources path.
+fn assemble<'doc>(
+    previous: &Document<'doc>,
+    checkpoint: &Checkpoint<'doc>,
+    new_source: &'doc str,
+    first: usize,
+    prefix_end: usize,
+    fragment: &Document<'doc>,
+) -> Document<'doc> {
+    let delta = prefix_end as isize;
+    let mut arena = Arena::new();
+    arena.reserve(
+        checkpoint.blocks[..first]
+            .iter()
+            .map(|b| b.nodes.len())
+            .sum::<usize>()
+            + fragment.arena.len()
+            + 1,
+    );
+    let root = arena.alloc(Node::Document, Span::new(0, new_source.len()));
+    for block in &checkpoint.blocks[..first] {
+        copy_checkpointed(&mut arena, &block.nodes, root, 0);
+    }
+    for top in fragment.arena.children(fragment.root).to_vec() {
+        copy_fragment(&mut arena, fragment, top, root, delta);
+    }
+
+    // Definitions: the prefix's carry verbatim (its bytes are
+    // identical), the fragment's shift into document coordinates. With
+    // `first` covering everything, the fragment contributes nothing and
+    // every definition carries.
+    let mut defs: Vec<SpannedDef<'doc>> = previous
+        .defs
+        .iter()
+        .filter(|def| def.span.end <= prefix_end)
+        .cloned()
+        .collect();
+    for def in &fragment.defs {
+        defs.push(SpannedDef {
+            def: def.def.clone(),
+            span: shift_span(def.span, delta),
+            titled: def.titled,
+        });
+    }
+    // The map is first-wins in document order: the prefix's
+    // definitions precede the fragment's, exactly as in a full parse.
+    // With the guards holding, `previous.link_defs` already is the
+    // prefix's map.
+    let mut link_defs = previous.link_defs.clone();
+    for def in &defs {
+        link_defs
+            .entry(normalize_label(&def.def.label))
+            .or_insert_with(|| def.def.clone());
+    }
+    // Problems follow the same partition as definitions.
+    let mut problems: Vec<geist4_core::problems::Problem> = previous
+        .problems
+        .iter()
+        .filter(|problem| problem.span.end <= prefix_end)
+        .map(|problem| geist4_core::problems::Problem::new(problem.message.clone(), problem.span))
+        .collect();
+    for problem in &fragment.problems {
+        problems.push(geist4_core::problems::Problem::new(
+            problem.message.clone(),
+            shift_span(problem.span, delta),
+        ));
+    }
+
+    Document {
+        arena,
+        root,
+        link_defs,
+        defs,
+        problems,
+    }
+}
+
+/// Re-allocates a checkpointed subtree into `arena` under `parent`,
+/// with every span shifted by `delta`. The list is pre-order with
+/// children referencing parents by position, so two passes wire it:
+/// allocate in list order, then attach children and reapply
+/// attributes.
+fn copy_checkpointed<'a>(
+    arena: &mut Arena<'a>,
+    nodes: &[CopiedNode<'a>],
+    parent: NodeId,
+    delta: isize,
+) {
+    if nodes.is_empty() {
+        return;
+    }
+    let mut ids = Vec::with_capacity(nodes.len());
+    for node in nodes {
+        let id = arena.alloc(node.kind.clone(), shift_span(node.span, delta));
+        for (name, value) in &node.attrs {
+            arena.set_attr(id, name.clone(), value.clone());
+        }
+        if let Some(owner) = node.owned {
+            arena.set_extension(id, owner);
+        }
+        ids.push(id);
+    }
+    for (index, node) in nodes.iter().enumerate() {
+        for &child in &node.children {
+            arena.push_child(ids[index], ids[child]);
+        }
+    }
+    arena.push_child(parent, ids[0]);
+}
+
+/// Copies one fragment subtree into `arena` under `parent`, shifting
+/// every span by `delta`.
+fn copy_fragment<'doc>(
+    arena: &mut Arena<'doc>,
+    fragment: &Document<'doc>,
+    source: NodeId,
+    parent: NodeId,
+    delta: isize,
+) {
+    let new_id = arena.alloc(
+        fragment.arena.kind(source).clone(),
+        shift_span(fragment.arena.span(source), delta),
+    );
+    for (name, value) in fragment.arena.attrs(source) {
+        arena.set_attr(new_id, name.clone(), value.clone());
+    }
+    if let Some(owner) = fragment.arena.extension_of(source) {
+        arena.set_extension(new_id, owner);
+    }
+    arena.push_child(parent, new_id);
+    for child in fragment.arena.children(source).to_vec() {
+        copy_fragment(arena, fragment, child, new_id, delta);
+    }
+}
+
+/// Extracts a checkpoint from a finished document. Returns `None` when
+/// the tree carries anything this stage cannot copy — an extension
+/// node anywhere.
+#[must_use]
+fn checkpoint_from<'a>(document: &Document<'a>, source: &'a str) -> Option<Checkpoint<'a>> {
+    let mut blocks = Vec::new();
+    for &child in document.arena.children(document.root) {
+        let mut nodes = Vec::new();
+        collect_subtree(&document.arena, child, &mut nodes)?;
+        blocks.push(CheckpointBlock {
+            span: document.arena.span(child),
+            nodes,
+        });
+    }
+    Some(Checkpoint {
+        blocks,
+        old_source: source,
+    })
+}
+
+/// Walks a subtree depth-first, pre-order, into `nodes`; children
+/// reference parents by list position. Returns `None` when a node's
+/// kind cannot be copied at this stage.
+fn collect_subtree<'a>(
+    arena: &Arena<'a>,
+    id: NodeId,
+    nodes: &mut Vec<CopiedNode<'a>>,
+) -> Option<()> {
+    if matches!(arena.kind(id), Node::Extension(_)) {
+        return None;
+    }
+    let mine = nodes.len();
+    nodes.push(CopiedNode {
+        kind: arena.kind(id).clone(),
+        span: arena.span(id),
+        children: Vec::new(),
+        attrs: arena.attrs(id).to_vec(),
+        owned: arena.extension_of(id),
+    });
+    for child in arena.children(id) {
+        let at = nodes.len();
+        collect_subtree(arena, *child, nodes)?;
+        nodes[mine].children.push(at);
+    }
+    Some(())
 }
 
 /// Computes a stable per-line hash for the line diff (FNV-1a). A hash
