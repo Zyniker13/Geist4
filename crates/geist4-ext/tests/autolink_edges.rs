@@ -7,7 +7,7 @@
 //! otherwise drive them through `render_with` on precise inputs.
 
 use geist4_core::basic_html::render_with;
-use geist4_core::extension::Options;
+use geist4_core::extension::{Extension, Options};
 use geist4_core::parser::parse_with;
 
 fn autolink_html(src: &str) -> String {
@@ -289,4 +289,123 @@ fn email_split_boundaries() {
         "<p><a href=\"mailto:a@b.com\">a@b.com</a> mid <a href=\"mailto:c@d.com\">c@d.com</a></p>\n",
         "the text between two addresses stays one node"
     );
+}
+
+/// Multibyte characters count as valid host characters and survive
+/// into the URL percent-encoded: `decode_char`'s 2-, 3- and 4-byte
+/// arms.
+#[test]
+fn multibyte_host_characters() {
+    assert_eq!(
+        autolink_html("www.é.com"),
+        "<p><a href=\"http://www.%C3%A9.com\">www.é.com</a></p>\n",
+        "a 2-byte character is a valid host character"
+    );
+    assert_eq!(
+        autolink_html("www.\u{FFFD}"),
+        "<p><a href=\"http://www.%EF%BF%BD\">www.\u{FFFD}</a></p>\n",
+        "a 3-byte character links to the line end"
+    );
+    assert_eq!(
+        autolink_html("www.a\u{0085}"),
+        "<p><a href=\"http://www.a%C2%85\">www.a\u{0085}</a></p>\n",
+        "a Unicode NEL is not an ASCII space to the matcher"
+    );
+}
+
+/// A `<` inside a www match ends it there, exactly as for scheme URLs.
+#[test]
+fn less_than_ends_www_match() {
+    assert_eq!(
+        autolink_html("www.example.com/a<b"),
+        "<p><a href=\"http://www.example.com/a\">www.example.com/a</a>&lt;b</p>\n"
+    );
+}
+
+/// A trailing `?` trims to the URL's end; the question mark stays
+/// literal text after the link.
+#[test]
+fn trailing_question_mark_trims() {
+    assert_eq!(
+        autolink_html("http://ab?"),
+        "<p><a href=\"http://ab\">http://ab</a>?</p>\n",
+        "the scheme form trims the ? too"
+    );
+    assert_eq!(
+        autolink_html("www.ab?"),
+        "<p><a href=\"http://www.ab\">www.ab</a>?</p>\n",
+        "the www form trims the ? too"
+    );
+}
+
+/// The email scan's restart paths: an `@` at the very start has no
+/// rewind room, so the scan restarts at the next `@` and the first
+/// stays literal; an address with no dot after the `@` declines.
+#[test]
+fn email_restart_and_decline() {
+    assert_eq!(
+        autolink_html("@b@c.example"),
+        "<p>@<a href=\"mailto:b@c.example\">b@c.example</a></p>\n",
+        "a leading @ has nothing before it; the later one anchors"
+    );
+    assert_eq!(
+        autolink_html("a@b"),
+        "<p>a@b</p>\n",
+        "no dot in the domain part, no link"
+    );
+}
+
+/// Both match kinds decline inside a link or image bracket, resolved
+/// or not: the trigger's `in_bracket` gate.
+#[test]
+fn triggers_decline_inside_brackets() {
+    assert_eq!(
+        autolink_html("[www.x.com a](b"),
+        "<p>[www.x.com a](b</p>\n",
+        "an unresolved bracket keeps everything literal"
+    );
+    assert_eq!(
+        autolink_html("[foo www.x.com"),
+        "<p>[foo www.x.com</p>\n",
+        "an open bracket before the trigger declines the match"
+    );
+    assert_eq!(
+        autolink_html("[www.x.com](y)"),
+        "<p><a href=\"y\">www.x.com</a></p>\n",
+        "a resolved link's text stays literal inside"
+    );
+}
+
+/// An email address in text the node owns after inline splitting
+/// still links: the splitter's `Cow::Owned` arm (an emphasis close
+/// re-owns its text).
+#[test]
+fn email_in_owned_text_links() {
+    assert_eq!(
+        autolink_html("*a foo@bar.com b*"),
+        "<p><em>a <a href=\"mailto:foo@bar.com\">foo@bar.com</a> b</em></p>\n"
+    );
+}
+
+/// A code span is not text to the scanner: its content stays literal.
+#[test]
+fn email_in_code_span_stays_literal() {
+    assert_eq!(
+        autolink_html("`code foo@bar.com`"),
+        "<p><code>code foo@bar.com</code></p>\n"
+    );
+}
+
+/// The extension trait surface: the name is the registered name and
+/// the trigger table routes `w` and `:` to their matchers.
+#[test]
+fn trait_surface() {
+    let extension = geist4_ext::autolink();
+    assert_eq!(Extension::name(extension.as_ref()), "autolink");
+    assert_eq!(extension.inline_triggers(), b"w:");
+    assert_eq!(
+        autolink_html("www.x.com"),
+        "<p><a href=\"http://www.x.com\">www.x.com</a></p>\n"
+    );
+    assert_eq!(autolink_html(":x"), "<p>:x</p>\n");
 }

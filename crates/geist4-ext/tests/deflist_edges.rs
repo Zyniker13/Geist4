@@ -152,3 +152,52 @@ fn loose_definition_rendering() {
         "a blank line inside the definition makes it a loose one; a trailing paragraph stays outside"
     );
 }
+
+/// A tight definition whose block child is not a plain paragraph
+/// keeps its own wrapper: the strip only fires for paragraphs, and a
+/// list child renders with the newline the `ensure_newline` hook
+/// supplies (`strip_paragraph_wrapper`'s `None` arm).
+#[test]
+fn tight_definition_with_a_list_child() {
+    assert_eq!(
+        dl_html("Term\n: - one\n- two\n"),
+        "<dl>\n<dt>Term</dt>\n<dd>\n<ul>\n<li>one</li>\n</ul>\n</dd>\n</dl>\n<ul>\n<li>two</li>\n</ul>\n",
+        "the first list joins the definition; the second breaks out at column 0 and closes the item"
+    );
+}
+
+/// A tight definition with an indented code block child: the code
+/// block's own rendering ends with a newline, so no extra one is
+/// inserted, and no `<p>` wrapper is stripped from it.
+#[test]
+fn tight_definition_with_a_code_child() {
+    assert_eq!(
+        dl_html("Term\n: def\n    code\n"),
+        "<dl>\n<dt>Term</dt>\n<dd>def\ncode</dd>\n</dl>\n"
+    );
+}
+
+/// The foreign-kind render arm: a node whose kind belongs to no
+/// deflist kind renders nothing through this extension's renderer,
+/// while the real kinds render through the same entry point.
+#[test]
+fn foreign_kind_renders_nothing() {
+    use geist4_core::extension::{ExtNode, RenderedChild};
+
+    let extension = geist4_ext::deflists();
+    let node = ExtNode {
+        kind: "not_a_deflist_kind".to_owned(),
+        attrs: Vec::new(),
+    };
+    let mut out = String::new();
+    extension.render(&node, &[] as &[RenderedChild<'_>], &mut out);
+    assert_eq!(out, "", "a foreign kind renders nothing");
+
+    let term = ExtNode {
+        kind: "description_term".to_owned(),
+        attrs: Vec::new(),
+    };
+    let mut out2 = String::new();
+    extension.render(&term, &[] as &[RenderedChild<'_>], &mut out2);
+    assert_eq!(out2, "<dt></dt>\n");
+}
