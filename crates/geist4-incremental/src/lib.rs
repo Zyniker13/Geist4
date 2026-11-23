@@ -33,6 +33,10 @@
 //!   inside the prefix, so no prefix reference can have resolved
 //!   against a definition inside the reparsed region, and the copied
 //!   tail cannot carry definitions either;
+//! * the bytes before the first reparsed block, when the reparse
+//!   starts at the document's first block, are whole blank lines —
+//!   anything else there is outside every block and takes the full
+//!   parse;
 //! * the boundary is hard: the update starts at the beginning of the
 //!   document, or the old source ends the prefix with a blank line
 //!   (which closes paragraphs and HTML blocks) and the last copied
@@ -197,9 +201,22 @@ impl Editor {
         // The prefix through the first changed block's start is
         // byte-identical in both sources: the diff trimmed the common
         // prefix, and any block starting before the region ends at or
-        // before it.
+        // before it. The comment is a claim, not a mechanism: verify
+        // it before slicing, and take the full parse otherwise.
         let prefix_end = checkpoint.blocks[first].span.start;
-        if old_source[..prefix_end] != new_source[..prefix_end] {
+        if old_source.len() < prefix_end
+            || new_source.len() < prefix_end
+            || old_source[..prefix_end] != new_source[..prefix_end]
+        {
+            return full();
+        }
+        // Guard: bytes before the first reparsed block belong to no
+        // block. They are droppable only as whole blank lines — a full
+        // parse gives blank lines no nodes, definitions or problems —
+        // and only then does the fragment start at a line start. Any
+        // other leading bytes (a block span starting inside its first
+        // line, say) take the full parse.
+        if first == 0 && prefix_end > 0 && !blank_prefix(&old_source[..prefix_end]) {
             return full();
         }
         // Guard: every previous definition lies in the prefix, so no
@@ -343,13 +360,30 @@ fn hard_boundary(
     prefix_end: usize,
     old_source: &str,
 ) -> bool {
-    if prefix_end == 0 {
+    if first == 0 {
+        // No copied blocks precede the reparse, so nothing can
+        // continue into it; whether the reparse may start at the first
+        // block's start is decided by the blank-prefix gate at the
+        // call site.
         return true;
     }
     if checkpoint.blocks[first - 1].tail_continues {
         return false;
     }
     ends_with_blank_line(&old_source[..prefix_end])
+}
+
+/// Whether `src` is a run of whole blank lines: every line blank
+/// after trimming spaces and tabs, and the text ending with a line
+/// ending, so the byte after `src` starts a line. Such a prefix
+/// produces no blocks, no definitions and no problems in a full
+/// parse, so dropping it from a reparse changes nothing.
+fn blank_prefix(src: &str) -> bool {
+    (src.ends_with('\n') || src.ends_with('\r'))
+        && src.lines().all(|line| {
+            line.trim_matches(|c: char| c == ' ' || c == '\t')
+                .is_empty()
+        })
 }
 
 /// Whether `src`'s last line is empty after trimming spaces and tabs.

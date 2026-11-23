@@ -13,6 +13,7 @@ workspace = true
 [dev-dependencies]
 geist4-ext = { path = "../geist4-ext" }
 criterion = { version = "0.7", default-features = false, features = ["cargo_bench_support"] }
+proptest = { version = "1", default-features = false, features = ["std"] }
 
 [[bench]]
 name = "update"

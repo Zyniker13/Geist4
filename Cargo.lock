@@ -975,6 +975,7 @@ dependencies = [
  "criterion",
  "geist4-core",
  "geist4-ext",
+ "proptest",
 ]
 
 [[package]]
