@@ -632,7 +632,12 @@ pub fn escape_href(url: &str) -> String {
 
 /// Escapes text the way the reference implementation does: `&`, `<`, `>` and
 /// `"` become entities; `'` and `/` stay raw.
-fn escape_html(text: &str) -> String {
+///
+/// Public so sibling crates (the highlighting module) escape byte-for-byte
+/// identically; the HTML renderer and the highlighter must agree exactly
+/// on what is escaped, or a highlighted block and a plain block would
+/// differ outside the spans.
+pub fn escape_html(text: &str) -> String {
     // Byte-level scan with bulk runs between escapes: the escapable bytes
     // are all ASCII, so a non-ASCII byte can never start an escape and
     // runs may be copied verbatim, including multi-byte characters.

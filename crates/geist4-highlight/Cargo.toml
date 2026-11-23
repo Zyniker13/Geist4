@@ -1,0 +1,23 @@
+[package]
+name = "geist4-highlight"
+description = "Syntax highlighting for Geist4 fenced code blocks: syntect scopes mapped to CSS class tokens"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+geist4-core = { path = "../geist4-core" }
+syntect = { version = "5.3", default-features = false, features = [
+    "parsing",
+    "default-syntaxes",
+    "default-themes",
+    "yaml-load",
+    "dump-load",
+    "dump-create",
+    "regex-fancy",
+] }
