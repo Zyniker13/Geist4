@@ -159,3 +159,54 @@ avoided by copying, and inlines re-run only in the edited leaves.
 - Binding exposure (FFI, wasm, python) follows once the core is
   proven; the roadmap's done-when needs at least the JavaScript
   binding exercised.
+
+## As-built amendment (2026-11-23, `a676b589`)
+
+The checkpoint stage landed with two deviations from the design
+above, both recorded here because they change what a later stage can
+assume:
+
+1. **`parse_fragment`, not a prefix-summary parser entry.** The
+   planned "start from a checkpoint and stop at one" parser primitive
+   is not built. Core gained `parse_fragment(src, options)` instead:
+   the ordinary `Parser` machinery run over a source *slice* that
+   must start at a line start, with no `begin_parse` and no
+   `post_process`, spans staying in fragment coordinates (the caller
+   shifts them). The incremental crate reuses it by reparsing
+   `[prefix_end, len)` — a *suffix* region, not an isolated edit
+   region — which makes the region rule simpler and strictly more
+   conservative than the design's "intersecting blocks + shifted
+   tail": every block from the first changed one to the end is
+   reparsed, so span-shift bookkeeping for copied tails disappears
+   (only the prefix is copied).
+
+2. **Definitions are not seeded; the fragment must be bracket-free.**
+   The design's seeded-defmap primitive was prototyped
+   (`parse_fragment_with_defs`) and reverted as unsound: a definition
+   inside the fragment must shadow its seeded label per first-wins,
+   and reproducing the scanner's titled-definition decisions out of
+   context is exactly the kind of divergent reimplementation the
+   differential corpus exists to catch. The landed guard is trivially
+   sound: if the fragment source contains any `[`, `update` falls
+   back to a full parse. A fragment with no `[` can contain no
+   definitions and no reference links/images/footnotes, so the
+   prefix's map carries over verbatim and resolution cannot differ
+   from the copy it replaces. The other as-built guards (extension
+   nodes, multi-region edits, byte-identity confirmation of the
+   prefix, defs crossing the boundary, hard boundaries: list, block
+   quote, setext, indented code) follow the design's fallback rule:
+   every path that cannot prove safety full-parses.
+
+The differential oracle also deviates from the design's wording: it
+never compares arena sizes. A full parse legitimately leaves
+unreachable block-phase text nodes behind (the document-wide inline
+pass clears each leaf's text children and re-allocates inline nodes;
+the originals stay in the arena), so only the reachable tree (kinds,
+attrs, ownership, spans via the tree dump), defs, the def map and
+problems are observable and compared. The identical-sources path,
+which the design did not call out, is assembly with an empty fragment
+— and the corpus caught a real bug there (the first draft parsed the
+whole new source as the "fragment" and double-appended every block).
+
+Benchmarks, the fuzz loop over the differential corpus, and binding
+exposure remain open items under this decision.
