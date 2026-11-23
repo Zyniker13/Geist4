@@ -40,6 +40,15 @@ pub struct FrontMatterWith {
     delimiter: String,
 }
 
+impl FrontMatterWith {
+    /// Builds the front matter extension for a caller-chosen delimiter.
+    pub fn new(delimiter: impl Into<String>) -> Self {
+        Self {
+            delimiter: delimiter.into(),
+        }
+    }
+}
+
 impl Extension for FrontMatterWith {
     fn name(&self) -> &str {
         "front_matter"
