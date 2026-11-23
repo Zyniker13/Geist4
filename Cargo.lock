@@ -969,6 +969,13 @@ name = "geist4-html"
 version = "0.1.0"
 
 [[package]]
+name = "geist4-incremental"
+version = "0.1.0"
+dependencies = [
+ "geist4-core",
+]
+
+[[package]]
 name = "geist4-json"
 version = "0.1.0"
 dependencies = [

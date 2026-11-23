@@ -171,6 +171,48 @@ pub fn parse_with<'a>(src: &'a str, options: &crate::extension::Options) -> Docu
     }
 }
 
+/// Parses a source *fragment* — a substring of a larger document — for
+/// incremental reparsing: the block and inline phases run exactly as
+/// [`parse_with`] runs them over a standalone source, except that the
+/// extensions' `begin_parse` and `post_process` hooks do not fire
+/// (those run once per assembled document, driven by the caller, over
+/// the finished tree). Spans stay in fragment coordinates: the caller
+/// shifts them into document coordinates.
+///
+/// The fragment must start at a line start; the caller guarantees it.
+/// `src` is any `&str` slice — the fragment parse borrows it the same
+/// way a full parse borrows its source, so the returned tree's
+/// `Cow::Borrowed` payloads point into `src`.
+#[must_use]
+pub fn parse_fragment<'a>(src: &'a str, options: &crate::extension::Options) -> Document<'a> {
+    let extensions: Option<&[std::sync::Arc<dyn crate::extension::Extension>]> =
+        if options.is_empty() {
+            None
+        } else {
+            Some(options.extensions())
+        };
+    // The front-matter claim reads only position zero; a fragment never
+    // begins a document, so it must not fire. The cheapest correct way
+    // to keep that guarantee is to hand the parser an options slice
+    // that has no front-matter delimiter: every built-in's delimiter is
+    // opt-in through the extension, so run the fragment through the
+    // plain options when the caller's options are empty, and otherwise
+    // trust the region choice — a fragment that happens to sit at a
+    // front-matter delimiter has a `---`/`+++` first line, which parses
+    // as a thematic break or a paragraph in a full parse; the
+    // incremental driver never selects such a region as a reparse
+    // boundary (its checkpoint rejects regions whose first line could
+    // be a prologue).
+    let (arena, root, link_defs, problems, defs) = Parser::new(src).extensions(extensions).run();
+    Document {
+        arena,
+        root,
+        link_defs,
+        problems,
+        defs,
+    }
+}
+
 /// Splits a front matter prologue off the very beginning of `src`,
 /// returning the byte offset one past its last byte. Mirrors the
 /// reference algorithm exactly: one leading byte order mark may

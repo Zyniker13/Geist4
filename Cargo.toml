@@ -14,6 +14,7 @@ members = [
     "crates/geist4-writer",
     "crates/geist4-json",
     "crates/geist4-highlight",
+    "crates/geist4-incremental",
     "crates/geist4-bench",
 ]
 # The fuzz crate builds with nightly instrumentation flags and must not
