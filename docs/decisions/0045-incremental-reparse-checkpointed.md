@@ -252,3 +252,34 @@ The line diff dropped its FNV hash: candidate equal lines are compared
 byte-for-byte in the first place, so equality is exact by construction
 and the hash pass is gone. `line_hash` is no longer part of
 `test_support` (its only consumer was the removed hash prefilter).
+
+## As-built amendment (2026-11-23, `1b4a70e3`) — property battery, two fallback-path fixes
+
+The fuzz loop the design named is a `proptest` battery
+(`crates/geist4-incremental/tests/properties.rs`, seed 2026_1123,
+regression file checked in) over generated paragraph documents:
+single edits of four kinds and chains, every result checked against
+a full parse through the lockstep oracle. Its first run found two
+arithmetic bugs in the fallback paths the 33 hand-written tests had
+missed; both are fixed and pinned in `tests/regressions.rs`:
+
+1. `hard_boundary` indexed `blocks[first - 1]` after checking only
+   `prefix_end == 0`. With leading blank lines the first block starts
+   after byte 0 while `first` is still 0, and the subtraction
+   underflowed. The check now keys on `first == 0` (no copied blocks,
+   nothing can continue into the reparse), and a new `blank_prefix`
+   gate accepts a first block preceded only by whole blank lines —
+   which a full parse turns into no blocks, no definitions and no
+   problems, so dropping them changes nothing — and full-parses
+   anything else.
+
+2. The prefix-identity check sliced `old_source[..prefix_end]` on the
+   claim that the first changed block's start lies inside both
+   sources. Deleting the first paragraph of a longer document breaks
+   the claim for the new source (its first block starts at 0), and
+   the slice panicked out of bounds. The claim is now checked before
+   slicing; a violated claim takes the full parse.
+
+Binding exposure stays an open item, recorded as follow-up in
+ROADMAP.md "After M11": the C ABI and the JavaScript binding do not
+carry the update call in 0.2.0.

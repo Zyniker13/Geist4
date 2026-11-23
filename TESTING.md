@@ -231,6 +231,46 @@ wasm module, which deliberately ships without the engine (decision
 gate in `scripts/check.sh` proves the pack never enters the artifact —
 415,020 raw / 170,665 gzipped against 0029's 524,288 / 180,224).
 
+### Incremental reparsing (M11)
+
+The editor crate `geist4-incremental` turns a previous parse and the
+new source into a new parse that reuses the unchanged blocks
+(decision 0045); the full parse is always its oracle. Its testing is
+the differential kind, all in `crates/geist4-incremental/tests/`, and
+it runs on every CI run as part of `scripts/check.sh`:
+
+- `diff.rs` — 9 tests pinning the line-diff contract: one region per
+  edit, whole-line boundaries, empty sides for pure insertions or
+  deletions, CRLF line endings, edits at both ends.
+- `differential.rs` — 24 corpus tests over edit shapes (intra-line
+  rewrites, line insert/delete/replace, paragraph insert/delete,
+  CRLF sources, lists and fenced code at the boundary), every one
+  asserting the incremental document is value-identical to a full
+  parse through a lockstep oracle: kinds, attributes, child counts,
+  definitions, the definition map and problems compared node for
+  node, never arena sizes (a full parse legitimately keeps
+  unreachable block-phase text nodes an assembled tree drops).
+- `regressions.rs` — 3 tests for the two arithmetic bugs the
+  property battery found on its first run (the `blocks[first - 1]`
+  underflow with leading blank lines, the unbounded
+  `old_source[..prefix_end]` slice when an edit deletes the first
+  block of a longer document) plus the shrunken minimal case.
+- `properties.rs` — a `proptest` battery (2 tests × 256 cases,
+  pinned seed 2026_1123, regression file checked in) generating
+  paragraph documents and applying single edits and edit chains:
+  every incremental result must match a full parse through the same
+  lockstep oracle, or the update must have taken the fallback (which
+  matches by construction). This is the "fuzzed corpus of edit
+  sequences" the roadmap's done-when names, plus the engine-side
+  fuzz targets (`to_html`, `parse_document`) that keep the underlying
+  parser panic-free on the sources such edits produce.
+
+The `Editor::update` API (previous document, old source, new source
+→ new document + changed spans) is the roadmap's binding-shaped
+call; the FFI exposes the one-shot `geist4_render_html` today, and
+the incremental surface is Rust-side this milestone (0.2.0's scope
+note in ROADMAP.md "After 0.1.0").
+
 ### The C ABI header and tests
 
 `crates/geist4-ffi` is the one place Rust meets C. Its header
@@ -463,6 +503,11 @@ Latest long-run results (2026-11-13):
 - Seed subset committed: 490 files (`to_html`), 472 files
   (`parse_document`), one per coverage edge; all 962 pass the
   differential test.
+- M11 (2026-11-23): no fuzz-target additions; the edit-sequence
+  fuzzing the incremental milestone needed is the proptest battery
+  in `crates/geist4-incremental/tests/properties.rs` (see the
+  "Incremental reparsing (M11)" section above), whose first run
+  found two real fallback-path bugs, both regression-tested.
 
 Mutation testing, 2026-11-22 (release run; see "Mutation testing" above
 for method and policy):

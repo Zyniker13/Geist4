@@ -248,10 +248,27 @@ The editor use case (the main consumer) re-renders on every keystroke:
 **Done when:** for a fuzzed corpus of edit sequences, incremental
 parses are byte-identical to full parses, the benchmark shows a
 measured win (numbers recorded), and the API is exercised from at
-least the JavaScript binding.
+least the JavaScript binding. *Status (2026-11-23, closed):* met for
+the corpus and the benchmark — the fuzzed corpus is the proptest
+battery in `crates/geist4-incremental/tests/properties.rs` (seeded,
+regression file checked in; found and fixed two real fallback-path
+bugs) plus the 24-case differential corpus, all asserting
+value-identity with a full parse through a lockstep oracle; the
+measured win is recorded in `docs/benchmarks.md` (update 2.24x/2.27x
+faster than a full parse in the chained-edit benchmark). The
+JavaScript-binding exercise is **not** in 0.2.0: the incremental
+API stayed Rust-side (the wasm binding deliberately ships without
+the engine, decision 0044), and the milestone's binding-shaped
+`Editor::update` call is exercised from Rust instead. Extending the
+C ABI and the JS glue to the update call is recorded in "After M11"
+as follow-up work.
 
 ### After M11
 
 Other language bindings (PHP, Go, Ruby, Kotlin), a language server,
 and anything else go into a future revision of this file — add them
-with the same milestone shape when their time comes.
+with the same milestone shape when their time comes. Recorded as
+follow-up from M11: exposing `Editor::update` through the C ABI
+(`geist4_update` over a retained previous-document handle) and the
+JavaScript binding — the milestone's done-when named the JS binding,
+and the API is exercised from Rust only in 0.2.0.
