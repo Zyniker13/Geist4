@@ -210,3 +210,45 @@ whole new source as the "fragment" and double-appended every block).
 
 Benchmarks, the fuzz loop over the differential corpus, and binding
 exposure remain open items under this decision.
+
+## As-built amendment (2026-11-23, `9d1d7ffa`) — metadata checkpoint, copied tail
+
+The benchmark of the checkpoint stage showed `update` 1.35x *slower*
+than a full parse (64.3 µs vs 47.2 µs per keystroke at ~10 KiB). Two
+design changes removed the overhead and flipped the ratio to ~2.25x
+*in favor of* incremental (24.1 µs vs 53.9 µs; 2.67x/2.70x faster
+updates than the checkpoint stage):
+
+1. **The checkpoint is metadata only.** Instead of snapshotting every
+   top-level block's subtree into `CopiedNode` lists, the checkpoint
+   carries one entry per top-level block: its byte span, its root
+   `NodeId`, and a `tail_continues` flag (list, or unfenced code
+   block). `update` takes the previous document by reference, so
+   mounted blocks re-`alloc` in the new arena reading kinds, attrs and
+   ownership straight out of the previous document's arena — the
+   caller already keeps that document alive across the call, which the
+   signature now states. The extension-node scan is gone as dead
+   weight: with no extensions registered none can exist, because only
+   extension hooks create them, so `checkpoint_from` always succeeds
+   for a plain parse.
+
+2. **The reparse window ends at a hard boundary; the tail is copied,
+   not reparsed.** The window starts at the first changed block as
+   before. Its end is chosen among the later block boundaries: the
+   first one where both sources end the boundary with a blank line,
+   the block before it does not continue across blank lines (no list,
+   no unfenced code block) and the window's own last block does not
+   either. Everything from that boundary on is byte-identical in both
+   sources (the diff's common suffix), so its blocks mount from the
+   previous arena with every span shifted by one delta. Window parses
+   are capped at eight attempts; a window that would contain `[`
+   ends the search (the guard is monotone in the window size) and the
+   end-of-document window decides it. No qualifying boundary falls
+   back to the end-of-document window, still subject to the bracket
+   guard. A problem straddling a partition boundary (prefix or tail)
+   also full-parses.
+
+The line diff dropped its FNV hash: candidate equal lines are compared
+byte-for-byte in the first place, so equality is exact by construction
+and the hash pass is gone. `line_hash` is no longer part of
+`test_support` (its only consumer was the removed hash prefilter).
