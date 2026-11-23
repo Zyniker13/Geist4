@@ -132,7 +132,10 @@ fn options_registry_reports_and_keeps_registrations() {
     // is_empty is the hook sites' short-circuit: it must agree with the
     // registration list.
     assert!(empty.is_empty());
-    assert_eq!(format!("{empty:?}"), "Options { extensions: [] }");
+    assert_eq!(
+        format!("{empty:?}"),
+        "Options { extensions: [], highlighter: false }"
+    );
 
     let mut one = Options::new();
     one.extension(Arc::new(Wedge));

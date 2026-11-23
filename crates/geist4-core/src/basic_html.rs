@@ -43,6 +43,7 @@ pub fn render_with(
             .filter(|extension| extension.filters_html())
             .cloned()
             .collect(),
+        highlighter: options.code_highlighter().cloned(),
         out: String::new(),
     };
     for extension in options.extensions() {
@@ -96,6 +97,9 @@ pub(crate) struct Renderer<'a> {
     /// The registered extensions that filter raw HTML output; empty
     /// when none do, which keeps raw literals on their verbatim path.
     pub(crate) filters: Vec<std::sync::Arc<dyn crate::extension::Extension>>,
+    /// The fenced-code highlighter, `None` by default: every fenced
+    /// block then renders as plain escaped code.
+    pub(crate) highlighter: Option<std::sync::Arc<dyn crate::extension::CodeHighlighter>>,
     pub(crate) out: String,
 }
 
@@ -137,6 +141,7 @@ impl Renderer<'_> {
             arena: self.arena,
             extensions: self.extensions,
             filters: self.filters.clone(),
+            highlighter: self.highlighter.clone(),
             out: String::new(),
         };
         let mut stack: Vec<Step> = Vec::new();
@@ -302,7 +307,29 @@ impl Renderer<'_> {
                     }
                 }
                 self.out.push('>');
-                self.out.push_str(&escape_html(&data.literal));
+                // Highlighting is a render-level option: the highlighter
+                // hook answers for the language token of the info
+                // string, and a decline (unknown language) or a fenced
+                // flag of false falls through to plain escaped code —
+                // byte-identical to the non-highlighting output.
+                let highlighted = if data.fenced {
+                    let language = data.info.as_ref().map(|info| {
+                        let word_end = info.find([' ', '\t']).unwrap_or(info.len());
+                        &info[..word_end]
+                    });
+                    match (&self.highlighter, language) {
+                        (Some(hook), Some(language)) if !language.is_empty() => {
+                            hook.highlight(&data.literal, language)
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                match highlighted {
+                    Some(tokens) => self.out.push_str(&tokens),
+                    None => self.out.push_str(&escape_html(&data.literal)),
+                }
                 self.out.push_str("</code></pre>\n");
             }
             Node::HtmlBlock(data) => {

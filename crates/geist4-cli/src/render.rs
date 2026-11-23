@@ -17,13 +17,21 @@ pub(crate) enum Format {
     Mdast,
 }
 
-/// Runs `geist4 render FILE --format html|json|mdast [--pretty]`.
+/// Runs `geist4 render FILE --format html|json|mdast [--highlight]
+/// [--pretty]`.
 ///
 /// The file is parsed with every `--ext` extension registered, then
 /// serialized in the chosen format to standard output. Loading a
 /// package that cannot load exits two; reading the file that cannot be
-/// read exits two. A parse never fails.
-pub(crate) fn run(file: &Path, format: Format, pretty: bool, extra: &[PathBuf]) -> ExitCode {
+/// read exits two. A parse never fails. `highlight` enables fenced-code
+/// highlighting for HTML output only; the other formats ignore it.
+pub(crate) fn run(
+    file: &Path,
+    format: Format,
+    pretty: bool,
+    extra: &[PathBuf],
+    highlight: bool,
+) -> ExitCode {
     let packages = match crate::packages::load(extra) {
         Ok(packages) => packages,
         Err((path, message)) => {
@@ -35,6 +43,9 @@ pub(crate) fn run(file: &Path, format: Format, pretty: bool, extra: &[PathBuf]) 
     for package in &packages {
         options.extension(package.extension().clone());
     }
+    if highlight {
+        options.highlighter(std::sync::Arc::new(geist4_highlight::SyntaxHighlighter));
+    }
     let text = match std::fs::read_to_string(file) {
         Ok(text) => text,
         Err(error) => {
@@ -45,7 +56,7 @@ pub(crate) fn run(file: &Path, format: Format, pretty: bool, extra: &[PathBuf]) 
 
     let document = parse_with(&text, &options);
     let output = match format {
-        Format::Html => geist4_core::basic_html::render(&document),
+        Format::Html => geist4_core::basic_html::render_with(&document, &options),
         Format::Json => geist4_json::to_json(&document, &text, pretty),
         Format::Mdast => {
             let mdast = geist4_mdast::to_mdast(&text, &document);

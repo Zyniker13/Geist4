@@ -910,6 +910,7 @@ dependencies = [
  "clap",
  "geist4-core",
  "geist4-ext-loader",
+ "geist4-highlight",
  "geist4-json",
  "geist4-mdast",
  "geist4-spec-harness",

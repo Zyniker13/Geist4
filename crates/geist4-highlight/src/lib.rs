@@ -71,6 +71,23 @@ fn class_for_scope(scope: syntect::parsing::Scope) -> String {
     "source".to_string()
 }
 
+/// The ready-to-register highlighter: implements core's
+/// [`CodeHighlighter`](geist4_core::extension::CodeHighlighter) so an
+/// options value can enable highlighting with one call.
+///
+/// The struct is a shared, stateless token mapper; the syntax pack it
+/// reads is the process-wide [`SYNTAX_SET`], loaded once. Every method
+/// is therefore safe to call from any thread, and registering the same
+/// instance on several options values shares the pack.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SyntaxHighlighter;
+
+impl geist4_core::extension::CodeHighlighter for SyntaxHighlighter {
+    fn highlight(&self, code: &str, language: &str) -> Option<String> {
+        highlight(code, language)
+    }
+}
+
 /// Applies one parser operation to the scope stack. `ScopeStack::apply`
 /// handles every op kind — pushes, pops and clears — with syntect's own
 /// semantics; no hand-rolled matcher to drift.

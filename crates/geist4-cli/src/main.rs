@@ -43,6 +43,10 @@ enum Command {
         /// Extension packages to load and register for the parse.
         #[arg(long = "ext")]
         ext: Vec<PathBuf>,
+        /// Highlight fenced code blocks in HTML output (off by
+        /// default, so plain output stays byte-identical).
+        #[arg(long)]
+        highlight: bool,
         /// Pretty-print JSON output.
         #[arg(long)]
         pretty: bool,
@@ -97,9 +101,10 @@ fn main() -> ExitCode {
             file,
             format,
             ext,
+            highlight,
             pretty,
-        } => render::run(&file, format, pretty, &ext),
-        Command::Ast { file, ext } => render::run(&file, render::Format::Json, true, &ext),
+        } => render::run(&file, format, pretty, &ext, highlight),
+        Command::Ast { file, ext } => render::run(&file, render::Format::Json, true, &ext, false),
         Command::Check { file, ext } => check::run(&file, &ext),
     }
 }

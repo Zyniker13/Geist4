@@ -77,7 +77,10 @@ fn options_is_empty_clone_and_debug_report_registrations() {
     // registration list.
     assert!(empty.is_empty());
     assert!(empty.extensions().is_empty());
-    assert_eq!(format!("{empty:?}"), "Options { extensions: [] }");
+    assert_eq!(
+        format!("{empty:?}"),
+        "Options { extensions: [], highlighter: false }"
+    );
 
     let mut one = Options::new();
     one.extension(Arc::new(Fallback));

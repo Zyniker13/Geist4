@@ -727,6 +727,25 @@ impl<'c, 's, 'l> BlockContinueCtx<'c, 's, 'l> {
 #[derive(Default)]
 pub struct Options {
     extensions: Vec<Arc<dyn Extension>>,
+    /// The fenced-code highlighter, `None` (plain code) by default.
+    highlighter: Option<Arc<dyn CodeHighlighter>>,
+}
+
+/// Highlights one fenced code block's text, given the language token
+/// from its info string.
+///
+/// The HTML renderer calls [`highlight`](CodeHighlighter::highlight)
+/// for every fenced block while a highlighter is registered on
+/// [`Options`]; `None` from the hook means "unknown language, render
+/// plain code" — never an error. The returned string is the inner HTML
+/// of the `<code>` element: the hook escapes its own text (the
+/// renderer's `escape_html` is public exactly so hooks and renderer
+/// escape byte-identically) and may wrap fragments in `<span
+/// class="…">`; the renderer adds no wrapper of its own beyond the
+/// block's `<pre><code>`.
+pub trait CodeHighlighter: Send + Sync {
+    /// Highlights `code` as `language`, or declines with `None`.
+    fn highlight(&self, code: &str, language: &str) -> Option<String>;
 }
 
 impl Options {
@@ -740,6 +759,20 @@ impl Options {
     pub fn extension(&mut self, ext: Arc<dyn Extension>) -> &mut Self {
         self.extensions.push(ext);
         self
+    }
+
+    /// Sets the fenced-code highlighter, replacing any previous one.
+    /// Off by default: without a highlighter, every fenced block
+    /// renders as plain escaped code and the spec suite output stays
+    /// byte-identical.
+    pub fn highlighter(&mut self, highlighter: Arc<dyn CodeHighlighter>) -> &mut Self {
+        self.highlighter = Some(highlighter);
+        self
+    }
+
+    /// The registered highlighter, if any.
+    pub fn code_highlighter(&self) -> Option<&Arc<dyn CodeHighlighter>> {
+        self.highlighter.as_ref()
     }
 
     /// The registered extensions, in run order.
@@ -763,6 +796,7 @@ impl Clone for Options {
     fn clone(&self) -> Self {
         Options {
             extensions: self.extensions.clone(),
+            highlighter: self.highlighter.clone(),
         }
     }
 }
@@ -778,6 +812,7 @@ impl std::fmt::Debug for Options {
                     .map(|e| e.name().to_string())
                     .collect::<Vec<_>>(),
             )
+            .field("highlighter", &self.highlighter.is_some())
             .finish()
     }
 }
