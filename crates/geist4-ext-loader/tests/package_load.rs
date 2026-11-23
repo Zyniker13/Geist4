@@ -47,7 +47,11 @@ fn missing_dir_reports_not_found() {
 }
 
 /// A directory whose manifest is a directory (unreadable as a file)
-/// declines through the non-NotFound branch.
+/// declines through the non-NotFound branch. The OS kind differs per
+/// platform — Unix reports `Is a directory`, Windows reports
+/// `PermissionDenied` — so the test pins only the cross-platform
+/// contract: the message names the file and is not the NotFound
+/// wording.
 #[test]
 fn unreadable_manifest_reports_plain_os_text() {
     let dir = temp_dir("unreadable");
@@ -59,12 +63,9 @@ fn unreadable_manifest_reports_plain_os_text() {
         "the message names the file: {}",
         error.message
     );
-    // A directory read yields `Is a directory` on Unix — not one of the
-    // two fixed kinds — so the OS text passes through.
     assert!(
-        !error.message.contains("no such file or directory")
-            && !error.message.contains("permission denied"),
-        "a rare kind keeps the OS text: {}",
+        !error.message.contains("no such file or directory"),
+        "the kind is not NotFound: {}",
         error.message
     );
 }
