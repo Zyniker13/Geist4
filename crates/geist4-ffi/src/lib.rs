@@ -20,6 +20,12 @@ use geist4_core::extension::{Extension, Options};
 
 use crate::safe::OwnedDocument;
 
+#[cfg(feature = "highlight")]
+/// The shared highlighter instance behind
+/// [`Options::enable_highlighting`](crate::safe::Options::enable_highlighting):
+/// stateless, so one instance serves every options value.
+static SAFE_HIGHLIGHTER: geist4_highlight::SyntaxHighlighter = geist4_highlight::SyntaxHighlighter;
+
 mod host;
 
 /// The outcome of an FFI call.
@@ -50,6 +56,10 @@ pub enum Status {
     /// A host extension's declared data broke the manifest's rules; the
     /// error buffer carries the reason and nothing was registered.
     GEIST4_ERR_INVALID = 6,
+    /// The operation exists in the API but this build lacks the engine
+    /// behind it (the wasm build has no syntax highlighter; decision
+    /// 0044). Nothing happened.
+    GEIST4_ERR_UNSUPPORTED = 7,
 }
 
 /// An owned UTF-8 string the engine handed out.
@@ -240,6 +250,42 @@ pub unsafe extern "C" fn geist4_options_enable_builtin(
         }
     }
     Status::GEIST4_OK
+}
+
+/// Enables built-in syntax highlighting for fenced code blocks in HTML
+/// output on an options handle. Off by default: without this call,
+/// every fenced block renders as plain escaped code.
+///
+/// The wasm build (`--no-default-features`) has no highlighting
+/// engine: the call there reports `GEIST4_ERR_UNSUPPORTED` and the
+/// options value is unchanged (decision 0044).
+///
+/// # Safety
+/// `options` must be a live handle from `geist4_options_create`;
+/// `err` must be null or writable for `err_cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn geist4_options_enable_highlighting(
+    options: *mut OptionsHandle,
+    err: *mut c_char,
+    err_cap: usize,
+) -> Status {
+    let Some(options) = (unsafe { options.as_mut() }) else {
+        set_error(err, err_cap, "options handle is null");
+        return Status::GEIST4_ERR_NULL;
+    };
+    #[cfg(feature = "highlight")]
+    {
+        options
+            .options
+            .highlighter(std::sync::Arc::new(SAFE_HIGHLIGHTER));
+        Status::GEIST4_OK
+    }
+    #[cfg(not(feature = "highlight"))]
+    {
+        let _ = &mut options.options;
+        set_error(err, err_cap, "highlighting is not built into this library");
+        Status::GEIST4_ERR_UNSUPPORTED
+    }
 }
 
 /// Registers a host extension (tier 3) from a vtable the caller owns.
@@ -663,7 +709,10 @@ pub mod safe {
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{Arc, Mutex};
 
+    #[cfg(not(feature = "highlight"))]
     use super::panic_message;
+    #[cfg(feature = "highlight")]
+    use super::{SAFE_HIGHLIGHTER, panic_message};
 
     // Host extensions (tier 3), re-exported here so a binding builds
     // its extension against one surface: `geist4_ffi::safe`. The C
@@ -793,6 +842,34 @@ pub mod safe {
             }
             self.inner.extension(extension);
             Ok(self)
+        }
+
+        /// Enables built-in syntax highlighting for fenced code blocks
+        /// in HTML output. Off by default: without it, every fenced
+        /// block renders as plain escaped code.
+        ///
+        /// The highlighter maps syntect's default syntax pack to CSS
+        /// class tokens (`<span class="keyword">` and friends); an
+        /// unknown info-string language renders as plain code, never an
+        /// error. This method cannot fail.
+        ///
+        /// Built without the `highlight` feature (the wasm module) the
+        /// syntect engine is absent; the call then does nothing and
+        /// fenced blocks stay plain — an HTML render never errors, and
+        /// a page wanting highlighting registers a host hook instead
+        /// (decision 0044).
+        #[cfg(feature = "highlight")]
+        pub fn enable_highlighting(&mut self) -> &mut Self {
+            self.inner.highlighter(Arc::new(SAFE_HIGHLIGHTER));
+            self
+        }
+
+        /// The no-engine build's `enable_highlighting`: a no-op that
+        /// keeps the API surface identical across feature sets (see
+        /// decision 0044 for why the wasm build omits the engine).
+        #[cfg(not(feature = "highlight"))]
+        pub fn enable_highlighting(&mut self) -> &mut Self {
+            self
         }
     }
 

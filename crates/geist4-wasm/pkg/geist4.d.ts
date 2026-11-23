@@ -91,6 +91,11 @@ export class Options {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Enables built-in syntax highlighting for fenced code blocks in
+     * HTML output. Off by default.
+     */
+    enableHighlighting(): void;
+    /**
      * Registers a host extension: JavaScript callbacks at the engine's
      * hook points, the same vocabulary the tier-2 adapter exposes.
      *
@@ -179,6 +184,7 @@ export interface InitOutput {
     readonly document_problems: (a: number) => [number, number];
     readonly hostextension_name: (a: number) => [number, number];
     readonly hostextension_new: (a: any) => [number, number, number];
+    readonly options_enableHighlighting: (a: number) => void;
     readonly options_enableHost: (a: number, b: number) => [number, number];
     readonly options_enable_builtin: (a: number, b: number, c: number) => [number, number];
     readonly options_new: () => number;
@@ -193,6 +199,7 @@ export interface InitOutput {
     readonly geist4_document_problems: (a: number, b: number, c: number, d: number) => number;
     readonly geist4_options_create: () => number;
     readonly geist4_options_enable_builtin: (a: number, b: number, c: number, d: number, e: number) => number;
+    readonly geist4_options_enable_highlighting: (a: number, b: number, c: number) => number;
     readonly geist4_options_enable_host: (a: number, b: number, c: number, d: number) => number;
     readonly geist4_options_free: (a: number) => void;
     readonly geist4_parse: (a: number, b: number, c: number, d: number, e: number) => number;

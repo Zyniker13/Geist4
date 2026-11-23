@@ -188,6 +188,13 @@ export class Options {
         wasm.__wbg_options_free(ptr, 0);
     }
     /**
+     * Enables built-in syntax highlighting for fenced code blocks in
+     * HTML output. Off by default.
+     */
+    enableHighlighting() {
+        wasm.options_enableHighlighting(this.__wbg_ptr);
+    }
+    /**
      * Registers a host extension: JavaScript callbacks at the engine's
      * hook points, the same vocabulary the tier-2 adapter exposes.
      *

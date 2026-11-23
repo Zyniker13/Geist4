@@ -148,3 +148,48 @@ fn a_nul_byte_is_ordinary_content() {
 fn version_matches_the_crate() {
     assert_eq!(geist4_ffi::safe::version(), env!("CARGO_PKG_VERSION"));
 }
+
+#[test]
+fn highlighting_off_renders_plain_code() {
+    let mut options = Options::new();
+    options.enable_builtin("gfm").expect("gfm is a valid name");
+    let document = OwnedDocument::parse("```rust\nlet x = 1;\n```\n", Some(&options))
+        .expect("parse cannot fail");
+    assert_eq!(
+        document.render_html().expect("render cannot fail"),
+        "<pre><code class=\"language-rust\">let x = 1;\n</code></pre>\n"
+    );
+}
+
+#[test]
+fn highlighting_on_wraps_tokens_in_class_spans() {
+    let mut options = Options::new();
+    options.enable_builtin("gfm").expect("gfm is a valid name");
+    options.enable_highlighting();
+    let document = OwnedDocument::parse("```rust\nlet x = 1;\n```\n", Some(&options))
+        .expect("parse cannot fail");
+    let html = document.render_html().expect("render cannot fail");
+    assert!(
+        html.contains("<span class=\"storage\">let</span>"),
+        "the keyword token gets its class: {html}"
+    );
+    assert!(
+        html.contains("<span class=\"numeric\">1</span>"),
+        "the numeric token gets its class: {html}"
+    );
+    // The wrapper and the escaping are unchanged.
+    assert!(html.starts_with("<pre><code class=\"language-rust\">"));
+    assert!(html.ends_with("</code></pre>\n"));
+}
+
+#[test]
+fn highlighting_on_unknown_language_stays_plain() {
+    let mut options = Options::new();
+    options.enable_highlighting();
+    let document = OwnedDocument::parse("```notalanguage\n<a>&b\n```\n", Some(&options))
+        .expect("parse cannot fail");
+    assert_eq!(
+        document.render_html().expect("render cannot fail"),
+        "<pre><code class=\"language-notalanguage\">&lt;a&gt;&amp;b\n</code></pre>\n"
+    );
+}

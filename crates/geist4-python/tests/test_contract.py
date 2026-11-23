@@ -111,3 +111,19 @@ class DocumentContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_highlighting_off_renders_plain_code(self):
+        options = geist4.Options()
+        html = geist4.render_html("```rust\nlet x = 1;\n```\n", options=options)
+        self.assertEqual(
+            html,
+            "<pre><code class=\"language-rust\">let x = 1;\n</code></pre>\n",
+        )
+
+    def test_highlighting_on_wraps_tokens_in_class_spans(self):
+        options = geist4.Options()
+        options.enable_highlighting()
+        html = geist4.render_html("```rust\nlet x = 1;\n```\n", options=options)
+        self.assertIn('<span class="storage">let</span>', html)
+        self.assertIn('<span class="numeric">1</span>', html)
+        self.assertTrue(html.startswith('<pre><code class="language-rust">'))

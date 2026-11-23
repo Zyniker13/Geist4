@@ -98,6 +98,12 @@ impl Options {
         self.inner.enable_host(host).map_err(host_error)?;
         Ok(())
     }
+
+    /// Enables built-in syntax highlighting for fenced code blocks in
+    /// HTML output. Off by default.
+    fn enable_highlighting(&mut self) {
+        self.inner.enable_highlighting();
+    }
 }
 
 /// A parsed document: parse once, render or inspect many times.

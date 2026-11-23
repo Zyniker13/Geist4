@@ -952,6 +952,7 @@ version = "0.1.0"
 dependencies = [
  "geist4-core",
  "geist4-ext",
+ "geist4-highlight",
  "serde_json",
 ]
 

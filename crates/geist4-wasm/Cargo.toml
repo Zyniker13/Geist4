@@ -16,7 +16,17 @@ workspace = true
 # is pinned before any WebAssembly is built.
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# The highlighting hook compiles in everywhere (the trait object is a
+# few bytes); the syntect engine behind it does not: the default syntax
+# pack is ~1.5 MiB of tables, four times decision 0029's page-load
+# budget (decision 0044). Native bindings get it by default; the wasm
+# build ships without it, and a page that wants highlighting calls the
+# JS-level hook instead.
+default = ["highlight"]
+highlight = ["geist4-ffi/highlight"]
+
 [dependencies]
-geist4-ffi = { path = "../geist4-ffi" }
+geist4-ffi = { path = "../geist4-ffi", default-features = false }
 wasm-bindgen = "0.2.130"
 js-sys = "0.3.107"

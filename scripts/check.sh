@@ -65,7 +65,12 @@ rustup target list --installed | grep -q wasm32-unknown-unknown || {
     echo 'the wasm32-unknown-unknown target is missing; add it with: rustup target add wasm32-unknown-unknown' >&2
     exit 1
 }
-cargo build -p geist4-wasm --target wasm32-unknown-unknown --release
+# Built without the `highlight` feature: the syntect pack is ~1.5 MiB of
+# tables and would blow decision 0029's page-load budget fourfold
+# (decision 0044); the wasm module ships without the engine and a page
+# wanting highlighting registers a JS host hook instead. The rlib
+# host-side tests still run with default features, where the engine is.
+cargo build -p geist4-wasm --target wasm32-unknown-unknown --release --no-default-features
 command -v wasm-opt >/dev/null 2>&1 || {
     echo "wasm-opt not found; install binaryen (brew install binaryen on macOS," >&2
     echo "apt-get install binaryen on Debian/Ubuntu, or the release tarball from" >&2

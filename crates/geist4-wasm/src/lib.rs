@@ -81,6 +81,13 @@ impl Options {
             .map(|_| ())
             .map_err(|error| JsError::new(&error.to_string()))
     }
+
+    /// Enables built-in syntax highlighting for fenced code blocks in
+    /// HTML output. Off by default.
+    #[wasm_bindgen(js_name = enableHighlighting)]
+    pub fn enable_highlighting(&mut self) {
+        self.inner.enable_highlighting();
+    }
 }
 
 impl Default for Options {

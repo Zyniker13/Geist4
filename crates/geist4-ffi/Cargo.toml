@@ -26,3 +26,12 @@ pedantic = { level = "warn", priority = -1 }
 geist4-core = { path = "../geist4-core" }
 geist4-ext = { path = "../geist4-ext" }
 serde_json = { version = "1", default-features = false, features = ["std"] }
+geist4-highlight = { path = "../geist4-highlight", optional = true }
+
+[features]
+default = ["highlight"]
+# The syntect engine behind `enable_highlighting`. Off in the wasm
+# build (the syntax pack is ~1.5 MiB, four times the wasm size budget,
+# decision 0044); the method stays and reports through the error path
+# when built without it.
+highlight = ["dep:geist4-highlight"]

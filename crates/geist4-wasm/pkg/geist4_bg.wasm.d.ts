@@ -11,6 +11,7 @@ export const document_parseWith: (a: number, b: number, c: number) => [number, n
 export const document_problems: (a: number) => [number, number];
 export const hostextension_name: (a: number) => [number, number];
 export const hostextension_new: (a: any) => [number, number, number];
+export const options_enableHighlighting: (a: number) => void;
 export const options_enableHost: (a: number, b: number) => [number, number];
 export const options_enable_builtin: (a: number, b: number, c: number) => [number, number];
 export const options_new: () => number;
@@ -25,6 +26,7 @@ export const geist4_document_html: (a: number, b: number, c: number, d: number) 
 export const geist4_document_problems: (a: number, b: number, c: number, d: number) => number;
 export const geist4_options_create: () => number;
 export const geist4_options_enable_builtin: (a: number, b: number, c: number, d: number, e: number) => number;
+export const geist4_options_enable_highlighting: (a: number, b: number, c: number) => number;
 export const geist4_options_enable_host: (a: number, b: number, c: number, d: number) => number;
 export const geist4_options_free: (a: number) => void;
 export const geist4_parse: (a: number, b: number, c: number, d: number, e: number) => number;
