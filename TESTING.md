@@ -208,6 +208,29 @@ lines are structural can show a lower percent than its executed code:
 a brace, a blank line or a doc comment — the executable code is fully
 exercised.
 
+### Syntax highlighting (M10)
+
+The highlighter lives in `geist4-highlight` (syntect 5.3,
+default-fancy, decision 0043) and hangs off
+`geist4_core::extension::CodeHighlighter`, registered through
+`Options::highlighter` (off by default). The engine's own behavior is
+pinned by 7 token tests (`crates/geist4-highlight/tests/tokens.rs`:
+scope-to-class mapping, adjacent-token merging, escaping, unknown
+language → `None`, trailing newline placement) and 7 renderer
+integration tests (`crates/geist4-highlight/tests/render_integration.rs`:
+the differential check that an off-mode render is byte-identical to a
+plain one, the `language-…` wrapper keeping the first info word, a
+declining hook falling back to plain code, nested fences). The
+bindings' surfaces are pinned in their own suites: the ffi safe module
+(`tests/safe.rs`, 3 highlight tests — off renders plain, on emits
+class spans, unknown language stays plain and escaped), the C ABI
+(header regeneration pins `geist4_options_enable_highlighting` and
+status 7), the Python contract suite (2 highlight tests), and the
+wasm module, which deliberately ships without the engine (decision
+0044; `enableHighlighting` exists there as a no-op and the size-budget
+gate in `scripts/check.sh` proves the pack never enters the artifact —
+415,020 raw / 170,665 gzipped against 0029's 524,288 / 180,224).
+
 ### The C ABI header and tests
 
 `crates/geist4-ffi` is the one place Rust meets C. Its header
