@@ -36,6 +36,13 @@ ignore = [
     # by iai-callgrind to store saved baselines in the benchmark crate,
     # never in geist4 artifacts. Revisit on an iai-callgrind upgrade.
     "RUSTSEC-2025-0141",
+    # RUSTSEC-2024-0320: yaml-rust is unmaintained. It reaches the tree
+    # only through syntect's optional plist/yaml frontmatter parsing
+    # (decision 0043), which geist4 never calls: the engine loads
+    # syntect's pre-built default pack from the embedded dumps and reads
+    # no .sublime-syntax/.YAML files at runtime. Revisit if a syntect
+    # upgrade moves to yaml-rust2 or drops the dependency.
+    "RUSTSEC-2024-0320",
 ]
 
 [bans]

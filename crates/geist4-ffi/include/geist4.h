@@ -124,6 +124,12 @@ enum geist4_status {
    * error buffer carries the reason and nothing was registered.
    */
   GEIST4_ERR_INVALID = 6,
+  /**
+   * The operation exists in the API but this build lacks the engine
+   * behind it (the wasm build has no syntax highlighter; decision
+   * 0044). Nothing happened.
+   */
+  GEIST4_ERR_UNSUPPORTED = 7,
 };
 typedef int32_t geist4_status;
 
@@ -576,6 +582,23 @@ geist4_status geist4_options_enable_builtin(struct geist4_options *options,
                                             size_t name_len,
                                             char *err,
                                             size_t err_cap);
+
+/**
+ * Enables built-in syntax highlighting for fenced code blocks in HTML
+ * output on an options handle. Off by default: without this call,
+ * every fenced block renders as plain escaped code.
+ *
+ * The wasm build (`--no-default-features`) has no highlighting
+ * engine: the call there reports `GEIST4_ERR_UNSUPPORTED` and the
+ * options value is unchanged (decision 0044).
+ *
+ * # Safety
+ * `options` must be a live handle from `geist4_options_create`;
+ * `err` must be null or writable for `err_cap` bytes.
+ */
+geist4_status geist4_options_enable_highlighting(struct geist4_options *options,
+                                                 char *err,
+                                                 size_t err_cap);
 
 /**
  * Registers a host extension (tier 3) from a vtable the caller owns.

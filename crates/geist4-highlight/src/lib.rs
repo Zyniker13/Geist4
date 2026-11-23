@@ -76,7 +76,7 @@ fn class_for_scope(scope: syntect::parsing::Scope) -> String {
 /// options value can enable highlighting with one call.
 ///
 /// The struct is a shared, stateless token mapper; the syntax pack it
-/// reads is the process-wide [`SYNTAX_SET`], loaded once. Every method
+/// reads is the process-wide syntax set, loaded once. Every method
 /// is therefore safe to call from any thread, and registering the same
 /// instance on several options values shares the pack.
 #[derive(Debug, Default, Clone, Copy)]

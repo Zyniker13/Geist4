@@ -1,0 +1,1355 @@
+== cargo fmt ==
+== cargo clippy ==
+   Compiling pyo3-ffi v0.30.1
+   Compiling pyo3 v0.30.1
+    Checking geist4-python v0.1.0 (/Users/agent/.hermes/profiles/geist4/work/Geist4/crates/geist4-python)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.09s
+warning: the following packages contain code that will be rejected by a future version of Rust: proc-macro-error2 v2.0.1
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`
+== cargo test ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.28s
+     Running unittests src/main.rs (target/debug/build/geist4-cli/703ff0cb260f4dad/out/geist4-703ff0cb260f4dad)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (target/debug/build/geist4-cli/71cca57a3dbec2d9/out/cli-71cca57a3dbec2d9)
+
+running 19 tests
+test check_reports_a_missing_file ... ok
+test check_reports_an_extension_load_failure ... ok
+test check_reports_each_failing_line ... ok
+test check_reports_a_broken_reference_with_its_position ... ok
+test check_accepts_a_clean_document ... ok
+test ext_check_reports_a_broken_manifest ... ok
+test ext_check_reports_a_spec_without_examples ... ok
+test ext_check_prints_at_most_ten_failing_examples_in_full ... ok
+test ext_check_rejects_conflicting_packages ... ok
+test ext_check_passes_a_correct_package ... ok
+test ext_check_rejects_duplicate_names ... ok
+test render_html_matches_the_renderer ... ok
+test render_mdast_exports_the_unist_shape ... ok
+test ast_prints_the_same_tree_pretty ... ok
+test render_json_carries_the_format_tag ... ok
+test ext_check_reports_failing_examples ... ok
+test render_reports_a_missing_file ... ok
+test ext_check_runs_with_a_registered_dependency ... ok
+test ext_manifest_validates_without_running_the_spec ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+
+     Running unittests src/lib.rs (target/debug/build/geist4-core/226d8b0634acaa53/out/geist4_core-226d8b0634acaa53)
+
+running 1 test
+test parser::textmap::tests::setext_span_after_consumed_defs ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/blocks.rs (target/debug/build/geist4-core/c8bc2c409ebf6655/out/blocks-c8bc2c409ebf6655)
+
+running 21 tests
+test html_block_trailing_blank_lines_are_kept ... ok
+test debug_printer_shows_the_tree ... ok
+test html_block_kind_six_ends_at_blank_line ... ok
+test html_block_kind_seven_needs_a_lone_tag ... ok
+test indented_code_blocks ... ok
+test hard_break_needs_two_spaces ... ok
+test block_quotes_nest_and_take_lazy_lines ... ok
+test html_block_kinds_one_through_five ... ok
+test atx_headings ... ok
+test code_span_backtick_memo ... ok
+test fenced_code_blocks ... ok
+test list_items_and_indentation ... ok
+test link_reference_definitions ... ok
+test nul_replacement_lines ... ok
+test paragraph_with_soft_break ... ok
+test raw_html_comments_allow_dash_runs ... ok
+test setext_headings ... ok
+test spans_cover_the_source ... ok
+test tabs_are_expanded_for_structure ... ok
+test thematic_breaks ... ok
+test reference_whitespace_and_control_bytes ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/debug_printer.rs (target/debug/build/geist4-core/4cdaf165cc7c6af6/out/debug_printer-4cdaf165cc7c6af6)
+
+running 4 tests
+test debug_prints_extension_nodes ... ok
+test kind_name_covers_every_core_arm ... ok
+test debug_prints_link_reference_forms ... ok
+test debug_prints_every_block_kind ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/differential.rs (target/debug/build/geist4-core/04ca355c436185ac/out/differential-04ca355c436185ac)
+
+running 2 tests
+test differential_against_reference ... ok
+test differential_over_fuzz_corpus ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.53s
+
+     Running tests/extensions.rs (target/debug/build/geist4-core/76f1585f6842c8f8/out/extensions-76f1585f6842c8f8)
+
+running 5 tests
+test unregistered_kinds_render_nothing ... ok
+test a_marker_claim_consumes_the_opener_bracket ... ok
+test plain_parsing_is_untouched ... ok
+test post_process_and_render_run ... ok
+test a_block_start_that_never_advances_is_capped ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/front_matter.rs (target/debug/build/geist4-core/c5a7c7880346f0d0/out/front_matter-c5a7c7880346f0d0)
+
+running 6 tests
+test closer_at_end_of_input_with_bare_carriage_return_is_not_front_matter ... ok
+test byte_order_mark_before_the_opener ... ok
+test no_prologue_leaves_no_node ... ok
+test prologue_node_holds_the_raw_text_and_span ... ok
+test crlf_throughout ... ok
+test carriage_return_closer_wins_over_earlier_line_feed ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mutants_ctx.rs (target/debug/build/geist4-core/a85471567f1e355f/out/mutants_ctx-a85471567f1e355f)
+
+running 28 tests
+test arena_parent_tracks_attach_and_detach ... ok
+test block_start_accessors_open_the_probe_block ... ok
+test inline_trigger_unput_on_an_entity_cell_keeps_the_remaining_span ... ok
+test inline_trigger_unput_walks_back_across_cells ... ok
+test content_starts_with_gates_on_the_first_text ... ok
+test inline_trigger_in_bracket_is_false_outside_brackets ... ok
+test empty_map_fallback_offsets_shift_by_the_block_start ... ok
+test continuation_column_counts_the_container_prefixes ... ok
+test inline_trigger_emit_link_text_covers_the_span_from_rewind ... ok
+test closing_fence_line_consumed_whole ... ok
+test bracket_content_reports_the_groups_text ... ok
+test inline_trigger_rest_of_line_stops_at_the_next_newline ... ok
+test line_prefix_runs_from_the_line_start_to_the_trigger ... ok
+test inline_trigger_line_prefix_excludes_the_preceding_newline ... ok
+test kind_name_flows_to_extension_render_children ... ok
+test opener_position_sits_just_past_the_bracket ... ok
+test line_prefix_spans_from_the_line_start_to_the_cursor ... ok
+test inline_trigger_in_bracket_is_true_inside_a_link_label ... ok
+test options_is_empty_clone_and_debug_report_registrations ... ok
+test preceding_reports_the_byte_before_the_trigger ... ok
+test repeated_marker_appends_to_the_open_block ... ok
+test rest_of_line_runs_from_the_trigger_to_the_line_end ... ok
+test trigger_matches_stay_out_of_brackets ... ok
+test trigger_line_prefix_rewinds_to_the_line_start ... ok
+test trigger_rest_of_line_reaches_the_line_end ... ok
+test trigger_preceding_reports_the_byte_before_the_cursor ... ok
+test unwritten_text_cells_map_to_their_preceding_byte ... ok
+test trigger_unput_unwrites_trailing_text ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mutants_ext.rs (target/debug/build/geist4-core/1eb7d2097a2ad703/out/mutants_ext-1eb7d2097a2ad703)
+
+running 6 tests
+test options_registry_reports_and_keeps_registrations ... ok
+test continuation_column_counts_the_container_prefixes ... ok
+test closing_fence_line_is_consumed_whole ... ok
+test a_pre_paragraphs_inlines_span_through_the_block_start ... ok
+test start_hooks_open_only_on_their_own_index_line_and_arena ... ok
+test repeated_marker_line_is_absorbed_into_the_open_block ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mutants_inline_emph.rs (target/debug/build/geist4-core/aeb4fd6c7dc99c07/out/mutants_inline_emph-aeb4fd6c7dc99c07)
+
+running 18 tests
+test claim_split_rounds_a_cut_down_to_a_character_boundary ... ok
+test nested_emphasis_leftovers_nest_by_position ... ok
+test a_scanned_runs_text_node_spans_the_run ... ok
+test claimed_node_span_covers_the_claimed_bytes ... ok
+test preceding_reports_the_byte_before_the_cursor ... ok
+test a_closer_after_a_trigger_byte_looks_past_it ... ok
+test claim_split_keeps_the_head_and_hands_the_rest_back ... ok
+test claim_split_in_a_later_cell_cuts_where_the_end_names ... ok
+test a_claim_takes_the_groups_delimiters_off_the_stack ... ok
+test full_reference_links_carry_the_full_kind ... ok
+test content_reports_the_groups_text_or_none ... ok
+test an_extension_pair_adopts_every_node_between_its_runs ... ok
+test registered_triggers_do_not_make_every_byte_transparent ... ok
+test rest_of_line_runs_to_the_line_end ... ok
+test the_bracket_hook_sees_the_openers_position ... ok
+test the_hook_sees_its_own_trigger_byte ... ok
+test the_hook_sees_the_trigger_bytes_position ... ok
+test the_trigger_hook_sees_its_own_byte ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mutants_inline_scan.rs (target/debug/build/geist4-core/939cc78d75edac96/out/mutants_inline_scan-939cc78d75edac96)
+
+running 20 tests
+test escaped_char_in_link_label_keeps_link_span ... ok
+test autolink_text_child_covers_the_url_only ... ok
+test a_leading_tab_makes_an_indented_code_block ... ok
+test hard_break_backwalk_stops_at_zero ... ok
+test escaped_char_at_line_start_covers_both_bytes ... ok
+test entity_span_covers_the_reference ... ok
+test delimiter_measurement_walks_through_trigger_bytes ... ok
+test hard_break_span_covers_dropped_trailing_spaces ... ok
+test disabled_link_close_bracket_text_covers_one_byte ... ok
+test literal_backslash_span_covers_one_byte ... ok
+test list_item_tab_padding_continues_at_its_tab_stop ... ok
+test broken_reference_label_is_trimmed_on_both_sides ... ok
+test long_backtick_run_span_starts_at_run_start ... ok
+test numeric_entity_decodes_decimal_references ... ok
+test unmatched_backtick_run_span_covers_the_ticks ... ok
+test unmatched_open_bracket_text_covers_one_byte ... ok
+test run_of_1001_backticks_is_literal_text ... ok
+test a_label_of_exactly_1000_bytes_is_a_reference ... ok
+test a_plain_label_over_the_cap_falls_back ... ok
+test an_escaped_label_over_the_cap_falls_back ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mutants_leaf.rs (target/debug/build/geist4-core/9ab2720b83eb4d4c/out/mutants_leaf-9ab2720b83eb4d4c)
+
+running 21 tests
+test attribute_needing_value_at_tag_end_is_still_complete ... ok
+test backslash_escape_in_fence_info_string ... ok
+test closing_tag_with_trailing_space_starts_an_html_block ... ok
+test self_closing_block_tag_interrupts_a_paragraph ... ok
+test attribute_shapes_rejected_at_first_char ... ok
+test html_block_requires_valid_first_attribute_char ... ok
+test attribute_scan_convergence_shapes ... ok
+test premature_kind1_name_is_a_paragraph ... ok
+test self_closing_inline_tag_alone_starts_an_html_block ... ok
+test link_label_is_trimmed_of_surrounding_whitespace ... ok
+test dash_number_period_is_not_a_list_marker ... ok
+test attribute_shapes_round_trip ... ok
+test self_closing_tag_keeps_trailing_text_in_paragraph ... ok
+test pointy_destination_may_span_lines_until_newline ... ok
+test single_quoted_attribute_in_skip_position ... ok
+test single_quoted_attribute_value_closes_at_quote ... ok
+test spaces_around_equals_both_sides ... ok
+test spaces_around_equals_in_second_attribute ... ok
+test underscore_leading_attribute_name_opens_kind7_block ... ok
+test title_may_be_on_the_next_line ... ok
+test unquoted_attribute_value_in_skip_position ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mutants_misc.rs (target/debug/build/geist4-core/178bf15f1e34d27a/out/mutants_misc-178bf15f1e34d27a)
+
+running 11 tests
+test span_len_and_is_empty_at_the_boundaries ... ok
+test is_empty_reflects_allocation ... ok
+test attrs_lists_the_set_values_in_insert_order ... ok
+test attr_only_matches_the_requested_name ... ok
+test extension_of_reports_the_claiming_extension_index ... ok
+test set_attr_same_name_replaces_the_stored_value ... ok
+test set_attr_then_attr_returns_the_set_value ... ok
+test len_counts_allocated_nodes ... ok
+test remove_child_clears_the_parent_of_a_mid_tree_node ... ok
+test extend_span_widens_the_node_span_to_the_union ... ok
+test debug_print_indents_children_one_stop_deeper ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mutants_parser.rs (target/debug/build/geist4-core/b84b578fc1b1bc79/out/mutants_parser-b84b578fc1b1bc79)
+
+running 17 tests
+test empty_item_span_covers_marker_and_padding ... ok
+test repeated_marker_line_absorbs_into_the_open_block ... ok
+test html_block_span_starts_at_its_opening_bracket ... ok
+test paragraph_span_starts_after_the_quote_prefix ... ok
+test heading_text_span_starts_at_the_first_content_byte ... ok
+test lazy_continuation_text_starts_after_the_tab ... ok
+test pre_table_cell_unescapes_pipes_and_trims ... ok
+test consecutive_same_marker_items_share_one_list ... ok
+test container_spans_cover_their_last_child ... ok
+test list_items_start_at_their_own_marker ... ok
+test front_matter_span_and_source_survive_offset_arithmetic ... ok
+test inline_span_after_nul_maps_to_real_source_bytes ... ok
+test replacement_map_offsets_skip_the_consumed_prefix ... ok
+test start_hook_allocations_land_in_the_document ... ok
+test start_hook_indent_column_count_is_exact ... ok
+test start_hook_indented_flag_survives_lazy_paragraph_line ... ok
+test start_hook_sees_its_own_extension_index_line_and_blank_flag ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/pathological.rs (target/debug/build/geist4-core/211f94c67f576a4a/out/pathological-211f94c67f576a4a)
+
+running 4 tests
+test fixed_pathological_cases ... ok
+test multiline_paragraph_span_mapping_scales_linearly ... ok
+test deep_nesting_completes ... ok
+test emphasis_families_scale_linearly ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.62s
+
+     Running tests/problems.rs (target/debug/build/geist4-core/29f68d9efa930068/out/problems-29f68d9efa930068)
+
+running 9 tests
+test shortcut_reference_without_definition_is_a_problem ... ok
+test a_retry_after_a_failure_is_not_a_second_problem ... ok
+test inline_links_produce_no_problems ... ok
+test problems_are_empty_for_clean_documents ... ok
+test broken_image_reference_is_a_problem ... ok
+test claimed_groups_produce_no_reference_problems ... ok
+test broken_reference_is_a_problem_with_unchanged_output ... ok
+test begin_parse_runs_once_per_parse_in_order ... ok
+test defined_references_produce_no_problems ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/properties.rs (target/debug/build/geist4-core/744e034278e2756e/out/properties-744e034278e2756e)
+
+running 6 tests
+test ordered_list_start_attribute_renders ... ok
+test autolink_anchor_tags_balance ... ok
+test spans_lie_inside_the_input ... ok
+test no_input_panics ... ok
+test rendering_is_deterministic ... ok
+test markdown_tags_balance ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/regressions.rs (target/debug/build/geist4-core/34faf3ad8a52e8b8/out/regressions-34faf3ad8a52e8b8)
+
+running 1 test
+test regression_corpus ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/spans.rs (target/debug/build/geist4-core/2d26463ed22e9e14/out/spans-2d26463ed22e9e14)
+
+running 18 tests
+test multi_line_paragraph_lines_map_separately ... ok
+test container_spans_enclose_children_across_shared_delimiters ... ok
+test lazy_continuation_lines_map_to_their_own_source ... ok
+test atx_heading_text_drops_the_closing_run ... ok
+test code_span_covers_its_backticks ... ok
+test leading_whitespace_is_outside_the_first_text ... ok
+test atx_heading_text_covers_its_content ... ok
+test hard_break_covers_the_backslash_and_ending ... ok
+test image_covers_its_whole_form ... ok
+test link_covers_its_whole_form ... ok
+test emphasis_covers_its_delimiters ... ok
+test inline_html_covers_its_tag ... ok
+test nul_replacement_maps_to_the_nul_byte ... ok
+test partially_consumed_tab_maps_to_the_tab_byte ... ok
+test setext_content_skips_consumed_definitions ... ok
+test soft_break_covers_the_line_ending ... ok
+test strong_covers_its_delimiters ... ok
+test text_runs_cover_their_source ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/spec.rs (target/debug/build/geist4-core/e034ef3e66d15227/out/spec-e034ef3e66d15227)
+
+running 1 test
+test commonmark_spec_progress ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/build/geist4-ext/7dcea5308e8501d1/out/geist4_ext-7dcea5308e8501d1)
+
+running 6 tests
+test slugger::tests::repeated_slugs_get_numbered_suffixes ... ok
+test slug_table::tests::slug_table_boundaries ... ok
+test slugger::tests::reset_restores_first_use ... ok
+test slugger::tests::free_slug_matches_reference_basics ... ok
+test slugger::tests::dash_collision_rechecks_the_original_counter ... ok
+test slug_table::tests::spot_checks ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/autolink_edges.rs (target/debug/build/geist4-ext/c26b665143f0f5e5/out/autolink_edges-c26b665143f0f5e5)
+
+running 22 tests
+test check_domain_stops_at_invalid_hostchar ... ok
+test email_in_code_span_stays_literal ... ok
+test email_scan_tree_links_and_images ... ok
+test email_in_owned_text_links ... ok
+test email_protocol_window ... ok
+test less_than_ends_scheme_match ... ok
+test delimiter_bracket_accounting ... ok
+test email_restart_and_decline ... ok
+test email_split_boundaries ... ok
+test less_than_ends_www_match ... ok
+test email_forward_scan_edges ... ok
+test check_domain_rules ... ok
+test delimiter_entity_trimming ... ok
+test multibyte_host_characters ... ok
+test scheme_guard_cases ... ok
+test trailing_question_mark_trims ... ok
+test trait_surface ... ok
+test url_rewind_is_letters_only ... ok
+test url_trigger_shape ... ok
+test triggers_decline_inside_brackets ... ok
+test www_declines_after_domain_check ... ok
+test www_trigger_preceding_gate ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/deflist_edges.rs (target/debug/build/geist4-ext/56a78dbe2ec0639f/out/deflist_edges-56a78dbe2ec0639f)
+
+running 13 tests
+test foreign_kind_renders_nothing ... ok
+test lazy_look_declines_indented ... ok
+test bare_marker_never_starts ... ok
+test lazy_look_declines_other_containers ... ok
+test try_start_behind_own_list ... ok
+test lazy_look_sees_own_item ... ok
+test tight_definition_with_a_list_child ... ok
+test quote_paragraph_continues_lazily ... ok
+test tight_definition_with_a_code_child ... ok
+test loose_definition_rendering ... ok
+test lazy_look_sees_own_list ... ok
+test try_start_declines_without_holder ... ok
+test close_joins_and_nests ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/deflist_look.rs (target/debug/build/geist4-ext/3e283f5ddbab4216/out/deflist_look-3e283f5ddbab4216)
+
+running 4 tests
+test trait_surface ... ok
+test marker_at_document_start_declines ... ok
+test nested_markers_nest_repeatedly ... ok
+test look_approves_open_paragraph_after_list ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/footnote_problems.rs (target/debug/build/geist4-ext/eeb414f569826640/out/footnote_problems-eeb414f569826640)
+
+running 3 tests
+test undefined_footnote_reference_is_a_problem_with_unchanged_output ... ok
+test defined_footnote_reference_produces_no_problems ... ok
+test a_reference_with_several_text_cells_keeps_the_rest_of_the_paragraph ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/front_matter.rs (target/debug/build/geist4-ext/5a3e20ce62301c4c/out/front_matter-5a3e20ce62301c4c)
+
+running 7 tests
+test front_matter_with_type_surface ... ok
+test source_attribute_holds_raw_prologue ... ok
+test unclosed_prologue_claims_nothing ... ok
+test constructors_build_registered_extensions ... ok
+test prologue_renders_nothing_with_and_without_body ... ok
+test each_delimiter_claims_its_own ... ok
+test custom_delimiter_claims_prologue ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/heading_identifiers.rs (target/debug/build/geist4-ext/2ab245a461ccba03/out/heading_identifiers-2ab245a461ccba03)
+
+running 3 tests
+test extracts_ids_across_tag_shapes ... ok
+test inline_extension_nodes_contribute_descendants ... ok
+test matches_reference_except_documented_divergences ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mutants_basic_html.rs (target/debug/build/geist4-ext/0c64e70309af2443/out/mutants_basic_html-0c64e70309af2443)
+
+running 6 tests
+test image_alt_text_includes_code_spans ... ok
+test safe_data_image_urls_are_kept ... ok
+test dangerous_link_urls_are_suppressed ... ok
+test tagfilter_escapes_disallowed_tag_starts ... ok
+test short_and_plain_urls_render_normally ... ok
+test every_dangerous_scheme_is_suppressed_in_links_and_images ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mutants_extension.rs (target/debug/build/geist4-ext/8f09af0a19e23070/out/mutants_extension-8f09af0a19e23070)
+
+running 19 tests
+test default_inline_triggers_are_empty ... ok
+test default_take_error_is_none ... ok
+test block_start_sees_column_zero_at_the_document ... ok
+test block_start_column_counts_the_container_prefixes ... ok
+test a_non_filtering_extension_leaves_raw_html_alone ... ok
+test an_extension_block_does_not_reach_past_its_container ... ok
+test default_front_matter_delimiter_ignores_lookalike_lines ... ok
+test default_front_matter_delimiter_claims_nothing ... ok
+test definition_term_text_keeps_its_source_span ... ok
+test a_shallow_quoted_continuation_does_not_join_the_definition ... ok
+test a_zero_indent_continuation_joins_the_definition ... ok
+test render_override_pulls_children_in_order_with_counts ... ok
+test consumed_columns_leave_the_rest_of_the_indent ... ok
+test the_default_filter_hook_allows_everything ... ok
+test state_is_visible_to_nested_block_starts ... ok
+test continuation_sees_the_definition_state ... ok
+test a_blank_line_inside_a_footnote_definition_keeps_it_open ... ok
+test indented_continuation_columns_are_counted_exactly ... ok
+test footnote_definition_after_a_blank_line_continues ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mutants_parser_ext.rs (target/debug/build/geist4-ext/6ed419fe2d85d398/out/mutants_parser_ext-6ed419fe2d85d398)
+
+running 10 tests
+test tasklist_marker_becomes_a_checkbox ... ok
+test a_declined_paragraph_is_not_reoffered ... ok
+test escaped_asterisk_preheader_stays_outside_the_table ... ok
+test table_frame_rows_build_a_full_table ... ok
+test nested_list_inside_a_definition ... ok
+test table_body_rows_join_the_open_table ... ok
+test pre_paragraph_span_covers_the_text_before_the_table ... ok
+test paragraph_before_delimiter_row_becomes_the_header ... ok
+test second_definition_marker_starts_a_new_definition ... ok
+test quoted_definition_list_keeps_paragraphs_in_definitions ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/slugger_oracle.rs (target/debug/build/geist4-ext/96017db2a1106bf4/out/slugger_oracle-96017db2a1106bf4)
+
+running 3 tests
+test maintain_case_oneoffs_match_oracle ... ok
+test dedup_scripts_match_oracle ... ok
+test pure_slug_matches_oracle ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/spec.rs (target/debug/build/geist4-ext/7e21123c7d6b004d/out/spec-7e21123c7d6b004d)
+
+running 16 tests
+test front_matter_off_leaves_plain_commonmark ... ok
+test autolink_off_leaves_plain_commonmark ... ok
+test tables_off_leaves_plain_commonmark ... ok
+test strikethrough_off_leaves_plain_commonmark ... ok
+test tasklist_off_leaves_plain_commonmark ... ok
+test tagfilter_off_leaves_plain_commonmark ... ok
+test footnotes_off_leaves_plain_commonmark ... ok
+test tables_spec ... ok
+test strikethrough_spec ... ok
+test heading_identifiers_spec ... ok
+test tagfilter_spec ... ok
+test front_matter_spec ... ok
+test description_lists_spec ... ok
+test autolink_spec ... ok
+test tasklist_spec ... ok
+test footnotes_spec ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/tagfilter_matcher.rs (target/debug/build/geist4-ext/1cbc9b07d01eec65/out/tagfilter_matcher-1cbc9b07d01eec65)
+
+running 7 tests
+test surface ... ok
+test boundary_byte_decides ... ok
+test closing_slash_is_matched ... ok
+test short_and_plain_literals_pass_through ... ok
+test lookalike_names_pass_through ... ok
+test name_at_end_of_literal_passes ... ok
+test every_blacklist_entry_matches_case_insensitively ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/build/geist4-ext-loader/11d2fecd456ab665/out/geist4_ext_loader-11d2fecd456ab665)
+
+running 6 tests
+test sandbox::tests::fuel_defaults_to_and_clamps_to_the_cap ... ok
+test sandbox::tests::memory_pages_defaults_to_and_clamps_to_the_cap ... ok
+test sandbox::tests::io_messages_for_the_common_kinds_are_stable ... ok
+test decl_block::private_tests::list_parses_across_the_inline_pass_splits ... ok
+test sandbox::tests::a_missing_component_file_reports_a_portable_message ... ok
+test sandbox::tests::sandbox_error_display_names_the_hook ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/adapter.rs (target/debug/build/geist4-ext-loader/06cb46fa35deadac/out/adapter-06cb46fa35deadac)
+
+running 13 tests
+test manifest_helpers_agree_with_the_loader_shape ... ok
+test package_load_rejects_a_failing_component ... ok
+test block_start_looks_gates_a_lazy_continuation ... ok
+test post_process_rewrites_text_nodes ... ok
+test inline_bracket_claims_its_group ... ok
+test block_hooks_flow_through_the_adapter ... ok
+test package_load_builds_a_working_tier2_extension ... ok
+test a_latched_error_persists_until_taken ... ok
+test attributes_from_the_decision_reach_the_render ... ok
+test inline_trigger_delimiter_pairs_through_the_adapter ... ok
+test plain_document_parses ... ok
+test fuel_exhaustion_latches_and_declines ... ok
+test memory_exhaustion_latches_and_declines ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+
+     Running tests/compile.rs (target/debug/build/geist4-ext-loader/8e4d1bce201aea1c/out/compile-8e4d1bce201aea1c)
+
+running 10 tests
+test package_load_rejects_a_missing_manifest ... ok
+test composed_extension_reports_its_name_and_kinds ... ok
+test package_load_rejects_an_invalid_manifest ... ok
+test replace_through_the_composed_extension ... ok
+test inline_span_through_the_composed_extension ... ok
+test block_container_through_the_composed_extension ... ok
+test attributes_flow_through_the_composed_extension ... ok
+test html_filter_through_the_composed_extension ... ok
+test package_load_rejects_a_missing_spec ... ok
+test package_load_accepts_a_valid_package ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/decl_block.rs (target/debug/build/geist4-ext-loader/ddcf3a48463efc7b/out/decl_block-ddcf3a48463efc7b)
+
+running 36 tests
+test closed_by_fence_records_no_problem ... ok
+test close_fence_is_consumed ... ok
+test empty_info_leaves_empty_info_slot ... ok
+test bare_close_fence_stays_text ... ok
+test attribute_list_attaches_to_inline_span ... ok
+test entries_dispatch_in_declaration_order ... ok
+test attribute_list_attaches_to_preceding_paragraph ... ok
+test attribute_list_final_line_attaches_to_paragraph ... ok
+test attribute_list_attaches_to_container_node ... ok
+test bare_key_and_quoted_value ... ok
+test container_round_trip ... ok
+test close_fence_may_trail_spaces ... ok
+test eof_closes_unclosed_container ... ok
+test eof_without_unclosed_ok_records_problem ... ok
+test four_space_indent_does_not_open ... ok
+test info_string_is_rendered ... ok
+test info_without_template_is_ignored ... ok
+test lazy_line_joins_paragraph_inside_container ... ok
+test list_without_target_stays_text ... ok
+test lists_open_inside_container ... ok
+test malformed_list_stays_text ... ok
+test longer_run_does_not_close ... ok
+test marker_interrupts_paragraph ... ok
+test marker_mid_line_stays_text ... ok
+test nested_same_name_containers ... ok
+test replace_applies_to_every_occurrence_without_once ... ok
+test over_the_entry_cap_stays_text ... ok
+test replace_never_crosses_a_node_boundary ... ok
+test replace_once_limits_to_one_per_node ... ok
+test replace_skips_code_blocks ... ok
+test replace_skips_code_spans ... ok
+test replace_skips_raw_html_tags ... ok
+test replaces_chain_in_declaration_order ... ok
+test shorter_run_does_not_close ... ok
+test second_list_appends_class ... ok
+test three_space_indent_opens_and_closes ... ok
+
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/decl_inline.rs (target/debug/build/geist4-ext-loader/c5b2f26ef22c7e3c/out/decl_inline-c5b2f26ef22c7e3c)
+
+running 41 tests
+test math_open_digit_stays_literal ... ok
+test one_byte_delimiter_inside_words ... ok
+test math_after_digit_stays_literal ... ok
+test math_digit_before_open_stays_literal ... ok
+test multiline_span_crosses_soft_break ... ok
+test math_span_wraps ... ok
+test math_interior_spaces_allowed ... ok
+test math_open_space_stays_literal ... ok
+test math_close_space_stays_literal ... ok
+test one_byte_rule_of_three_blocks_pair ... ok
+test one_byte_delimiters_pair_as_runs ... ok
+test entries_share_trigger_by_length ... ok
+test real_link_wins_over_wiki ... ok
+test single_line_span_within_one_line ... ok
+test span_declared_attr_absent_renders_empty ... ok
+test span_escaped_opener_stays_literal ... ok
+test span_escaped_closer_inside_keeps_span ... ok
+test span_flanking_spaces_block ... ok
+test span_flanking_line_edges_stay_literal ... ok
+test span_flanking_word_edges_pair ... ok
+test span_pairs_nearest_opener ... ok
+test span_unmatched_closer_is_literal ... ok
+test span_renders_nested_inline ... ok
+test span_stops_at_paragraph_boundary ... ok
+test span_unmatched_opener_is_literal ... ok
+test span_wraps_content ... ok
+test single_line_span_unwraps_across_soft_break ... ok
+test template_unknown_slot_stays_literal ... ok
+test single_line_span_unwraps_around_inner_span ... ok
+test two_byte_delimiter_needs_full_run ... ok
+test two_byte_mismatched_runs_stay_literal ... ok
+test two_byte_delimiter_spans_whole_runs ... ok
+test wiki_claim_happens_before_emphasis ... ok
+test wiki_link_label_overrides_target ... ok
+test wiki_suffix_mismatch_stays_literal ... ok
+test wiki_link_renders_target ... ok
+test span_wraps_wiki_link ... ok
+test wiki_group_clears_inner_span_delims ... ok
+test wiki_target_percent_encodes_spaces ... ok
+test wiki_unterminated_group_stays_text ... ok
+test wiki_target_encodes_hash_and_query ... ok
+
+test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/hostile.rs (target/debug/build/geist4-ext-loader/e587d41daaa81319/out/hostile-e587d41daaa81319)
+
+running 4 tests
+test render_memory_hog_is_stopped ... ok
+test oversized_claim_keeps_whole_content ... ok
+test undeclared_block_kind_is_latched ... ok
+test endless_look_is_stopped_by_fuel ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+
+     Running tests/manifest.rs (target/debug/build/geist4-ext-loader/ee7a284c016bce3e/out/manifest-ee7a284c016bce3e)
+
+running 45 tests
+test accepts_the_whole_hook_vocabulary ... ok
+test host_manifests ... ok
+test declaration_order_is_preserved ... ok
+test accepts_two_and_three_part_versions ... ok
+test attribute_list_rules ... ok
+test block_container_rules ... ok
+test inline_text_template_needs_children ... ok
+test full_manifest_parses_to_exact_model ... ok
+test kind_cross_rules ... ok
+test minimal_manifest_uses_defaults ... ok
+test missing_extension_fields ... ok
+test format_shape_and_major_decoupling ... ok
+test format_version_rules ... ok
+test name_length_limits ... ok
+test rejects_duplicate_kinds ... ok
+test html_filter_rules ... ok
+test license_expressions ... ok
+test rejects_bad_attr_names ... ok
+test rejects_bad_kind_names ... ok
+test rejects_kind_without_name ... ok
+test rejects_no_tier ... ok
+test rejects_bad_option_names ... ok
+test rejects_options_missing_type_or_default ... ok
+test rejects_bad_names ... ok
+test rejects_bad_markers ... ok
+test rejects_templates_over_1kib ... ok
+test rejects_unknown_option_type ... ok
+test option_limit_is_enforced ... ok
+test rejects_unknown_hooks ... ok
+test toml_syntax_errors_carry_spans ... ok
+test rejects_option_type_mismatches ... ok
+test shape_mismatches_are_rejected ... ok
+test rejects_bad_version_shapes ... ok
+test rejects_unknown_template_substitutions ... ok
+test validation_errors_carry_spans ... ok
+test rejects_two_tiers ... ok
+test rejects_span_delimiters_out_of_range ... ok
+test replace_rules ... ok
+test wasm_inline_triggers ... ok
+test rejects_reserved_names ... ok
+test wasm_section_and_limits ... ok
+test wiki_link_rules ... ok
+test kind_limit_is_enforced ... ok
+test rejects_overlarge_manifest ... ok
+test replace_and_entry_limits ... ok
+
+test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/package_load.rs (target/debug/build/geist4-ext-loader/5360c5ec22c1d929/out/package_load-5360c5ec22c1d929)
+
+running 6 tests
+test load_error_shape ... ok
+test missing_dir_reports_not_found ... ok
+test unreadable_manifest_reports_plain_os_text ... ok
+test malformed_manifest_carries_span ... ok
+test missing_spec_md_declines ... ok
+test complete_package_loads ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/sandbox.rs (target/debug/build/geist4-ext-loader/ee22699ed865f3eb/out/sandbox-ee22699ed865f3eb)
+
+running 12 tests
+test load_rejects_a_missing_file ... ok
+test load_rejects_a_non_wasm_file ... ok
+test load_rejects_a_core_module ... ok
+test a_component_without_the_hooks_interface_fails_to_load ... ok
+test fuel_exhaustion_is_a_defined_error ... ok
+test limits_are_clamped_to_the_loader_caps ... ok
+test block_hooks_round_trip ... ok
+test init_receives_kinds_and_options ... ok
+test memory_limit_stops_growth ... ok
+test fixture_loads_and_checks ... ok
+test inline_hooks_round_trip ... ok
+test a_component_with_imports_fails_to_instantiate ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+
+     Running unittests src/lib.rs (target/debug/build/geist4-ffi/689668f64e49c207/out/geist4_ffi-689668f64e49c207)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/cross_reference.rs (target/debug/build/geist4-ffi/407d655a0cd92ce5/out/cross_reference-407d655a0cd92ce5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/ffi.rs (target/debug/build/geist4-ffi/8e1a334904cc970d/out/ffi-8e1a334904cc970d)
+
+running 16 tests
+test freeing_null_handles_is_a_no_op ... ok
+test error_buffers_truncate_and_stay_terminated ... ok
+test invalid_utf8_is_rejected_with_the_offset ... ok
+test null_arguments_are_rejected ... ok
+test unknown_extension_names_are_rejected ... ok
+test version_is_a_nonempty_string ... ok
+test every_bundle_name_enables_something ... ok
+test empty_input_parses_with_a_non_null_pointer ... ok
+test a_nul_byte_is_ordinary_content ... ok
+test documents_keep_working_across_many_renders ... ok
+test the_options_handle_may_be_freed_before_rendering ... ok
+test plain_parse_renders_the_spec_shape ... ok
+test one_shot_render_matches_the_handle_path ... ok
+test broken_references_become_problems_with_spans ... ok
+test enabling_twice_is_idempotent ... ok
+test gfm_bundle_renders_strikethrough_and_tables ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/host_extension.rs (target/debug/build/geist4-ffi/f6d919690a0b963f/out/host_extension-f6d919690a0b963f)
+
+running 9 tests
+test declared_data_is_validated ... ok
+test duplicate_names_are_rejected ... ok
+test hook_failure_latches_and_surfaces_once ... ok
+test block_close_html_replaces_the_children ... ok
+test fenced_block_starts_continues_and_renders ... ok
+test claim_marks_the_container_and_the_override_renders ... ok
+test post_process_rewrites_text_only ... ok
+test bracket_claims_an_unmatched_group ... ok
+test trigger_tags_a_run_and_renders ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/safe.rs (target/debug/build/geist4-ffi/716a5027b88ea55d/out/safe-716a5027b88ea55d)
+
+running 15 tests
+test an_unknown_name_is_rejected_with_the_valid_names ... ok
+test highlighting_off_renders_plain_code ... ok
+test the_document_outlives_its_options ... ok
+test the_one_shot_path_needs_no_options ... ok
+test a_document_can_be_moved_after_parsing ... ok
+test a_nul_byte_is_ordinary_content ... ok
+test the_gfm_bundle_enables_strikethrough ... ok
+test plain_parse_renders_byte_for_byte ... ok
+test enabling_a_bundle_twice_registers_nothing_twice ... ok
+test version_matches_the_crate ... ok
+test the_one_shot_path_takes_options ... ok
+test empty_source_parses_and_renders_empty ... ok
+test problems_carry_spans_inside_the_source ... ok
+test highlighting_on_unknown_language_stays_plain ... ok
+test highlighting_on_wraps_tokens_in_class_spans ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running unittests src/lib.rs (target/debug/build/geist4-highlight/150f6fb8dfa82ac0/out/geist4_highlight-150f6fb8dfa82ac0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/render_integration.rs (target/debug/build/geist4-highlight/53d9eb66d810f26e/out/render_integration-53d9eb66d810f26e)
+
+running 7 tests
+test on_mode_empty_info_stays_plain ... ok
+test on_mode_indented_code_stays_plain ... ok
+test a_declining_highlighter_is_transparent ... ok
+test off_matches_plain_byte_for_byte ... ok
+test on_mode_unknown_language_is_plain ... ok
+test on_mode_wraps_tokens_in_the_same_pre_code ... ok
+test on_mode_uses_only_the_first_info_word ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/tokens.rs (target/debug/build/geist4-highlight/05336dedf2a8f733/out/tokens-05336dedf2a8f733)
+
+running 7 tests
+test unknown_language_declines ... ok
+test token_text_is_escaped_like_the_plain_renderer ... ok
+test adjacent_same_class_tokens_merge ... ok
+test output_is_class_tokens_only ... ok
+test rust_tokens_map_to_conventional_classes ... ok
+test python_tokens_map_to_the_same_vocabulary ... ok
+test spans_balance_across_languages ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+
+     Running unittests src/lib.rs (target/debug/build/geist4-html/4334251b3a6d0cec/out/geist4_html-4334251b3a6d0cec)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/build/geist4-json/c71c5b2c3c7847d9/out/geist4_json-c71c5b2c3c7847d9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/schema.rs (target/debug/build/geist4-json/57b5fdaa65e6b22d/out/schema-57b5fdaa65e6b22d)
+
+running 7 tests
+test utf16_positions_match_the_mdast_convention ... ok
+test deflists_moved_text_keeps_its_source_spans ... ok
+test problems_and_defs_carry_positions ... ok
+test golden_shapes_pin_the_fields ... ok
+test every_span_stays_in_bounds_across_the_corpus ... ok
+test every_kind_serializes_and_validates ... ok
+test every_cross_binding_case_validates ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running unittests src/lib.rs (target/debug/build/geist4-mdast/2f6320ebc7b04dda/out/geist4_mdast-2f6320ebc7b04dda)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mdast_fixtures.rs (target/debug/build/geist4-mdast/dddd81f23e9a9d1b/out/mdast_fixtures-dddd81f23e9a9d1b)
+
+running 1 test
+test fixtures_match_the_reference ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running unittests src/lib.rs (target/debug/build/geist4-spec-harness/35aa305d99dc54d3/out/geist4_spec_harness-35aa305d99dc54d3)
+
+running 7 tests
+test tests::ordinary_fenced_code_is_not_an_example ... ok
+test tests::parse_errors_on_a_missing_separator ... ok
+test tests::failures_carry_the_details_a_developer_needs ... ok
+test tests::parse_errors_on_an_unclosed_example ... ok
+test tests::the_example_fence_is_thirty_two_backticks ... ok
+test tests::run_reports_passes_failures_and_sections ... ok
+test tests::parse_reads_sections_numbers_and_options ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/build/geist4-wasm/6db85129fe4afd44/out/geist4_wasm-6db85129fe4afd44)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/build/geist4-writer/a10b98d556eb3349/out/geist4_writer-a10b98d556eb3349)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/fuzz.rs (target/debug/build/geist4-writer/8cb048d9067f1952/out/fuzz-8cb048d9067f1952)
+
+running 1 test
+test fuzz_round_trip ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/round_trip.rs (target/debug/build/geist4-writer/939e3b8e2f04bdeb/out/round_trip-939e3b8e2f04bdeb)
+
+running 16 tests
+test reference_definitions_are_reemitted ... ok
+test fence_sizing_grows_with_inner_runs ... ok
+test code_spans_keep_their_content ... ok
+test bullet_and_ordered_markers_normalize ... ok
+test setext_headings_normalize_to_atx ... ok
+test heading_content_stays_on_one_line ... ok
+test adjacent_lists_rotate_markers_to_stay_separate ... ok
+test heading_content_escapes_closing_sequences ... ok
+test nested_emphasis_switches_delimiters ... ok
+test empty_containers_survive ... ok
+test thematic_breaks_normalize ... ok
+test thematic_breaks_avoid_marker_and_setext_collisions ... ok
+test text_escaping_stays_minimal ... ok
+test unusual_destinations_reparse ... ok
+test stress_inputs_round_trip ... ok
+test spec_examples_round_trip ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+   Doc-tests geist4_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests geist4_ext
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests geist4_ext_loader
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests geist4_ffi
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests geist4_highlight
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests geist4_html
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests geist4_json
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests geist4_mdast
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests geist4_spec_harness
+
+running 1 test
+test crates/geist4-spec-harness/src/lib.rs - (line 26) ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 0.22s; merged doctests compilation took 0.12s
+   Doc-tests geist4_wasm
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests geist4_writer
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== C header is current ==
+== C ABI tests ==
+== building geist4-ffi (release) ==
+    Finished `release` profile [optimized] target(s) in 0.03s
+== compiling test_ffi.c ==
+== running the C contract tests ==
+ok - version is non-null
+ok - version is 0.1.0
+ok - options created
+ok - plain parse renders
+ok - heading renders byte for byte
+ok - empty document renders empty
+ok - empty output is terminated
+ok - NUL becomes U+FFFD
+ok - null input parses nothing
+ok - null input reports: input pointer is null
+ok - invalid UTF-8 parses nothing
+ok - invalid UTF-8 reports: input is not valid UTF-8 at byte 1
+ok - one-shot rejects invalid UTF-8
+ok - out untouched on failure
+ok - gfm bundle enabled: 
+ok - strikethrough renders
+ok - table renders byte for byte
+ok - unknown name rejected
+ok - rejection lists names: unknown extension; valid names: tables, strikethrough, autolink, tasklist, tagfilter, footnotes, front_matter, heading_identifiers, description_lists, gfm, all
+ok - strikethrough enabled
+ok - document parsed
+ok - problems read
+ok - 1 problems
+ok - problem items non-null
+ok - a problem names the missing reference
+ok - document renders after options freed
+ok - len agrees with the terminator
+ok - document HTML byte for byte
+ok - second render identical
+ok - null frees are no-ops
+all C checks passed
+== Swift binding ==
+    Finished `release` profile [optimized] target(s) in 0.06s
+    Finished `release` profile [optimized] target(s) in 0.06s
+    Finished `release` profile [optimized] target(s) in 0.05s
+    Finished `release` profile [optimized] target(s) in 0.05s
+assembled /Users/agent/.hermes/profiles/geist4/work/Geist4/bindings/swift/CGeist4.xcframework: ios
+ios-sim
+macos
+Building for debugging...
+[Planning deferred tasks]
+[3 / 10] Geist4
+[11 / 16] Geist4
+/Users/agent/.hermes/profiles/geist4/work/Geist4/bindings/swift/Package.swift: Geist4: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/Library/Frameworks' not found
+[15 / 19] Geist4Contract-product
+[18 / 19] Geist4Contract-product/Users/agent/.hermes/profiles/geist4/work/Geist4/bindings/swift/Package.swift: Geist4Contract-product: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/usr/lib' not found
+/Users/agent/.hermes/profiles/geist4/work/Geist4/bindings/swift/Package.swift: Geist4Contract-product: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/Library/Frameworks' not found
+
+Build complete! (0.72 sec)
+ok - version is nonempty
+ok - heading renders byte for byte
+ok - empty document renders empty
+ok - NUL byte becomes a replacement character
+ok - gfm bundle enables strikethrough
+ok - gfm table renders byte for byte
+ok - unknown extension is rejected with valid names
+ok - strikethrough enables alone
+ok - document outlives options and renders twice
+ok - problems name the missing reference with a span
+ok - host extension renders a fenced block through the hooks
+ok - host block close owns the whole output
+ok - host claim renders through the override
+ok - host inline trigger tags and renders a run
+ok - host bracket claims an unmatched group
+ok - host post-process rewrites text but not code
+ok - a failing host hook declines and surfaces through problems
+ok - host extension validation rejects bad declared data
+ok - a duplicate host extension name is rejected
+19/19 checks passed
+== wasm binding ==
+    Finished `release` profile [optimized] target(s) in 0.05s
+ok - the version reads
+ok - a heading renders byte for byte
+ok - inline markup renders byte for byte
+ok - plain rendering leaves strikethrough literal
+ok - an unknown extension throws with the valid names
+ok - enable_builtin accepts a valid name twice
+ok - the gfm bundle enables strikethrough
+ok - a table renders byte for byte
+ok - a tasklist item renders the checkbox
+ok - the document keeps rendering the same bytes
+ok - one broken reference is one problem
+ok - a defined reference leaves no problems
+ok - a chain of broken groups reports each distinct label
+ok - a NUL byte renders as the replacement character
+ok - an empty document parses and renders empty
+ok - host extension renders a fenced block through the hooks
+ok - host block close owns the whole output
+ok - host claim renders through the override
+ok - host inline trigger tags and renders a run
+ok - an unmatched trigger run stays text
+ok - host bracket claims an unmatched group
+ok - host post-process rewrites text but not code
+ok - a failing host hook declines the parse
+ok - a failing host hook latches one problem
+ok - the latched message names the extension and the error
+ok - host errors carry no span
+ok - host extension validation rejects bad declared data
+ok - a duplicate host extension name is rejected
+ok - the version reads
+ok - a heading renders byte for byte
+ok - inline markup renders byte for byte
+ok - plain rendering leaves strikethrough literal
+ok - an unknown extension throws with the valid names
+ok - enable_builtin accepts a valid name twice
+ok - the gfm bundle enables strikethrough
+ok - a table renders byte for byte
+ok - a tasklist item renders the checkbox
+ok - the document keeps rendering the same bytes
+ok - one broken reference is one problem
+ok - a defined reference leaves no problems
+ok - a chain of broken groups reports each distinct label
+ok - a NUL byte renders as the replacement character
+ok - an empty document parses and renders empty
+ok - host extension renders a fenced block through the hooks
+ok - host block close owns the whole output
+ok - host claim renders through the override
+ok - host inline trigger tags and renders a run
+ok - an unmatched trigger run stays text
+ok - host bracket claims an unmatched group
+ok - host post-process rewrites text but not code
+ok - a failing host hook declines the parse
+ok - a failing host hook latches one problem
+ok - the latched message names the extension and the error
+ok - host errors carry no span
+ok - host extension validation rejects bad declared data
+ok - a duplicate host extension name is rejected
+== Python binding ==
+🍹 Building a mixed python/rust project
+🐍 Found CPython 3.15 at /opt/homebrew/opt/python@3.15/bin/python3.15
+🔗 Found pyo3 bindings with abi3-py3.9 support
+📡 Using build options features from pyproject.toml
+💻 Using `MACOSX_DEPLOYMENT_TARGET=11.0` for aarch64-apple-darwin by default
+    Finished `release` profile [optimized] target(s) in 0.05s
+📦 Built wheel for abi3 Python ≥ 3.9 to ../../target/wheels/geist4-0.1.0-cp39-abi3-macosx_11_0_arm64.whl
+............................
+----------------------------------------------------------------------
+Ran 28 tests in 0.001s
+
+OK
+== cross-binding ==
+cases.jsonl is current (1158 cases)
+    Finished `release` profile [optimized] target(s) in 0.03s
+Building for debugging...
+[Planning deferred tasks]
+[1 / 7]
+[2 / 6] Geist4Cross-product
+[5 / 9] Geist4Cross-product
+[8 / 9] Geist4Cross-product
+/Users/agent/.hermes/profiles/geist4/work/Geist4/bindings/swift/Package.swift: Geist4Cross-product: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/usr/lib' not found
+/Users/agent/.hermes/profiles/geist4/work/Geist4/bindings/swift/Package.swift: Geist4Cross-product: ld: warning: search path '/Library/Developer/CommandLineTools/Developer/Library/Frameworks' not found
+Build complete! (0.77 sec)
+cross-binding: 1158 cases against the core
+cross-binding: javascript matches the core byte for byte
+cross-binding: python matches the core byte for byte
+cross-binding: swift matches the core byte for byte
+== conformance kit ==
+conformance: 26/26 cases pass
+== cargo doc ==
+    Checking pyo3 v0.30.1
+ Documenting geist4-python v0.1.0 (/Users/agent/.hermes/profiles/geist4/work/Geist4/crates/geist4-python)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.71s
+   Generated /Users/agent/.hermes/profiles/geist4/work/Geist4/target/doc/geist4/index.html and 13 other files
+== cargo deny ==
+warning[license-not-encountered]: license was not encountered
+   ┌─ /Users/agent/.hermes/profiles/geist4/work/Geist4/deny.toml:16:6
+   │
+16 │     "CC0-1.0",
+   │      ━━━━━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+   ┌─ /Users/agent/.hermes/profiles/geist4/work/Geist4/deny.toml:17:6
+   │
+17 │     "ISC",
+   │      ━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+   ┌─ /Users/agent/.hermes/profiles/geist4/work/Geist4/deny.toml:19:6
+   │
+19 │     "MPL-2.0",
+   │      ━━━━━━━ unmatched license allowance
+
+warning[duplicate]: found 2 duplicate entries for crate 'hashbrown'
+    ┌─ /Users/agent/.hermes/profiles/geist4/work/Geist4/Cargo.lock:115:1
+    │  
+115 │ ╭ hashbrown 0.16.1 registry+https://github.com/rust-lang/crates.io-index
+116 │ │ hashbrown 0.17.1 registry+https://github.com/rust-lang/crates.io-index
+    │ ╰──────────────────────────────────────────────────────────────────────┘ lock entries
+    │  
+    ├ hashbrown v0.16.1
+      └── gimli v0.33.0
+          ├── cranelift-codegen v0.137.2
+          │   ├── cranelift-frontend v0.137.2
+          │   │   └── wasmtime-internal-cranelift v50.0.2
+          │   │       └── wasmtime v50.0.2
+          │   │           └── geist4-ext-loader v0.1.0
+          │   │               └── geist4-cli v0.1.0
+          │   ├── cranelift-native v0.137.2
+          │   │   └── wasmtime-internal-cranelift v50.0.2 (*)
+          │   ├── wasmtime-internal-cranelift v50.0.2 (*)
+          │   └── wasmtime-internal-unwinder v50.0.2
+          │       ├── wasmtime v50.0.2 (*)
+          │       └── wasmtime-internal-cranelift v50.0.2 (*)
+          ├── wasmtime-environ v50.0.2
+          │   ├── wasmtime v50.0.2 (*)
+          │   ├── wasmtime-internal-cranelift v50.0.2 (*)
+          │   └── wasmtime-internal-unwinder v50.0.2 (*)
+          └── wasmtime-internal-cranelift v50.0.2 (*)
+    ├ hashbrown v0.17.1
+      ├── cranelift-codegen v0.137.2
+      │   ├── cranelift-frontend v0.137.2
+      │   │   └── wasmtime-internal-cranelift v50.0.2
+      │   │       └── wasmtime v50.0.2
+      │   │           └── geist4-ext-loader v0.1.0
+      │   │               └── geist4-cli v0.1.0
+      │   ├── cranelift-native v0.137.2
+      │   │   └── wasmtime-internal-cranelift v50.0.2 (*)
+      │   ├── wasmtime-internal-cranelift v50.0.2 (*)
+      │   └── wasmtime-internal-unwinder v50.0.2
+      │       ├── wasmtime v50.0.2 (*)
+      │       └── wasmtime-internal-cranelift v50.0.2 (*)
+      ├── cranelift-frontend v0.137.2 (*)
+      ├── indexmap v2.14.2
+      │   ├── gimli v0.33.0
+      │   │   ├── cranelift-codegen v0.137.2 (*)
+      │   │   ├── wasmtime-environ v50.0.2
+      │   │   │   ├── wasmtime v50.0.2 (*)
+      │   │   │   ├── wasmtime-internal-cranelift v50.0.2 (*)
+      │   │   │   └── wasmtime-internal-unwinder v50.0.2 (*)
+      │   │   └── wasmtime-internal-cranelift v50.0.2 (*)
+      │   ├── h2 v0.4.20
+      │   │   ├── hyper v1.12.0
+      │   │   │   ├── hyper-rustls v0.27.10
+      │   │   │   │   └── reqwest v0.13.5
+      │   │   │   │       └── jsonschema v0.61.2
+      │   │   │   │           └── (dev) geist4-json v0.1.0
+      │   │   │   │               └── geist4-cli v0.1.0 (*)
+      │   │   │   ├── hyper-util v0.1.21
+      │   │   │   │   ├── hyper-rustls v0.27.10 (*)
+      │   │   │   │   └── reqwest v0.13.5 (*)
+      │   │   │   └── reqwest v0.13.5 (*)
+      │   │   └── reqwest v0.13.5 (*)
+      │   ├── object v0.40.0
+      │   │   ├── wasmtime v50.0.2 (*)
+      │   │   ├── wasmtime-environ v50.0.2 (*)
+      │   │   ├── wasmtime-internal-cranelift v50.0.2 (*)
+      │   │   └── wasmtime-internal-unwinder v50.0.2 (*)
+      │   ├── wasm-metadata v0.261.0
+      │   │   └── wit-component v0.261.0
+      │   │       └── wasmtime-internal-wit-bindgen v50.0.2
+      │   │           └── wasmtime-internal-component-macro v50.0.2
+      │   │               └── wasmtime v50.0.2 (*)
+      │   ├── wasmparser v0.261.0
+      │   │   ├── wasm-encoder v0.261.0
+      │   │   │   ├── wasm-metadata v0.261.0 (*)
+      │   │   │   ├── wasmtime-environ v50.0.2 (*)
+      │   │   │   └── wit-component v0.261.0 (*)
+      │   │   ├── wasm-metadata v0.261.0 (*)
+      │   │   ├── wasmprinter v0.261.0
+      │   │   │   └── wasmtime-environ v50.0.2 (*)
+      │   │   ├── wasmtime v50.0.2 (*)
+      │   │   ├── wasmtime-environ v50.0.2 (*)
+      │   │   ├── wasmtime-internal-cranelift v50.0.2 (*)
+      │   │   ├── wit-component v0.261.0 (*)
+      │   │   └── wit-parser v0.261.0
+      │   │       ├── wasmtime-internal-component-macro v50.0.2 (*)
+      │   │       ├── wasmtime-internal-wit-bindgen v50.0.2 (*)
+      │   │       └── wit-component v0.261.0 (*)
+      │   ├── wasmtime-environ v50.0.2 (*)
+      │   ├── wasmtime-internal-wit-bindgen v50.0.2 (*)
+      │   ├── wit-component v0.261.0 (*)
+      │   └── wit-parser v0.261.0 (*)
+      ├── object v0.40.0 (*)
+      ├── referencing v0.61.2
+      │   └── jsonschema v0.61.2 (*)
+      ├── regalloc2 v0.15.2
+      │   └── cranelift-codegen v0.137.2 (*)
+      ├── wasmparser v0.261.0 (*)
+      ├── wasmtime-environ v50.0.2 (*)
+      ├── wasmtime-internal-core v50.0.2
+      │   ├── cranelift-bforest v0.137.2
+      │   │   ├── cranelift-codegen v0.137.2 (*)
+      │   │   └── wasmtime-environ v50.0.2 (*)
+      │   ├── cranelift-bitset v0.137.2
+      │   │   ├── cranelift-codegen v0.137.2 (*)
+      │   │   ├── cranelift-entity v0.137.2
+      │   │   │   ├── cranelift-bforest v0.137.2 (*)
+      │   │   │   ├── cranelift-codegen v0.137.2 (*)
+      │   │   │   ├── wasmtime-environ v50.0.2 (*)
+      │   │   │   └── wasmtime-internal-cranelift v50.0.2 (*)
+      │   │   ├── pulley-interpreter v50.0.2
+      │   │   │   ├── cranelift-codegen v0.137.2 (*)
+      │   │   │   ├── cranelift-codegen-meta v0.137.2
+      │   │   │   │   └── (build) cranelift-codegen v0.137.2 (*)
+      │   │   │   ├── wasmtime v50.0.2 (*)
+      │   │   │   └── wasmtime-internal-cranelift v50.0.2 (*)
+      │   │   └── wasmtime-environ v50.0.2 (*)
+      │   ├── cranelift-codegen v0.137.2 (*)
+      │   ├── cranelift-entity v0.137.2 (*)
+      │   ├── pulley-interpreter v50.0.2 (*)
+      │   ├── wasmtime v50.0.2 (*)
+      │   ├── wasmtime-environ v50.0.2 (*)
+      │   ├── wasmtime-internal-cranelift v50.0.2 (*)
+      │   └── wasmtime-internal-jit-icache-coherence v50.0.2
+      │       └── wasmtime v50.0.2 (*)
+      └── wit-parser v0.261.0 (*)
+
+advisories ok, bans ok, licenses ok, sources ok
+all checks passed
