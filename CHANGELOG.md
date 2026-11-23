@@ -10,7 +10,44 @@ before 1.0 (versioning lives in decisions 0002 and 0003).
 
 Nothing yet.
 
-## [0.1.0] - 2026-11-22
+## [0.2.0] - 2026-11-23
+
+The post-0.1.0 roadmap: ext coverage, syntax highlighting, incremental
+reparsing.
+
+### Added
+
+- Syntax highlighting (`geist4-highlight`): fenced code blocks rendered
+  to CSS class tokens via syntect's syntax definitions (decision 0043).
+  A `CodeHighlighter` hook on `Options` (off by default, returning
+  plain code when absent or when the language is unknown) and the
+  `--highlight` CLI flag turn it on; the hook escapes its own text with
+  the renderer's public `escape_html`, so hook and renderer escape
+  byte-identically. The wasm binding ships without the engine (decision
+  0044).
+- Incremental reparsing (`geist4-incremental`, decision 0045):
+  `Editor::update` reparses only the changed region of a document,
+  rebuilding the tree from a metadata checkpoint of the previous parse
+  plus one fragment reparse, falling back to a full parse whenever a
+  soundness guard cannot prove the untouched blocks unchanged. The
+  benchmark shows updates 2.24×–2.27× faster than a full parse.
+
+### Changed
+
+- Coverage is measured with `--all-features` in CI, and the
+  `geist4-ext` crate is gated at 90% line coverage (decision 0042).
+
+### Fixed
+
+- Two fallback-path arithmetic bugs in the incremental engine found by
+  the new property battery: a subtract-with-overflow in the hard-boundary
+  check when the first block follows leading blank lines, and an
+  out-of-bounds slice when an edit deletes the first block of a longer
+  document. Both regression-tested (`tests/regressions.rs`); existing
+  tests were never weakened (decision 0040).
+
+[Unreleased]: https://github.com/Zyniker13/Geist4/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Zyniker13/Geist4/compare/v0.1.0...v0.2.0
 
 First release: the full engine per the roadmap's M0 through M8.
 
@@ -53,5 +90,4 @@ First release: the full engine per the roadmap's M0 through M8.
 - The instruction-count performance gate (iai-callgrind) and the wasm
   size budget (decision 0029).
 
-[Unreleased]: https://github.com/Zyniker13/Geist4/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/Zyniker13/Geist4/releases/tag/v0.1.0

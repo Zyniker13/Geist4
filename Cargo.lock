@@ -894,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "geist4-bench"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "comrak",
  "criterion",
@@ -905,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "geist4-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "geist4-core",
@@ -919,7 +919,7 @@ dependencies = [
 
 [[package]]
 name = "geist4-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "criterion",
  "geist4-spec-harness",
@@ -928,7 +928,7 @@ dependencies = [
 
 [[package]]
 name = "geist4-ext"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "caseless",
  "geist4-core",
@@ -938,7 +938,7 @@ dependencies = [
 
 [[package]]
 name = "geist4-ext-loader"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "geist4-core",
  "serde",
@@ -948,7 +948,7 @@ dependencies = [
 
 [[package]]
 name = "geist4-ffi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "geist4-core",
  "geist4-ext",
@@ -958,7 +958,7 @@ dependencies = [
 
 [[package]]
 name = "geist4-highlight"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "geist4-core",
  "syntect",
@@ -966,11 +966,11 @@ dependencies = [
 
 [[package]]
 name = "geist4-html"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "geist4-incremental"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "criterion",
  "geist4-core",
@@ -980,7 +980,7 @@ dependencies = [
 
 [[package]]
 name = "geist4-json"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "geist4-core",
  "geist4-ext",
@@ -991,7 +991,7 @@ dependencies = [
 
 [[package]]
 name = "geist4-mdast"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "geist4-core",
  "serde",
@@ -1000,7 +1000,7 @@ dependencies = [
 
 [[package]]
 name = "geist4-python"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "geist4-ffi",
  "pyo3",
@@ -1008,11 +1008,11 @@ dependencies = [
 
 [[package]]
 name = "geist4-spec-harness"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "geist4-wasm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "geist4-ffi",
  "js-sys",
@@ -1021,7 +1021,7 @@ dependencies = [
 
 [[package]]
 name = "geist4-writer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "geist4-core",
  "geist4-spec-harness",
