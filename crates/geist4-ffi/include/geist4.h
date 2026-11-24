@@ -136,10 +136,10 @@ typedef int32_t geist4_status;
 /**
  * A parsed document, owning the source it was parsed from.
  *
- * The document borrows its text from the input, so the handle keeps a
- * private copy of the input alive (decision 0028). Release with
- * `geist4_document_free`; every pointer borrowed from the handle — the
- * problem messages — is invalid afterwards.
+ * The document borrows its text from the input, so the handle keeps
+ * a private copy of the input alive (decision 0028). Release with
+ * `geist4_document_free`; every pointer borrowed from the handle —
+ * the problem messages — is invalid afterwards.
  */
 typedef struct geist4_document geist4_document;
 
@@ -535,6 +535,40 @@ typedef struct geist4_problem_list {
 } geist4_problem_list;
 
 /**
+ * One changed span a `geist4_update` reported, in new-source
+ * coordinates.
+ */
+typedef struct geist4_change {
+  /**
+   * The span's start, as a byte offset into the new source.
+   */
+  size_t start;
+  /**
+   * The span's end, exclusive, as a byte offset into the new source.
+   */
+  size_t end;
+} geist4_change;
+
+/**
+ * A list of changed spans, borrowed from the document the update
+ * produced.
+ *
+ * `items` is null only when `len` is zero. The memory belongs to the
+ * `geist4_document`; it stays valid until that handle is freed. An
+ * update whose sources were identical reports an empty list.
+ */
+typedef struct geist4_change_list {
+  /**
+   * The spans, in source order.
+   */
+  const struct geist4_change *items;
+  /**
+   * How many spans the list holds.
+   */
+  size_t len;
+} geist4_change_list;
+
+/**
  * The version of the engine, as a static NUL-terminated string the
  * caller never frees.
  *
@@ -644,6 +678,40 @@ struct geist4_document *geist4_parse(const struct geist4_options *options,
                                      size_t err_cap);
 
 /**
+ * Produces the document for `data` given the previous document
+ * `previous`, reusing the unchanged blocks of the previous parse where
+ * that is provably safe (the incremental engine) and falling back to a
+ * full parse otherwise. The result is value-identical to parsing
+ * `data` fresh: the same tree, definitions, and problems.
+ *
+ * `previous` must be a live document this library handed out. The new
+ * document keeps the previous document's options — the update call
+ * takes no options handle — and it retains the previous document's
+ * source for as long as it lives, because parts of the previous parse
+ * mount into the new tree; the caller may free the previous handle as
+ * soon as the call returns. The changed spans, read with
+ * `geist4_document_spans`, are byte ranges of the new source that were
+ * reparsed or whose spans moved, for a renderer patching its output; a
+ * full-parse fallback reports the whole source and identical sources
+ * report nothing.
+ *
+ * On failure null is returned, the error buffer explains why, and
+ * nothing was consumed: `previous` stays live and may be updated
+ * again.
+ *
+ * # Safety
+ * `data` must be readable for `len` bytes for the duration of the
+ * call, or null when `len` is zero; `previous` must be null or a live
+ * handle from `geist4_parse` or `geist4_update`; `err` must be null or
+ * writable for `err_cap` bytes.
+ */
+struct geist4_document *geist4_update(const struct geist4_document *previous,
+                                      const char *data,
+                                      size_t len,
+                                      char *err,
+                                      size_t err_cap);
+
+/**
  * Renders a parsed document's HTML into an owned string.
  *
  * The extensions registered on the options the document was parsed
@@ -675,6 +743,25 @@ geist4_status geist4_document_problems(const struct geist4_document *document,
                                        struct geist4_problem_list *out,
                                        char *err,
                                        size_t err_cap);
+
+/**
+ * The changed spans a `geist4_update` reported, in new-source
+ * coordinates, in source order.
+ *
+ * The list borrows from the document; it stays valid until
+ * `geist4_document_free`. An empty list means the update found the
+ * sources identical — not a null pointer. A document from
+ * `geist4_parse` reports an empty list.
+ *
+ * # Safety
+ * `document` must be a live handle from `geist4_parse` or
+ * `geist4_update`; `out` must be writable; `err` must be null or
+ * writable for `err_cap` bytes.
+ */
+geist4_status geist4_document_spans(const struct geist4_document *document,
+                                    struct geist4_change_list *out,
+                                    char *err,
+                                    size_t err_cap);
 
 /**
  * Frees a document handle and everything it owns: the document, its

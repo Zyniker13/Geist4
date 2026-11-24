@@ -21,6 +21,8 @@ usize_is_size_t = true
 "Geist4String" = "geist4_string"
 "Geist4Problem" = "geist4_problem"
 "Geist4ProblemList" = "geist4_problem_list"
+"Geist4Change" = "geist4_change"
+"Geist4ChangeList" = "geist4_change_list"
 "Status" = "geist4_status"
 
 [export]

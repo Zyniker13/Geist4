@@ -119,6 +119,30 @@ pub struct Geist4ProblemList {
     pub len: usize,
 }
 
+/// One changed span a `geist4_update` reported, in new-source
+/// coordinates.
+#[repr(C)]
+pub struct Geist4Change {
+    /// The span's start, as a byte offset into the new source.
+    pub start: usize,
+    /// The span's end, exclusive, as a byte offset into the new source.
+    pub end: usize,
+}
+
+/// A list of changed spans, borrowed from the document the update
+/// produced.
+///
+/// `items` is null only when `len` is zero. The memory belongs to the
+/// `geist4_document`; it stays valid until that handle is freed. An
+/// update whose sources were identical reports an empty list.
+#[repr(C)]
+pub struct Geist4ChangeList {
+    /// The spans, in source order.
+    pub items: *const Geist4Change,
+    /// How many spans the list holds.
+    pub len: usize,
+}
+
 /// The parse options: which built-in extensions are registered.
 ///
 /// Created with `geist4_options_create`, configured with
@@ -130,10 +154,10 @@ pub struct OptionsHandle {
 
 /// A parsed document, owning the source it was parsed from.
 ///
-/// The document borrows its text from the input, so the handle keeps a
-/// private copy of the input alive (decision 0028). Release with
-/// `geist4_document_free`; every pointer borrowed from the handle — the
-/// problem messages — is invalid afterwards.
+/// The document borrows its text from the input, so the handle keeps
+/// a private copy of the input alive (decision 0028). Release with
+/// `geist4_document_free`; every pointer borrowed from the handle —
+/// the problem messages — is invalid afterwards.
 pub struct DocumentHandle {
     /// The parse itself: the erased borrows, the input copy and the
     /// options registration, dropped in the right order.
@@ -146,6 +170,9 @@ pub struct DocumentHandle {
     /// would dangle.
     #[allow(dead_code)]
     messages: Box<[Box<str>]>,
+    /// The changed spans a `geist4_update` reported, in new-source
+    /// coordinates. Empty for a document from `geist4_parse`.
+    spans: Box<[Geist4Change]>,
 }
 
 /// Plain `CommonMark`, for entry points called with a null options handle.
@@ -451,6 +478,98 @@ fn build_handle(
         owned,
         problems: entries.into_boxed_slice(),
         messages: messages.into_boxed_slice(),
+        spans: Vec::new().into_boxed_slice(),
+    };
+    Box::into_raw(Box::new(handle))
+}
+
+/// Produces the document for `data` given the previous document
+/// `previous`, reusing the unchanged blocks of the previous parse where
+/// that is provably safe (the incremental engine) and falling back to a
+/// full parse otherwise. The result is value-identical to parsing
+/// `data` fresh: the same tree, definitions, and problems.
+///
+/// `previous` must be a live document this library handed out. The new
+/// document keeps the previous document's options — the update call
+/// takes no options handle — and it retains the previous document's
+/// source for as long as it lives, because parts of the previous parse
+/// mount into the new tree; the caller may free the previous handle as
+/// soon as the call returns. The changed spans, read with
+/// `geist4_document_spans`, are byte ranges of the new source that were
+/// reparsed or whose spans moved, for a renderer patching its output; a
+/// full-parse fallback reports the whole source and identical sources
+/// report nothing.
+///
+/// On failure null is returned, the error buffer explains why, and
+/// nothing was consumed: `previous` stays live and may be updated
+/// again.
+///
+/// # Safety
+/// `data` must be readable for `len` bytes for the duration of the
+/// call, or null when `len` is zero; `previous` must be null or a live
+/// handle from `geist4_parse` or `geist4_update`; `err` must be null or
+/// writable for `err_cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn geist4_update(
+    previous: *const DocumentHandle,
+    data: *const c_char,
+    len: usize,
+    err: *mut c_char,
+    err_cap: usize,
+) -> *mut DocumentHandle {
+    let Some(previous) = (unsafe { previous.as_ref() }) else {
+        set_error(err, err_cap, "previous document handle is null");
+        return ptr::null_mut();
+    };
+    let Ok(source) = validate_input(data, len, err, err_cap) else {
+        return ptr::null_mut();
+    };
+    build_update_handle(previous, source, err, err_cap)
+}
+
+/// Builds the C handle around [`OwnedDocument::update`]: the safe
+/// incremental update plus the problem and span lists laid out for C.
+fn build_update_handle(
+    previous: &DocumentHandle,
+    source: &str,
+    err: *mut c_char,
+    err_cap: usize,
+) -> *mut DocumentHandle {
+    let updated = match previous.owned.update(source) {
+        Ok(updated) => updated,
+        Err(panic) => {
+            set_error(err, err_cap, &panic.message);
+            return ptr::null_mut();
+        }
+    };
+    // The problems, laid out exactly as `build_handle` lays them out.
+    let reports = updated.owned.problems();
+    let mut messages: Vec<Box<str>> = Vec::with_capacity(reports.len());
+    let mut entries: Vec<Geist4Problem> = Vec::with_capacity(reports.len());
+    for report in &reports {
+        let message: Box<str> = report.message.as_str().into();
+        let entry = Geist4Problem {
+            message: message.as_ptr().cast::<c_char>(),
+            message_len: message.len(),
+            start: report.start,
+            end: report.end,
+        };
+        messages.push(message);
+        entries.push(entry);
+    }
+    let changes: Vec<Geist4Change> = updated
+        .spans
+        .iter()
+        .map(|span| Geist4Change {
+            start: span.start,
+            end: span.end,
+        })
+        .collect();
+    let handle = DocumentHandle {
+        owned: updated.owned,
+        problems: entries.into_boxed_slice(),
+        messages: messages.into_boxed_slice(),
+        spans: changes.into_boxed_slice(),
     };
     Box::into_raw(Box::new(handle))
 }
@@ -518,6 +637,42 @@ pub unsafe extern "C" fn geist4_document_problems(
     let list = Geist4ProblemList {
         items: document.problems.as_ptr(),
         len: document.problems.len(),
+    };
+    // SAFETY: `out` was checked non-null and is writable.
+    unsafe { *out = list };
+    Status::GEIST4_OK
+}
+
+/// The changed spans a `geist4_update` reported, in new-source
+/// coordinates, in source order.
+///
+/// The list borrows from the document; it stays valid until
+/// `geist4_document_free`. An empty list means the update found the
+/// sources identical — not a null pointer. A document from
+/// `geist4_parse` reports an empty list.
+///
+/// # Safety
+/// `document` must be a live handle from `geist4_parse` or
+/// `geist4_update`; `out` must be writable; `err` must be null or
+/// writable for `err_cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn geist4_document_spans(
+    document: *const DocumentHandle,
+    out: *mut Geist4ChangeList,
+    err: *mut c_char,
+    err_cap: usize,
+) -> Status {
+    let Some(document) = (unsafe { document.as_ref() }) else {
+        set_error(err, err_cap, "document handle is null");
+        return Status::GEIST4_ERR_NULL;
+    };
+    if out.is_null() {
+        set_error(err, err_cap, "output pointer is null");
+        return Status::GEIST4_ERR_NULL;
+    }
+    let list = Geist4ChangeList {
+        items: document.spans.as_ptr(),
+        len: document.spans.len(),
     };
     // SAFETY: `out` was checked non-null and is writable.
     unsafe { *out = list };
@@ -873,12 +1028,22 @@ pub mod safe {
         }
     }
 
+    /// The result of [`OwnedDocument::update`]: the new document plus
+    /// the changed spans, in new-source coordinates, a renderer patches
+    /// its output with.
+    pub struct Updated {
+        /// The document for the new source.
+        pub owned: OwnedDocument,
+        /// The byte ranges that were reparsed or whose spans moved.
+        pub spans: Vec<geist4_core::span::Span>,
+    }
+
     /// A parsed document that owns everything it borrows.
     ///
     /// The core's `Document` borrows its source text, so the document
     /// owns a private copy of the input and the registration it was
     /// parsed with. The erased `'static` inside is not real: it holds
-    /// exactly as long as `input`'s heap allocation, and the field
+    /// exactly as long as the input allocation lives, and the field
     /// order drops the parse before that allocation. Moving an
     /// `OwnedDocument` moves the `Box`'s pointer, never the allocation,
     /// so the borrows survive any move.
@@ -888,9 +1053,16 @@ pub mod safe {
         /// The input the document's borrows point into. Never read —
         /// the field exists to keep the allocation alive for exactly
         /// the document's lifetime; dropping it after `document` is
-        /// the whole soundness argument.
+        /// the whole soundness argument. The `Arc` lets an incremental
+        /// update retain the previous document's allocation by
+        /// reference count, sharing it with its handle.
         #[allow(dead_code)]
-        input: Box<str>,
+        input: Arc<str>,
+        /// The previous document's input an update mounted into this
+        /// document's tree: the prefix and tail borrows point into it.
+        /// Empty for a document from `parse`.
+        #[allow(dead_code)]
+        retained: Vec<Arc<str>>,
         /// The registration the document was parsed with.
         options: CoreOptions,
         /// Errors the extensions latched, drained after the parse and
@@ -928,7 +1100,7 @@ pub mod safe {
             source: &str,
             options: &CoreOptions,
         ) -> Result<Self, PanicReport> {
-            let input: Box<str> = source.into();
+            let input: Arc<str> = Arc::from(source);
             let parsed = catch_unwind(AssertUnwindSafe(|| parse_with(&input, options)));
             let document = match parsed {
                 Ok(document) => document,
@@ -940,7 +1112,7 @@ pub mod safe {
             };
             // SAFETY: the document's borrows point into the heap
             // allocation `input` owns; the allocation's address never
-            // changes while the Box lives, and the field order drops
+            // changes while the Arc lives, and the field order drops
             // `document` before `input`. The `'static` is erased, not
             // real, for exactly that span (decision 0028).
             let document: Document<'static> =
@@ -950,9 +1122,72 @@ pub mod safe {
             Ok(Self {
                 document,
                 input,
+                retained: Vec::new(),
                 options: options.clone(),
                 extension_errors: Mutex::new(extension_errors),
             })
+        }
+
+        /// Produces the document for `new_source` given this document
+        /// and the source it was parsed from, reusing the unchanged
+        /// blocks where the incremental engine proves that safe and
+        /// falling back to a full parse otherwise. The result is
+        /// value-identical to parsing `new_source` fresh.
+        ///
+        /// The returned document keeps this document's options and
+        /// retains this document's input allocation for as long as it
+        /// lives — parts of this parse mount into its tree. The spans
+        /// list reports, in new-source coordinates, the byte ranges
+        /// that were reparsed or whose spans moved; a full-parse
+        /// fallback reports the whole source, and identical sources
+        /// report nothing.
+        ///
+        /// # Errors
+        /// [`PanicReport`] when the engine panicked — always a bug.
+        pub fn update(&self, new_source: &str) -> Result<Updated, PanicReport> {
+            // The previous document's input allocation, shared by
+            // reference count: the update's assembled tree borrows it.
+            // The allocation outlives the borrows as long as either
+            // document lives, and the new document keeps a handle to
+            // it in `retained` (dropped after its `document`, same
+            // field-order argument as `input`).
+            let old_input = self.input.clone();
+            let updated = catch_unwind(AssertUnwindSafe(|| {
+                self.editor().update(&self.document, &old_input, new_source)
+            }));
+            let (document, spans) = match updated {
+                Ok(updated) => updated,
+                Err(panic) => {
+                    return Err(PanicReport {
+                        message: panic_message(&panic),
+                    });
+                }
+            };
+            // SAFETY: the new document's borrows point into two heap
+            // allocations: `retained`'s (the mounted prefix and tail)
+            // and the new input's own (the reparsed window). Both are
+            // kept alive by fields dropped after `document`. The
+            // `'static` is erased, not real, for exactly that span
+            // (decision 0028).
+            let document: Document<'static> =
+                unsafe { std::mem::transmute::<Document<'_>, Document<'static>>(document) };
+            let mut extension_errors = Vec::new();
+            drain_extension_errors(&self.options, &mut extension_errors);
+            Ok(Updated {
+                owned: Self {
+                    document,
+                    input: Arc::from(new_source),
+                    retained: vec![old_input],
+                    options: self.options.clone(),
+                    extension_errors: Mutex::new(extension_errors),
+                },
+                spans,
+            })
+        }
+
+        /// The incremental editor over this document's options.
+        fn editor(&self) -> geist4_incremental::Editor {
+            geist4_incremental::Editor::new(self.options.clone())
         }
 
         /// Renders the document's HTML.

@@ -206,6 +206,79 @@ int main(void) {
     geist4_options_free(gfm);
     geist4_options_free(plain);
 
+    /* Updates: a document handle parses, updates, reports spans. */
+    {
+        err[0] = '\0';
+        geist4_document *previous =
+            geist4_parse(NULL, "one\n\ntwo\n\nthree\n", 17, err, sizeof(err));
+        CHECK(previous != NULL, "previous document parsed: %s", err);
+        const char *edited = "one\n\nTWO\n\nthree\n";
+        err[0] = '\0';
+        geist4_document *updated =
+            geist4_update(previous, edited, strlen(edited), err, sizeof(err));
+        CHECK(updated != NULL, "update succeeded: %s", err);
+
+        geist4_change_list changes = {NULL, 0};
+        err[0] = '\0';
+        status = geist4_document_spans(updated, &changes, err, sizeof(err));
+        CHECK(status == GEIST4_OK, "spans read: %s", err);
+        CHECK(changes.len == 1, "one change, %zu reported", changes.len);
+        int covered = changes.len == 1 &&
+                      changes.items[0].start <= 6 &&
+                      changes.items[0].end >= 9;
+        CHECK(covered, "the change covers the edited bytes");
+
+        /* The update's HTML equals a fresh parse's HTML. */
+        geist4_string from_update = {NULL, 0};
+        status = geist4_document_html(updated, &from_update, err, sizeof(err));
+        CHECK(status == GEIST4_OK, "updated document renders");
+        geist4_document *full =
+            geist4_parse(NULL, edited, strlen(edited), err, sizeof(err));
+        CHECK(full != NULL, "oracle parsed");
+        geist4_string from_full = {NULL, 0};
+        status = geist4_document_html(full, &from_full, err, sizeof(err));
+        CHECK(status == GEIST4_OK, "oracle renders");
+        CHECK(from_update.len == from_full.len &&
+                  memcmp(from_update.data, from_full.data, from_full.len) == 0,
+              "update matches a full parse");
+
+        /* The previous document stays usable until freed, and freeing
+         * it does not disturb the update's handle. */
+        geist4_string before = {NULL, 0};
+        status = geist4_document_html(previous, &before, err, sizeof(err));
+        CHECK(status == GEIST4_OK, "previous document still renders");
+        geist4_document *after =
+            geist4_update(previous, edited, strlen(edited), err, sizeof(err));
+        CHECK(after != NULL, "the previous document updates again");
+        geist4_document_free(after);
+        geist4_document_free(previous);
+        geist4_string_free(before);
+
+        /* An identical source reports nothing. */
+        err[0] = '\0';
+        geist4_document *same =
+            geist4_update(updated, edited, strlen(edited), err, sizeof(err));
+        CHECK(same != NULL, "identical update succeeds");
+        geist4_change_list none = {NULL, 0};
+        status = geist4_document_spans(same, &none, err, sizeof(err));
+        CHECK(status == GEIST4_OK && none.len == 0,
+              "identical sources report no changes");
+
+        /* A null previous handle is an error and leaves the buffer
+         * filled. */
+        err[0] = '\0';
+        geist4_document *bad =
+            geist4_update(NULL, edited, strlen(edited), err, sizeof(err));
+        CHECK(bad == NULL, "null previous rejected");
+        CHECK(strstr(err, "null") != NULL, "null previous reports: %s", err);
+
+        geist4_string_free(from_update);
+        geist4_string_free(from_full);
+        geist4_document_free(full);
+        geist4_document_free(updated);
+        geist4_document_free(same);
+    }
+
     /* Null frees are no-ops. */
     geist4_document_free(NULL);
     geist4_options_free(NULL);

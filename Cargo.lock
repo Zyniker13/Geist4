@@ -953,6 +953,7 @@ dependencies = [
  "geist4-core",
  "geist4-ext",
  "geist4-highlight",
+ "geist4-incremental",
  "serde_json",
 ]
 
