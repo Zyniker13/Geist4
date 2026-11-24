@@ -42,6 +42,22 @@ export class Document {
      * document order.
      */
     problems(): Problem[];
+    /**
+     * Produces the document for `new_source` by updating `self`, the
+     * way an editor drives the engine: the previous document stays
+     * usable until dropped, the returned document is value-identical
+     * to a fresh `parse`, and the changed spans describe what was
+     * reparsed or moved.
+     *
+     * The spans are `[start, end]` byte pairs into the new source;
+     * the reparse window extends to block boundaries and covers the
+     * whole source on any fallback, so treat them as a superset of
+     * the real edit, never as a minimal diff.
+     *
+     * # Errors
+     * Only an engine bug would throw here; valid input updates.
+     */
+    update(new_source: string): UpdatedDocument;
 }
 
 /**
@@ -147,6 +163,45 @@ export class Problem {
 }
 
 /**
+ * The document an `update` returns: the same surface a parsed
+ * `Document` has — `html`, `problems`, and another `update` — plus
+ * the changed spans of the update that produced it, so an editor can
+ * re-render only what moved.
+ */
+export class UpdatedDocument {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * The changed byte ranges of the update that produced this
+     * document, each as `[start, end]` bytes into the new source;
+     * the reparse window extends to block boundaries and covers the
+     * whole source on any fallback, so the pairs are a superset of
+     * the real edit, never a minimal diff. An update whose source is
+     * identical reports an empty list.
+     */
+    changedSpans(): Uint32Array;
+    /**
+     * The document's HTML, byte for byte as the Rust core renders it.
+     *
+     * # Errors
+     * Only an engine bug would throw here.
+     */
+    html(): string;
+    /**
+     * The problems the parse noticed, in document order.
+     */
+    problems(): Problem[];
+    /**
+     * Updates again from this document, chaining an edit sequence.
+     *
+     * # Errors
+     * Only an engine bug would throw here.
+     */
+    update(new_source: string): UpdatedDocument;
+}
+
+/**
  * Parses and renders in one call, as plain CommonMark.
  *
  * The convenient path for callers who only want HTML. The `renderHtml`
@@ -178,10 +233,12 @@ export interface InitOutput {
     readonly __wbg_hostextension_free: (a: number, b: number) => void;
     readonly __wbg_options_free: (a: number, b: number) => void;
     readonly __wbg_problem_free: (a: number, b: number) => void;
+    readonly __wbg_updateddocument_free: (a: number, b: number) => void;
     readonly document_html: (a: number) => [number, number, number, number];
     readonly document_parse: (a: number, b: number) => [number, number, number];
     readonly document_parseWith: (a: number, b: number, c: number) => [number, number, number];
     readonly document_problems: (a: number) => [number, number];
+    readonly document_update: (a: number, b: number, c: number) => [number, number, number];
     readonly hostextension_name: (a: number) => [number, number];
     readonly hostextension_new: (a: any) => [number, number, number];
     readonly options_enableHighlighting: (a: number) => void;
@@ -193,10 +250,15 @@ export interface InitOutput {
     readonly problem_start: (a: number) => number;
     readonly renderHtml: (a: number, b: number) => [number, number, number, number];
     readonly renderHtmlWith: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly updateddocument_changedSpans: (a: number) => [number, number];
+    readonly updateddocument_html: (a: number) => [number, number, number, number];
+    readonly updateddocument_problems: (a: number) => [number, number];
+    readonly updateddocument_update: (a: number, b: number, c: number) => [number, number, number];
     readonly version: () => [number, number];
     readonly geist4_document_free: (a: number) => void;
     readonly geist4_document_html: (a: number, b: number, c: number, d: number) => number;
     readonly geist4_document_problems: (a: number, b: number, c: number, d: number) => number;
+    readonly geist4_document_spans: (a: number, b: number, c: number, d: number) => number;
     readonly geist4_options_create: () => number;
     readonly geist4_options_enable_builtin: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly geist4_options_enable_highlighting: (a: number, b: number, c: number) => number;
@@ -205,6 +267,7 @@ export interface InitOutput {
     readonly geist4_parse: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly geist4_render_html: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
     readonly geist4_string_free: (a: number) => void;
+    readonly geist4_update: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly geist4_version: () => number;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;

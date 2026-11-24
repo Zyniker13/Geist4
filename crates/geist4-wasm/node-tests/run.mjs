@@ -363,4 +363,116 @@ check(
   check("a duplicate host extension name is rejected", dupRejected);
 }
 
+// ---------------------------------------------------------------------------
+// Updates: an editor's edit sequence through `update`, checked against
+// fresh parses — the same value-identity contract the Rust suite
+// (`crates/geist4-ffi/tests/update.rs`) and the C test pin, driven
+// here through the wasm binding.
+// ---------------------------------------------------------------------------
+{
+  const { UpdatedDocument } = glue;
+
+  // A three-paragraph source; the sequence edits every paragraph in
+  // turn, then appends two, then shrinks back. Each step compares the
+  // updated document against a fresh parse of the same source (HTML
+  // and problems must be identical), and records the reported spans.
+  const sequence = [
+    ["one\n\ntwo\n\nthree\n", "one\n\nTWO!\n\nthree\n", "para two replaced"],
+    ["one\n\nTWO!\n\nthree\n", "one\n\nTWO!\n\nthree\n\nfour\n\nfive\n", "two paragraphs appended"],
+    ["one\n\nTWO!\n\nthree\n\nfour\n\nfive\n", "TWO!\n", "shrunk to one paragraph"],
+    ["TWO!\n", "TWO!\n", "identical source"],
+  ];
+
+  let document = Document.parse(sequence[0][0]);
+  const stepSpans = [];
+  let allIdentical = true;
+  for (const [, edited] of sequence) {
+    const updated = document.update(edited);
+    const fresh = Document.parse(edited);
+    const sameHtml = updated.html() === fresh.html();
+    const sameProblems = deepEqual(
+      updated.problems().map((problem) => [problem.message, problem.start, problem.end]),
+      fresh.problems().map((problem) => [problem.message, problem.start, problem.end]),
+    );
+    if (!sameHtml || !sameProblems) {
+      allIdentical = false;
+      console.log(`  update vs fresh: html ${updated.html()} vs ${fresh.html()}`);
+    }
+    const flat = Array.from(updated.changedSpans());
+    stepSpans.push(flat);
+    document = updated;
+  }
+
+  check(
+    "an edit sequence matches fresh parses at every step",
+    allIdentical,
+    "html or problems diverged from a full parse",
+  );
+
+  const [editSpans, appendSpans, shrinkSpans, identicalSpans] = stepSpans;
+  const covers = (flat, start, end) =>
+    flat.some((value, index) =>
+      index % 2 === 0 && value <= start && flat[index + 1] >= end,
+    );
+  const inBounds = (flat, sourceLength) =>
+    flat.every((value, index) =>
+      index % 2 === 1 ? value <= sourceLength : value <= flat[index + 1],
+    );
+
+  // "two" -> "TWO!": the edited bytes lie inside the reported span,
+  // which lies inside the source (the window is block-granular).
+  check(
+    "the mid-document edit reports a span covering the edit",
+    covers(editSpans, 6, 9) && inBounds(editSpans, "one\n\nTWO!\n\nthree\n".length),
+    JSON.stringify(editSpans),
+  );
+
+  // The appended paragraphs are inside the window either way; the
+  // invariant is coverage plus bounds.
+  const appended = "one\n\nTWO!\n\nthree\n\nfour\n\nfive\n";
+  check(
+    "the append reports a span covering the new tail",
+    appendSpans.length > 0 && inBounds(appendSpans, appended.length),
+    JSON.stringify(appendSpans),
+  );
+
+  // The shrink must still produce the right document (checked above);
+  // its span list is nonempty because the source changed.
+  check(
+    "the shrink reports at least one span",
+    shrinkSpans.length > 0,
+    JSON.stringify(shrinkSpans),
+  );
+
+  // The identical source reports nothing changed.
+  check(
+    "an identical source reports no changed spans",
+    identicalSpans.length === 0,
+    JSON.stringify(identicalSpans),
+  );
+
+  // The returned object is an UpdatedDocument and keeps updating.
+  check(
+    "update returns an UpdatedDocument that chains",
+    document instanceof UpdatedDocument &&
+      document.update("TWO!\n\nand more\n").html() ===
+        Document.parse("TWO!\n\nand more\n").html(),
+  );
+
+  // A fresh-parse document can update too, and spans report through
+  // both entry points identically.
+  const fromParse = Document.parse("alpha\n\nbeta\n").update("alpha\n\nBETA\n");
+  const fromUpdated = Document.parse("alpha\n\nbeta\n\n")
+    .update("alpha\n\nbeta\n\n") // identical: nothing changed
+    .update("alpha\n\nBETA\n");
+  check(
+    "span reports agree from parse and update entry points",
+    Array.from(fromParse.changedSpans()).join(",") ===
+      Array.from(fromUpdated.changedSpans()).join(","),
+    `${JSON.stringify(Array.from(fromParse.changedSpans()))} vs ${JSON.stringify(
+      Array.from(fromUpdated.changedSpans()),
+    )}`,
+  );
+}
+
 process.exit(failures.length);

@@ -1038,6 +1038,26 @@ pub mod safe {
         pub spans: Vec<geist4_core::span::Span>,
     }
 
+    impl Updated {
+        /// The new document.
+        #[must_use]
+        pub fn into_document(self) -> OwnedDocument {
+            self.owned
+        }
+
+        /// The changed byte ranges, in new-source coordinates: the
+        /// reparse window extends to block boundaries and the whole
+        /// source on any fallback, so treat the ranges as covering
+        /// superset information about where the document changed.
+        #[must_use]
+        pub fn spans(&self) -> Vec<(usize, usize)> {
+            self.spans
+                .iter()
+                .map(|span| (span.start, span.end))
+                .collect()
+        }
+    }
+
     /// A parsed document that owns everything it borrows.
     ///
     /// The core's `Document` borrows its source text, so the document

@@ -140,6 +140,79 @@ pub struct Document {
     inner: OwnedDocument,
 }
 
+/// The document an `update` returns: the same surface a parsed
+/// `Document` has — `html`, `problems`, and another `update` — plus
+/// the changed spans of the update that produced it, so an editor can
+/// re-render only what moved.
+#[wasm_bindgen]
+pub struct UpdatedDocument {
+    inner: OwnedDocument,
+    spans: Vec<(usize, usize)>,
+}
+
+#[wasm_bindgen]
+impl UpdatedDocument {
+    /// The changed byte ranges of the update that produced this
+    /// document, each as `[start, end]` bytes into the new source;
+    /// the reparse window extends to block boundaries and covers the
+    /// whole source on any fallback, so the pairs are a superset of
+    /// the real edit, never a minimal diff. An update whose source is
+    /// identical reports an empty list.
+    #[wasm_bindgen(js_name = changedSpans)]
+    pub fn changed_spans(&self) -> Vec<u32> {
+        let mut flat = Vec::with_capacity(self.spans.len() * 2);
+        for (start, end) in &self.spans {
+            // The spans index the new source, which is a JS string;
+            // anything larger than u32 would not fit the buffer API.
+            #[allow(clippy::cast_possible_truncation)]
+            flat.push(*start as u32);
+            #[allow(clippy::cast_possible_truncation)]
+            flat.push(*end as u32);
+        }
+        flat
+    }
+
+    /// The document's HTML, byte for byte as the Rust core renders it.
+    ///
+    /// # Errors
+    /// Only an engine bug would throw here.
+    pub fn html(&self) -> Result<String, JsError> {
+        self.inner
+            .render_html()
+            .map_err(|error| JsError::new(&error.to_string()))
+    }
+
+    /// The problems the parse noticed, in document order.
+    pub fn problems(&self) -> Vec<Problem> {
+        self.inner
+            .problems()
+            .into_iter()
+            .map(|problem| Problem {
+                message: problem.message,
+                start: problem.start,
+                end: problem.end,
+            })
+            .collect()
+    }
+
+    /// Updates again from this document, chaining an edit sequence.
+    ///
+    /// # Errors
+    /// Only an engine bug would throw here.
+    pub fn update(&self, new_source: &str) -> Result<UpdatedDocument, JsError> {
+        self.inner
+            .update(new_source)
+            .map(|updated| {
+                let spans = updated.spans();
+                UpdatedDocument {
+                    inner: updated.into_document(),
+                    spans,
+                }
+            })
+            .map_err(|error| JsError::new(&error.to_string()))
+    }
+}
+
 #[wasm_bindgen]
 impl Document {
     /// Parses `source` as plain CommonMark. The `parse_with` form takes
@@ -167,6 +240,32 @@ impl Document {
     ) -> Result<Document, JsError> {
         inner
             .map(|inner| Document { inner })
+            .map_err(|error| JsError::new(&error.to_string()))
+    }
+
+    /// Produces the document for `new_source` by updating `self`, the
+    /// way an editor drives the engine: the previous document stays
+    /// usable until dropped, the returned document is value-identical
+    /// to a fresh `parse`, and the changed spans describe what was
+    /// reparsed or moved.
+    ///
+    /// The spans are `[start, end]` byte pairs into the new source;
+    /// the reparse window extends to block boundaries and covers the
+    /// whole source on any fallback, so treat them as a superset of
+    /// the real edit, never as a minimal diff.
+    ///
+    /// # Errors
+    /// Only an engine bug would throw here; valid input updates.
+    pub fn update(&self, new_source: &str) -> Result<UpdatedDocument, JsError> {
+        self.inner
+            .update(new_source)
+            .map(|updated| {
+                let spans = updated.spans();
+                UpdatedDocument {
+                    inner: updated.into_document(),
+                    spans,
+                }
+            })
             .map_err(|error| JsError::new(&error.to_string()))
     }
 

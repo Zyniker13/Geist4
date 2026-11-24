@@ -100,6 +100,32 @@ export class Document {
         wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
         return v1;
     }
+    /**
+     * Produces the document for `new_source` by updating `self`, the
+     * way an editor drives the engine: the previous document stays
+     * usable until dropped, the returned document is value-identical
+     * to a fresh `parse`, and the changed spans describe what was
+     * reparsed or moved.
+     *
+     * The spans are `[start, end]` byte pairs into the new source;
+     * the reparse window extends to block boundaries and covers the
+     * whole source on any fallback, so treat them as a superset of
+     * the real edit, never as a minimal diff.
+     *
+     * # Errors
+     * Only an engine bug would throw here; valid input updates.
+     * @param {string} new_source
+     * @returns {UpdatedDocument}
+     */
+    update(new_source) {
+        const ptr0 = passStringToWasm0(new_source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.document_update(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return UpdatedDocument.__wrap(ret[0]);
+    }
 }
 if (Symbol.dispose) Document.prototype[Symbol.dispose] = Document.prototype.free;
 
@@ -299,6 +325,99 @@ export class Problem {
     }
 }
 if (Symbol.dispose) Problem.prototype[Symbol.dispose] = Problem.prototype.free;
+
+/**
+ * The document an `update` returns: the same surface a parsed
+ * `Document` has — `html`, `problems`, and another `update` — plus
+ * the changed spans of the update that produced it, so an editor can
+ * re-render only what moved.
+ */
+export class UpdatedDocument {
+    static __wrap(ptr) {
+        const obj = Object.create(UpdatedDocument.prototype);
+        obj.__wbg_ptr = ptr;
+        UpdatedDocumentFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        UpdatedDocumentFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_updateddocument_free(ptr, 0);
+    }
+    /**
+     * The changed byte ranges of the update that produced this
+     * document, each as `[start, end]` bytes into the new source;
+     * the reparse window extends to block boundaries and covers the
+     * whole source on any fallback, so the pairs are a superset of
+     * the real edit, never a minimal diff. An update whose source is
+     * identical reports an empty list.
+     * @returns {Uint32Array}
+     */
+    changedSpans() {
+        const ret = wasm.updateddocument_changedSpans(this.__wbg_ptr);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * The document's HTML, byte for byte as the Rust core renders it.
+     *
+     * # Errors
+     * Only an engine bug would throw here.
+     * @returns {string}
+     */
+    html() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.updateddocument_html(this.__wbg_ptr);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * The problems the parse noticed, in document order.
+     * @returns {Problem[]}
+     */
+    problems() {
+        const ret = wasm.updateddocument_problems(this.__wbg_ptr);
+        var v1 = getArrayJsValueFromWasm0(ret[0], ret[1]);
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * Updates again from this document, chaining an edit sequence.
+     *
+     * # Errors
+     * Only an engine bug would throw here.
+     * @param {string} new_source
+     * @returns {UpdatedDocument}
+     */
+    update(new_source) {
+        const ptr0 = passStringToWasm0(new_source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.updateddocument_update(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return UpdatedDocument.__wrap(ret[0]);
+    }
+}
+if (Symbol.dispose) UpdatedDocument.prototype[Symbol.dispose] = UpdatedDocument.prototype.free;
 
 /**
  * Parses and renders in one call, as plain CommonMark.
@@ -557,6 +676,9 @@ const OptionsFinalization = (typeof FinalizationRegistry === 'undefined')
 const ProblemFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_problem_free(ptr, 1));
+const UpdatedDocumentFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_updateddocument_free(ptr, 1));
 
 function addToExternrefTable0(obj) {
     const idx = wasm.__externref_table_alloc();
@@ -639,6 +761,11 @@ function getArrayJsValueFromWasm0(ptr, len) {
     return result;
 }
 
+function getArrayU32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
 let cachedDataViewMemory0 = null;
 function getDataViewMemory0() {
     if (cachedDataViewMemory0 === null || cachedDataViewMemory0.buffer.detached === true || (cachedDataViewMemory0.buffer.detached === undefined && cachedDataViewMemory0.buffer !== wasm.memory.buffer)) {
@@ -650,6 +777,14 @@ function getDataViewMemory0() {
 function getStringFromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return decodeText(getUint8ArrayMemory0().subarray(ptr, ptr + len));
+}
+
+let cachedUint32ArrayMemory0 = null;
+function getUint32ArrayMemory0() {
+    if (cachedUint32ArrayMemory0 === null || cachedUint32ArrayMemory0.byteLength === 0) {
+        cachedUint32ArrayMemory0 = new Uint32Array(wasm.memory.buffer);
+    }
+    return cachedUint32ArrayMemory0;
 }
 
 let cachedUint8ArrayMemory0 = null;
@@ -751,6 +886,7 @@ function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     wasmModule = module;
     cachedDataViewMemory0 = null;
+    cachedUint32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;
