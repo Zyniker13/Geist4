@@ -1,11 +1,13 @@
 # Status
 
-- **Current milestone:** M12 (0.3.0, "editor-ready") — added to ROADMAP this window.
-- **Last done:** **M12 milestone added to ROADMAP.md** (`docs/decisions` next number 0046; survey of FFI/wasm/ext/incremental internals carried over from the previous window). Next: part 1 — `geist4_update` C ABI.
-- **Next step:** Part 1 (C ABI + wasm `update` + size decision + JS edit-sequence test), then part 2 (four built-ins + spec files), then part 3 (micromark/remark differential), then release 0.3.0 with tag when done-when is green.
+- **Current milestone:** M12 (0.3.0, "editor-ready").
+- **Last done:** **Part 1a landed** (`973da5df`): `geist4_update` C ABI (previous handle + new source → new document; `geist4_document_spans` → `geist4_change_list`), safe `OwnedDocument::update` with `Arc<str>`-retained previous input, 13-test Rust differential suite + C smoke section, header + cbindgen renames. Next free decision number: 0046.
+- **Next step:** Part 1b — wasm/JS `update` binding + JS edit-sequence test vs full parses; then 1c size decision.
 - **Blocked on:** nothing.
 
 ## Log
+
+- 2026-11-24: M12 part 1a (`973da5df`): geist4_update C ABI — previous handle + new source returns the new document; geist4_document_spans reports Geist4Change lists (new-source byte ranges); safe OwnedDocument::update retains the previous input via Arc<str>; 13 Rust differential tests + C smoke section; cbindgen rename entries for geist4_change(ge_list); the two span tests now assert containment+bounds (the reparse window extends to block boundaries by design) and the failure-path test uses invalid UTF-8 (interior NUL is valid UTF-8 and parses via U+FFFD).
 
 - 2026-11-23: 0.3.0/M12 kickoff: M12 added to ROADMAP.md after "After M11" with the standard shape (editor update surface through the C ABI and the JS binding with the decision-0029 size re-measurement; the four built-ins; the micromark/remark side-by-side differential with every difference documented).
 - 2026-11-23: 0.2.0 release prep: workspace version → 0.2.0 (all 15 crates via `workspace.package`), CHANGELOG 0.2.0 entry (highlighting, incremental reparsing, the all-features coverage gate, the two property-battery bug fixes), STATUS note. Gate = full `scripts/check.sh` before the release commit; publishing stays with Mahler.
