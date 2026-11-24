@@ -1,8 +1,8 @@
 # Status
 
 - **Current milestone:** M12 (0.3.0, "editor-ready").
-- **Last done:** **Part 1a landed** (`973da5df`): `geist4_update` C ABI (previous handle + new source → new document; `geist4_document_spans` → `geist4_change_list`), safe `OwnedDocument::update` with `Arc<str>`-retained previous input, 13-test Rust differential suite + C smoke section, header + cbindgen renames. Next free decision number: 0046.
-- **Next step:** Part 1b — wasm/JS `update` binding + JS edit-sequence test vs full parses; then 1c size decision.
+- **Last done:** **Part 1c landed** (`786422e9`): decision 0046 records the wasm update surface against the 524,288-byte budget — 434,075 raw / 177,017 gzip with the surface, from a measured 414,870 / 170,529 baseline at the 0.2.0 commit, both via the exact check.sh pipeline. CI green on `786422e9` (all three workflows; the `973da5df`/`202bbf6e` red was the FFI crate's new wasm exports staling pkg/ before part 1b regenerated it).
+- **Next step:** Part 2 — built-in extensions math, wiki links, highlight marks, smart typography, each with a spec file in the `spec/*.md` shape.
 - **Blocked on:** nothing.
 
 ## Log
