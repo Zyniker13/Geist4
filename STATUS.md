@@ -1,12 +1,13 @@
 # Status
 
-- **Current milestone:** 0.2.0 release (all three post-0.1.0 milestones closed).
-- **Last done:** **M11 closed (`449a58b9`, confirmed green on `dc587db7`).** ROADMAP done-when marked: fuzzed corpus = proptest battery + 24-case differential corpus (lockstep oracle), measured win recorded, JS-binding exercise deferred to "After M11" (the wasm binding ships without the engine per decision 0044). TESTING.md gained the "Incremental reparsing (M11)" section; decision 0045 gained the property-battery amendment. `scripts/check.sh` exit=0 (78 suites). 0.2.0's roadmap list (M9+M10+M11) is complete.
-- **Next step:** nothing — **0.2.0 is released: tag `v0.2.0` at `8ecfe423`** (version bump + CHANGELOG, `scripts/check.sh` green, 78 suites). Remaining for Mahler: publishing to crates.io/npm/PyPI (his accounts). A new milestone revision (e.g. `Editor::update` C ABI/JS exposure per "After M11") needs his roadmap.
-- **Blocked on:** publishing (Mahler's) and any next milestone's roadmap (Mahler's).
+- **Current milestone:** M12 (0.3.0, "editor-ready") — added to ROADMAP this window.
+- **Last done:** **M12 milestone added to ROADMAP.md** (`docs/decisions` next number 0046; survey of FFI/wasm/ext/incremental internals carried over from the previous window). Next: part 1 — `geist4_update` C ABI.
+- **Next step:** Part 1 (C ABI + wasm `update` + size decision + JS edit-sequence test), then part 2 (four built-ins + spec files), then part 3 (micromark/remark differential), then release 0.3.0 with tag when done-when is green.
+- **Blocked on:** nothing.
 
 ## Log
 
+- 2026-11-23: 0.3.0/M12 kickoff: M12 added to ROADMAP.md after "After M11" with the standard shape (editor update surface through the C ABI and the JS binding with the decision-0029 size re-measurement; the four built-ins; the micromark/remark side-by-side differential with every difference documented).
 - 2026-11-23: 0.2.0 release prep: workspace version → 0.2.0 (all 15 crates via `workspace.package`), CHANGELOG 0.2.0 entry (highlighting, incremental reparsing, the all-features coverage gate, the two property-battery bug fixes), STATUS note. Gate = full `scripts/check.sh` before the release commit; publishing stays with Mahler.
 - 2026-11-23: **0.2.0 released** (`8ecfe423`, tag `v0.2.0` pushed). Release commit = Cargo.toml version + Cargo.lock (15 crates) + CHANGELOG entry; full `scripts/check.sh` green (78 suites, deny all-ok) before the commit.
 - 2026-11-23: **M11 closed (`449a58b9`, confirmed green on `dc587db7`).** ROADMAP done-when marked: fuzzed corpus = proptest battery + 24-case differential corpus (lockstep oracle), measured win recorded, JS-binding exercise deferred to "After M11" (the wasm binding ships without the engine per decision 0044). TESTING.md gained the "Incremental reparsing (M11)" section; decision 0045 gained the property-battery amendment. `scripts/check.sh` exit=0 (78 suites). 0.2.0's roadmap list (M9+M10+M11) is complete.

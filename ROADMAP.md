@@ -267,8 +267,39 @@ as follow-up work.
 
 Other language bindings (PHP, Go, Ruby, Kotlin), a language server,
 and anything else go into a future revision of this file — add them
-with the same milestone shape when their time comes. Recorded as
-follow-up from M11: exposing `Editor::update` through the C ABI
-(`geist4_update` over a retained previous-document handle) and the
-JavaScript binding — the milestone's done-when named the JS binding,
-and the API is exercised from Rust only in 0.2.0.
+with the same milestone shape when their time comes.
+
+### M12: Editor-ready (0.3.0)
+
+Three parts, aimed at the main consumer — a Markdown editor whose
+renderer runs as JavaScript in browsers and as JavaScriptCore inside
+native apps — plus the shared-source users the C ABI serves:
+
+- Editor update surface: expose `Editor::update` through the C ABI as
+  `geist4_update` over a retained previous-document handle (the parse
+  entry points keep their ownership rules; the update call reuses the
+  handle's options and its retained source as the old source),
+  returning the new document plus the changed spans, and through the
+  JavaScript binding on wasm. Measure the wasm binary size against the
+  budget in decision 0029 and record the measurement in a decision
+  record. A JavaScript test applies edit sequences through the binding
+  and compares every step's HTML against a full parse of the same
+  source.
+- Built-in extensions for math (`$…$` inline spans), wiki links
+  (`[[target|label]]`), highlight marks (`==…==` → `<mark>`) and smart
+  typography (curly quotes, dashes and ellipses), each following the
+  declarative tier's semantics and each with a spec examples file in
+  the same shape as the existing ones.
+- A side-by-side differential test against micromark (parse events)
+  and remark (mdast tree) output on a checked-in fixture corpus, with
+  every difference from those tools documented in a decision record —
+  differences that are spec-conformant interpretations, extensions,
+  or bugs on either side are labeled as such.
+
+**Done when:** the C ABI update entry and the JavaScript binding both
+pass their edit-sequence tests (JS edits byte-identical to full
+parses), the wasm size budget is re-measured and holds, the four
+built-ins pass their spec files and leave the default output
+byte-identical when disabled, the differential corpus runs against the
+real tools in CI-adjacent form with every difference documented, and
+`scripts/check.sh` stays identical to CI and green.
