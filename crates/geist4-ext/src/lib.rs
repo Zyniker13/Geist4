@@ -1,7 +1,8 @@
 //! Built-in Geist4 extensions: GitHub Flavored Markdown (tables,
 //! strikethrough, extended autolinks, task list items, and the disallowed
-//! raw HTML filter), footnotes, front matter, heading identifiers, and
-//! definition lists.
+//! raw HTML filter), footnotes, front matter, heading identifiers,
+//! definition lists, and the editor features (math, wiki links, highlight
+//! marks, smart typography).
 //!
 //! Built-in extensions use only the public extension API of the core, exactly
 //! like loaded extensions, so the API stays honest. See the repository
@@ -126,11 +127,18 @@ pub fn deflists() -> std::sync::Arc<dyn Extension> {
     deflists::deflists()
 }
 
+/// The math extension as a shared extension value.
+#[must_use]
+pub fn math() -> std::sync::Arc<dyn Extension> {
+    math::Math::extension()
+}
+
 pub mod autolink;
 pub mod deflists;
 pub mod footnotes;
 pub mod front_matter;
 pub mod heading_identifiers;
+pub mod math;
 pub mod slug_table;
 pub mod slugger;
 pub mod tables;
