@@ -133,6 +133,12 @@ pub fn math() -> std::sync::Arc<dyn Extension> {
     math::Math::extension()
 }
 
+/// The wiki-links extension as a shared extension value.
+#[must_use]
+pub fn wiki_links() -> std::sync::Arc<dyn Extension> {
+    wiki_links::WikiLinks::extension()
+}
+
 pub mod autolink;
 pub mod deflists;
 pub mod footnotes;
@@ -144,3 +150,4 @@ pub mod slugger;
 pub mod tables;
 pub mod tagfilter;
 pub mod tasklist;
+pub mod wiki_links;
