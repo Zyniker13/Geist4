@@ -139,11 +139,18 @@ pub fn wiki_links() -> std::sync::Arc<dyn Extension> {
     wiki_links::WikiLinks::extension()
 }
 
+/// The highlight extension as a shared extension value.
+#[must_use]
+pub fn highlight() -> std::sync::Arc<dyn Extension> {
+    highlight::Highlight::extension()
+}
+
 pub mod autolink;
 pub mod deflists;
 pub mod footnotes;
 pub mod front_matter;
 pub mod heading_identifiers;
+pub mod highlight;
 pub mod math;
 pub mod slug_table;
 pub mod slugger;

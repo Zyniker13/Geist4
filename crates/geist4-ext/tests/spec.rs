@@ -21,6 +21,7 @@ const HEADING_IDENTIFIERS_SPEC: &str = include_str!("../spec/heading_identifiers
 const DESCRIPTION_LISTS_SPEC: &str = include_str!("../spec/description_lists.md");
 const MATH_SPEC: &str = include_str!("../spec/math.md");
 const WIKI_LINKS_SPEC: &str = include_str!("../spec/wiki_links.md");
+const HIGHLIGHT_SPEC: &str = include_str!("../spec/highlight.md");
 
 /// Runs a spec file with `options` and requires every example to pass.
 fn run_spec(name: &str, spec: &str, options: &Options) {
@@ -115,6 +116,34 @@ fn wiki_links_spec() {
     let mut options = Options::new();
     options.extension(geist4_ext::wiki_links());
     run_spec("wiki_links", WIKI_LINKS_SPEC, &options);
+}
+
+#[test]
+fn highlight_spec() {
+    let mut options = Options::new();
+    options.extension(geist4_ext::highlight());
+    run_spec("highlight", HIGHLIGHT_SPEC, &options);
+}
+
+/// With no extensions, `==…==` runs stay literal text: the same sources
+/// that carry a mark with the extension must not change plain
+/// CommonMark output.
+#[test]
+fn highlight_off_leaves_plain_commonmark() {
+    for source in ["a ==b== c\n", "====x====\n"] {
+        let plain = render_with(&parse_with(source, &Options::new()), &Options::new());
+        assert!(
+            plain.contains("=="),
+            "without the extension the delimiters stay literal: {source:?}"
+        );
+        let mut options = Options::new();
+        options.extension(geist4_ext::highlight());
+        let marked = render_with(&parse_with(source, &options), &options);
+        assert_ne!(
+            plain, marked,
+            "the extension must change this output: {source:?}"
+        );
+    }
 }
 
 /// With no extensions, front matter syntax is plain Markdown: the
