@@ -16,5 +16,5 @@ geist4-mdast = { path = "../geist4-mdast" }
 serde_json = "1"
 
 [dev-dependencies]
-jsonschema = "0.61"
+jsonschema = "0.63"
 geist4-ext = { path = "../geist4-ext" }
